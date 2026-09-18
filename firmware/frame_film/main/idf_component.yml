@@ -17,3 +17,4 @@ dependencies:
   espressif/led_strip: ^3.0.1
   esp-idf-lib/encoder: ^3.0.2
   espressif/button: ^3.5.0
+  lvgl/lvgl: ^9.6.0~1
