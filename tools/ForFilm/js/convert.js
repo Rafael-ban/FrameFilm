@@ -1607,20 +1607,24 @@ function szClosestFit128(r, g, b) {
     return best;
 }
 
-// Atkinson 增强量化: 三行滚动缓冲六邻域误差扩散。
-// 返回用 film 显示色填充的预览 ImageData；后续 processImageData 会把
-// 这些 film 颜色精确映射回 film 编码，因此下载/蓝牙上传结果与预览一致。
-// selectIndexFn(r,g,b) 返回 0-5 色板索引，residualOf(index) 返回残差 RGB。
-function atkinsonQuantizeBase(imageData, selectIndexFn, residualOf) {
+// Atkinson 增强量化内核：三行滚动缓冲六邻域误差扩散（消费时一次性 (sum+4)>>3）。
+// 返回用色板实际颜色填充的预览 ImageData；后续 processImageData 会把
+// 这些颜色精确映射回色板索引，因此下载/蓝牙上传结果与预览一致。
+//   selectIndexFn(r,g,b,lab) → 色板索引
+//   residualOf(index)        → 该索引用于计算残差的 RGB（墨水屏按实际显示色算）
+//   previewColorOf(index)    → 该索引用于预览的 RGB；缺省按六色 film 编码映射
+//   strength                 → 扩散强度倍数，缺省 1（内核原始强度）
+function atkinsonQuantizeBase(imageData, selectIndexFn, residualOf, previewColorOf, strength) {
     const width = imageData.width;
     const height = imageData.height;
     const data = imageData.data;
     const stride = (width + 3) * 3;
+    const spread = (strength === undefined) ? 1 : strength;
     let currentErrors = new Int32Array(stride);
     let nextErrors = new Int32Array(stride);
     let secondErrors = new Int32Array(stride);
 
-    // 当前像素的 film 编码（逻辑行优先）
+    // 当前像素的色板索引（逻辑行优先）
     var codes = new Uint8Array(width * height);
 
     function slot(x) {
@@ -1638,13 +1642,13 @@ function atkinsonQuantizeBase(imageData, selectIndexFn, residualOf) {
 
             const lab = aeRgbToLab(r, g, b);
             const index = selectIndexFn(r, g, b, lab);
-            codes[y * width + x] = AE_INDEX_TO_FILM_CODE[index];
+            codes[y * width + x] = index;
 
-            // 残差按墨水屏校准色计算（非显示色）
+            // 残差按墨水屏实际显示色（六色用校准残差色）计算，非预览色
             const rp = residualOf(index);
-            const errR = r - rp[0];
-            const errG = g - rp[1];
-            const errB = b - rp[2];
+            const errR = (r - rp[0]) * spread;
+            const errG = (g - rp[1]) * spread;
+            const errB = (b - rp[2]) * spread;
 
             // 六邻域: (x+1,y) (x+2,y) (x-1,y+1) (x,y+1) (x+1,y+1) (x,y+2)
             let n = slot(x + 1);
@@ -1668,11 +1672,11 @@ function atkinsonQuantizeBase(imageData, selectIndexFn, residualOf) {
         secondErrors.fill(0);
     }
 
-    // 预览: 用 film 显示色填充（与打包/设备显示一致）
+    // 预览: 用色板实际颜色填充（与打包/设备显示一致）
     const out = new ImageData(width, height);
     const outData = out.data;
     for (let i = 0; i < codes.length; i++) {
-        const color = FILM_CODE_RGB[codes[i]];
+        const color = previewColorOf ? previewColorOf(codes[i]) : FILM_CODE_RGB[AE_INDEX_TO_FILM_CODE[codes[i]]];
         outData[i * 4] = color[0];
         outData[i * 4 + 1] = color[1];
         outData[i * 4 + 2] = color[2];
@@ -1828,66 +1832,24 @@ function cfClosestIndex(r, g, b, profile) {
     return indexes[best];
 }
 
-// Floyd-Steinberg 误差扩散：误差在线性光空间累积（贴合面板混色），选色仍走 Lab 最近邻
+// 8bpp 索引色的抖动：只借「Atkinson 增强」的扩散内核（三行滚动缓冲、六邻域、
+// 消费时 (sum+4)>>3 整数累加），不用它的 LUT 校色：
+//   - 选色 = 当前色板的加权 CIELAB 最近邻（cfClosestIndex）
+//   - 残差 = 选中色板色（面板实际显示色）
+//   - 预览 = 选中色板色，故预览与下载/上传结果逐像素一致
+// strength 为「抖动强度」滑块的扩散倍数（1 = 内核原始强度）。
 function cfDither(imageData, strength, profile) {
-    var width = imageData.width;
-    var height = imageData.height;
-    var data = imageData.data;
-    var palette = profile.palette;
-    var lin = new Float32Array(width * height * 3);
-    for (var i = 0, p = 0; i < data.length; i += 4, p += 3) {
-        lin[p] = srgbToLinear(data[i]);
-        lin[p + 1] = srgbToLinear(data[i + 1]);
-        lin[p + 2] = srgbToLinear(data[i + 2]);
-    }
-
-    for (var y = 0; y < height; y++) {
-        for (var x = 0; x < width; x++) {
-            var q = (y * width + x) * 3;
-            var lr = lin[q];
-            var lg = lin[q + 1];
-            var lb = lin[q + 2];
-
-            var index = cfClosestIndex(linearToSrgb(lr), linearToSrgb(lg), linearToSrgb(lb), profile);
-            var color = palette[index];
-
-            var o = (y * width + x) * 4;
-            data[o] = color[0];
-            data[o + 1] = color[1];
-            data[o + 2] = color[2];
-
-            var errR = (lr - srgbToLinear(color[0])) * strength;
-            var errG = (lg - srgbToLinear(color[1])) * strength;
-            var errB = (lb - srgbToLinear(color[2])) * strength;
-
-            if (x + 1 < width) {
-                var n = q + 3;
-                lin[n] += errR * 7 / 16;
-                lin[n + 1] += errG * 7 / 16;
-                lin[n + 2] += errB * 7 / 16;
-            }
-            if (y + 1 < height) {
-                if (x > 0) {
-                    var nl = q + width * 3 - 3;
-                    lin[nl] += errR * 3 / 16;
-                    lin[nl + 1] += errG * 3 / 16;
-                    lin[nl + 2] += errB * 3 / 16;
-                }
-                var nd = q + width * 3;
-                lin[nd] += errR * 5 / 16;
-                lin[nd + 1] += errG * 5 / 16;
-                lin[nd + 2] += errB * 5 / 16;
-                if (x + 1 < width) {
-                    var nr = q + width * 3 + 3;
-                    lin[nr] += errR * 1 / 16;
-                    lin[nr + 1] += errG * 1 / 16;
-                    lin[nr + 2] += errB * 1 / 16;
-                }
-            }
-        }
-    }
-
-    return imageData;
+    return atkinsonQuantizeBase(imageData,
+        function(r, g, b) {
+            return cfClosestIndex(r, g, b, profile);
+        },
+        function(index) {
+            return profile.palette[index];
+        },
+        function(index) {
+            return profile.palette[index];
+        },
+        strength);
 }
 
 // 8bpp 索引色量化：useDither 为真走误差扩散，否则逐像素最近色。
