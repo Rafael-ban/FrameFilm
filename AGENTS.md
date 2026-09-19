@@ -138,6 +138,9 @@ film_service → film_hal → film_sys → ESP-IDF
 | UI 层框架（LVGL 宿主/页面生命周期） | `firmware/frame_film/components/film_ui/src/ui_core.c` |
 | UI 层开关与显示链路 | `firmware/frame_film/components/film_ui/inc/{ui_conf.h,ui_ops.h}` + `src/ui_display.c` |
 | 开机画面 / 主菜单 / 系统设置 | `firmware/frame_film/components/film_app/src/app_{boot,menu,settings}.c` |
+| 休眠卡 + 入睡流程（主菜单长按） | `firmware/frame_film/components/film_app/src/app_sleep.c` |
+| 手动休眠入口 / 占屏门闸 | `firmware/frame_film/components/film_app/src/app_manager.c`（`app_manager_sleep_show` + `m_sleep_page`） |
+| 进低功耗（deinit + deep sleep） | `firmware/frame_film/components/film_service/src/service_monitor.c`（`service_monitor_request_sleep`） |
 | UI 页公共外壳（状态栏 + 提示行） | `firmware/frame_film/components/film_app/{inc/app_shell.h,src/app_shell.c}` |
 | SD 可替换图标（FFUI 容器） | `firmware/frame_film/components/film_ui/src/ui_assets.c` + `tools/ui-assets/gen_ui_assets.py` |
 | 协议文档 | `docs/blecmd/blecmd_protocol.md` |
@@ -155,6 +158,8 @@ film_service → film_hal → film_sys → ESP-IDF
 9. **不要假设各机型 `0x42` 回包一致** — dock 返回 `面板ID(1)+宽(2)+高(2)`（LEN=5），冰箱贴只返回 `宽(2)+高(2)`（LEN=4）；客户端需按 LEN 区分解析
 10. **不要在 app_task 里碰 `lv_*`** — LVGL 非线程安全，只在 `ui_task` 上下文调用；要向页面推数据走 `ui_core_post()`（下行）、要回写服务层走 `app_manager_post_ui_msg()`（上行），两者都在 `film_app`/`film_ui` 里
 11. **不要在 ui_task 里读写 `g_service_param` / 电池 / WiFi / SD** — 那些没有跨任务保证。设置页只上报 `[行号, 候选下标]`，由 `settings_on_event()` 在 app 任务侧校验、写参数、落盘，再把整页快照回投给页面
+12. **不要在唤醒条件还成立的时候进 deep sleep** — ext0 是**电平**触发（`hal_pwr.c`，STD/PRO = GPIO5 低有效、MAX = GPIO13 高有效）。长按是**按住期间**上报的，那一刻唤醒脚必然还满足条件 → 按着断电会当场醒回来（表现为"长按后闪一下就恢复"）。`app_sleep_run()` 入睡前要同时满足两件事，**缺一不可**：① `hal_pwr_wake_condition_met()` 为 false（等手指抬起）——它只会让入睡更晚、不会更早，是叠加项；② 距切页已过 **4s**（`SP_DRAW_WAIT_MS`）——`ui_core_page_enter()` 是异步的，**没有回调能告诉你"第一帧已上屏"**，只能按时间兜。这个值**不要**按"单帧 940ms"去推：上机实测 2s 不够（卡还没刷出来就断电，屏幕停在旧画面/半张卡），换页后第一次上屏的耗时明显大于稳态单帧。**EPD 挂在外设供电轨上，断电即停在半途**。别用按键库自己的状态顶替 ①：PRO/MAX 现在根本没发 press/release 事件，STD 的库虽有 `RE_ET_BTN_RELEASED` 但 HAL 的映射表把它丢了，而 HAL 里那份 `button_pressed` 在长按上报时就被置 false（手指还在键上）
+13. **不要假设"长按"在菜单里有别的含义** — 各 app 的长按是"回主菜单"，菜单是调度器的根、它的长按专门留给手动休眠；改这块时别把两条语义搅在一起
 
 ## BLE 协议速览
 

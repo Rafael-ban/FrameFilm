@@ -724,14 +724,24 @@ static void clock_timer_cb(lv_timer_t *t)
 5. **接口接线**：`app_interface.h` 加 `layer`/`ui_ops`；`film_app` CMake 加 `REQUIRES film_ui`。✅ 已完成
 6. **调度分流**：`app_manager` 的 `app_do_switch` 按层分流 + UI 层输入路由 + 主菜单接管/长按退出 + 跨线程消息（`app_manager_post_ui_msg` / `ui_core_post`）。✅ 已完成
 7. **时钟改造**：`app_clock.c` 重写为 UI app（竖屏布局、分钟级刷新、页面内 `lv_timer`）。✅ 已完成
+    - v0.3 按设计稿（`tools/ui-mockup` §07）重做为"计时仪表"：主读数（Montserrat 48 ± 实心三角）+ 分钟尺（30 格 × 2 分）+ 星期黑标（左下切角）+ 日期 + 星期寄存器（7 格）+ 取景框设备面板，并接入 `app_shell` 状态栏
+    - LVGL 没有填充三角形图元（边框宽度全边统一，也没有 `clip-path`），故页面自带最简光栅化 `clock_tri_px()`，创建时生成 ▶ / ◀ / 切角三张 L8 小位图（代码内生成，不占 SD 资源）
 8. **UI 页面三件套 + 资源层**：`app_boot.c`（开机画面：徽章/遥测/分段进度）、`app_menu.c`（主菜单：轮播/指示点/层级面板）、`app_settings.c`（设备信息 + 系统参数，写参数经 `post_ui_msg` 回 app 任务落盘）、`ui_assets.c`（SD 可替换图标，FFUI 容器 + 内置默认图回退）。✅ 已完成
 9. **公共外壳**：`app_shell.c` 提供"顶部状态栏（品牌 + 电量/WiFi/蓝牙指示块）+ 底部操作提示行"，三个 UI 页共用同一套版式；状态栏数据由 app 任务侧采集后经 `APP_UI_MSG_STATUS` 回投（设置页复用已有的整页快照，不额外往返）。✅ 已完成
 10. **上电流程**：FULL 模式固定 BOOT → MENU，首帧 mono 顺带完成整屏清场；非 FULL / UI 层不可用时沿用"恢复上次 app"。✅ 已完成
-    - 进度条由**页面内 `lv_timer`** 推进，且**每次回调只点亮一格**（`APP_BOOT_SEG_NUM` = 16 格 × `APP_BOOT_STEP_MS` = 440ms ≈ 7s）。节拍刻意 ≥ mono 单帧耗时（实测 ~410ms），否则一帧内会跨过两格、看起来"跳格"
-    - 走满后停留 `APP_BOOT_DONE_HOLD_MS` = 1s，再由页面 `app_manager_post_ui_msg(APP_UI_REQ_BOOT_DONE)` 上报切页 —— **切页时机由页面决定**，不用固定延时去猜首帧清场那 ~3.3s；`app_init` 只留一个 `APP_BOOT_FALLBACK_MS` = 20s 的兜底定时器（页面构建失败时也能出去）
-    - 反例（都踩过）：① 外部定时器往页面投"步骤消息" —— 首帧 flush 阻塞 3.3s，消息全堆队列里被一次吞掉，进度条不动；② 按墙上时间算百分比 —— 每帧 410ms 跨 1.4 格，会出现一次跳两格
+    - 进度条由**页面内 `lv_timer`** 推进，且**每次回调只点亮一格**（`APP_BOOT_SEG_NUM` = 16 格 × `APP_BOOT_STEP_MS` = 900ms ≈ 15s）。节拍刻意 ≥ mono 单帧耗时（**实测 ~940ms**），否则一帧内会跨过两格、看起来"跳格"
+    - 走满后停留 `APP_BOOT_DONE_HOLD_TICKS` = 1 个节拍，再由页面 `app_manager_post_ui_msg(APP_UI_REQ_BOOT_DONE)` 上报切页 —— **切页时机由页面决定**，不用固定延时去猜首帧清场那 ~3.3s；`app_init` 只留一个 `APP_BOOT_FALLBACK_MS` = 35s 的兜底定时器（页面构建失败时也能出去，且必须**明显大于**正常路径 ≈18s，否则会抢在进度条走完前切页）
+    - 反例（都踩过）：① 外部定时器往页面投"步骤消息" —— 首帧 flush 阻塞 3.3s，消息全堆队列里被一次吞掉，进度条不动；② 按墙上时间算百分比 —— 每帧 ~940ms 跨 1.4 格，会出现一次跳两格；③ 把"格数→百分比→格数"来回换算 —— 整除丢精度，第 1 格算出来的点亮数仍是 0，看起来像"卡一格才动"
+    - 兜底回调跑在 **FreeRTOS Timer 服务任务**上，只投递消息、**不直接切页**（切页会做 SD 目录刷新 / NVS 落盘）；同时 `CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH` 已从 2048 提到 **3072** —— 否则那条 `sys_logw` 会把 Tmr Svc 栈打爆
 11. **索引色调色板前缀修正**：flush 跳过 `px_map` 前 8 字节（I1 调色板），显存多申请 8 字节，并在每次 flush 写死调色板（索引 0 = 黑、1 = 白）。✅ 已完成（详见 §6）
-12. **待上机验证**：见 §12 —— SPI 40MHz 稳定性、I1 渲染质量；并回归图片/模板/动图/时钟/设置页与主菜单来回切换（含长按退出的残影表现）。
+12. **休眠卡（手动休眠）**：主菜单长按 ENTER → `app_sleep_run()`（`app_sleep.c`，设计见 `tools/ui-mockup` §08）。✅ 已完成
+    - 页面是**全屏、不带 `app_shell` 外壳**的居中构图：徽章（与 BOOT 同一张 SD 资源）→ 细线 → `STANDBY` → 细线 → `PRESS ENTER TO WAKE`，屏幕底边锚一行 `AUTO WAKE hh:mm` / `AUTO WAKE OFF`
+    - `app_manager` 侧加了 `m_sleep_page` 占屏门闸（与 `m_boot_page` 同构）—— 这一帧是**唯一**一帧，之后设备就断电，绝不能被别的 app 盖掉
+    - **不受休眠模式开关（BLE 0x25）约束**：那个开关管的是自动休眠，用户明确按下的动作就该执行
+    - 入睡前必须同时满足两件事（`app_sleep_run()` 的等待循环，**缺一不可**）：① `hal_pwr_wake_condition_met()` 为 false（等手指抬起 —— ext0 是电平触发，长按又是按住期间上报的，按着断电会当场醒回来；这条只会让入睡更晚，是叠加项而非替代品）；② 距切页已过 **4s**（`SP_DRAW_WAIT_MS`）—— `ui_core_page_enter()` 异步且**没有"第一帧已上屏"的回调**，只能按时间兜。**别按"单帧 940ms"推这个值**：上机实测 2s 不够（卡还没刷出来就断电，屏幕停在旧画面/半张卡），换页后第一次上屏明显慢于稳态单帧；EPD 在外设供电轨上，断电即停在半途。一直按着不放时 15s 兜底
+    - 查询只放在 `hal_pwr`（`hal_pwr_wake_condition_met()`，读的就是 `hal_pwr_enter_sleep()` 里 ext0 配的那路 GPIO），**输入驱动零改动**：按键库回答不了这个问题 —— PRO/MAX 现在没注册 press/release 事件，STD 的库虽有 `RE_ET_BTN_RELEASED` 但 `hal_encoder.c` 的映射表把它丢了，而 HAL 里现成那份 `button_pressed` 在长按上报时就被置 false（此刻手指还在键上）
+    - 低功耗仍走 monitor 任务既有路径：新增 `service_monitor_request_sleep()` + `MSG_ENTER_SLEEP`，只投消息，deinit + `hal_pwr_enter_sleep()` 都在 monitor 任务里做
+13. **待上机验证**：见 §12 —— SPI 40MHz 稳定性、I1 渲染质量；并回归图片/模板/动图/时钟/设置页与主菜单来回切换（含长按退出的残影表现）、以及主菜单长按休眠 → 按 ENTER 唤醒的完整往返。
 
 > 时间源（§10.4）本次**未实现**：`app_clock.c` 仍直接使用 `time()`，设备重启后时间需依赖后续的
 > SNTP / 蓝牙校时 + RTC 兜底补齐。这是本次改造遗留的已知缺口。
