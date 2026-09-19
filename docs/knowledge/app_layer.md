@@ -40,7 +40,7 @@
    - 独立文件夹存放，持续循环播放，切换时只切换动图文件（与图片切换语义不同）。
 
 5. **首次开机默认进入图片（照片墙）**。
-   - `app_manager` 启动时默认 app 为 `APP_ID_IMAGE`；是否记忆上次退出时的 app 待定（可选）。
+   - `app_manager` 启动时默认 app 为 `APP_ID_IMAGE`；上电流程见 §8.1（`FULL` 模式固定走 开机画面 → 主菜单；其余模式用 `service_param_app_current_get()` 恢复上次 app，非法/未注册则回落图片）。
 
 ---
 
@@ -109,7 +109,7 @@ void film_sys_init(void) {
 
 ### 5.2 film_app_init() 职责
 
-创建 `app_task` + 队列 → 注册 4 个 app（图片/模板/时钟/动图）→ 根据屏能力决定是否启用切换菜单 → 注册输入回调转发到 app_manager。
+创建 `app_task` + 队列 → 注册 app（图片/模板恒注册；`FULL` 模式下追加 时钟/动图/主菜单/系统设置）→ 上电流程（`FULL`：开机画面 → 主菜单；其余：恢复上次 app）→ 注册输入回调转发到 app_manager。
 
 ---
 
@@ -121,6 +121,8 @@ typedef enum {
     APP_ID_TEMPLATE,
     APP_ID_CLOCK,
     APP_ID_ANIMATION,
+    APP_ID_SETTINGS,       // 系统设置（UI 层）
+    APP_ID_MENU,           // 主菜单（UI 层，调度器的"根"状态，不在轮播列表里）
     APP_ID_MAX,
 } app_id_t;
 
@@ -193,76 +195,84 @@ app_id_t app_manager_get_current(void);
 |---|---|---|---|
 | `SYS_APP_SWITCH_NONE`(0) | 恒生效 | 按键不参与切换，全部放行给当前 app（纯相框，BLE 远程切换仍有效） | 图片 + 模板 |
 | `SYS_APP_SWITCH_SIMPLE`(1) | 恒生效 | 上/下回图片；确认键在图片 <-> 最近推送的 app 互切 | 图片 + 模板 |
-| `SYS_APP_SWITCH_FULL`(2) | 需屏幕具备封面菜单能力（3.7" 0x02），否则**自动降级为 SIMPLE** | 长按确认键进封面菜单，上/下翻页，短按确认 | 全部 4 个 |
+| `SYS_APP_SWITCH_FULL`(2) | 需 UI 层可用（`SYS_UI_ENABLE` + MonoFast 面板 + 上/下导航与确认键），否则**自动降级为 SIMPLE** | 上电出开机画面 → 主菜单；菜单内 上/下 选择、确认键进入；其余 app 内长按确认键回主菜单 | 全部 6 个（4 内容 + 设置 + 主菜单） |
 
-> 注册集合按**配置模式**判定（非生效模式）：`FULL` 在非 3.7 屏上只降级按键交互，
-> 仍注册 4 个 app，保证连接端远程切换（BLE `0x4B`）行为不变。
+> 注册集合按**配置模式**判定（非生效模式）：`FULL` 在跑不动主菜单的屏上只降级按键交互，
+> 仍注册全部 app，保证连接端远程切换（BLE `0x4B`）行为不变。
 
-### 8.1 封面菜单态（FULL）
+### 8.1 主菜单态（FULL）
 
-`app_manager` 维护 `app_switch_state`，仅在 FULL 模式下进入 `SWITCH_SELECT`：
+主菜单本身就是一个 **UI 层 app**（`APP_ID_MENU` / `g_app_menu_entry`），是调度器的"根"状态 ——
+它不像图片 app 那样是"被切进去的内容"，而是所有内容 app 的入口：
 
 ```
-[RUN]───确认键长按──→[SWITCH_SELECT]──按UP/DOWN在“已注册 app”间滚动──→高亮项
-                        │ 按确认键短按命中 → [RUN]（切换成功）
-                        │ 一段时间无输入 → 超时回 [RUN]（取消）
+BOOT 页 ──2.5s 自检步进──→ [MENU] ──上/下──→ 换高亮项（下标下发 UI 页重绘）
+                              │  确认键 → app_do_switch(m_menu_entries[m_menu_sel])
+                              │
+  [IMAGE/TEMPLATE/CLOCK/ANIMATION/SETTINGS] ──长按确认键──→ [MENU]
 ```
 
 **关键：任务/事件划分**
-- 在 `[RUN]` 态：由各 app 自己处理按键（如动图按 UP 换动图、图片按 UP 切图片）。
-- 在 `[SWITCH_SELECT]` 态：由 app_manager 接管按键（滚动列表 / 确认切换），不透明、绝不透传。
+- 在 `[MENU]` 态：由 app_manager 接管**全部**按键（上/下换选中索引、确认键进入），页面只显示（`on_key = NULL`）。
+- 在其余 app：长按确认键由 app_manager 截获并 `app_menu_open()`；短按/上/下 照旧放行给 app 自己。
 
 ```c
 // app_manager_process_input()：返回 app_input_result_t（APP_INPUT_CONSUMED / APP_INPUT_PASS）
 static app_input_result_t app_manager_process_input(input_press_type_t key) {
     if (mode == NONE) return APP_INPUT_PASS;
-    if (m_switch_state == APP_SWITCH_SELECT) {      // 菜单态：接管全部按键
-        switch (key) { UP/DOWN: 滚动高亮(仅已注册 app); ENTER: 确认→app_do_switch(id); }
+    if (m_current_app == APP_ID_MENU) {             // 菜单态：接管全部按键
+        UP/DOWN: m_menu_sel 循环 + ui_core_post(APP_UI_MSG_MENU_SEL);
+        ENTER  : app_do_switch(m_menu_entries[m_menu_sel]);
         return APP_INPUT_CONSUMED;
     }
-    if (mode == FULL && key == INPUT_PRESS_LONG) {  // 长按=进菜单
-        m_switch_state = APP_SWITCH_SELECT;
-        app_render_switch_menu(current_app_name);
+    if (key == INPUT_PRESS_LONG && app_menu_available()) {   // 长按 = 回主菜单
+        app_menu_open();
         return APP_INPUT_CONSUMED;
     }
     return APP_INPUT_PASS;   // 否则放行给当前 app
 }
 ```
 
+`m_menu_entries[]`（app_manager.c）是菜单的**行为表**（下标 → app_id），
+顺序必须与 `app_menu.c` 的 `MENU_ITEMS[]`（**视觉表**）严格一致。
+
 ### 8.2 简易切换态（SIMPLE）
 
-不做封面菜单，靠**声明式按键掩码**避让：每个 app 在 `app_entry_t.keys` 声明自己占用的按键
+不做主菜单，靠**声明式按键掩码**避让：每个 app 在 `app_entry_t.keys` 声明自己占用的按键
 （`APP_KEY_UP/DOWN/SHORT/LONG`），调度器只在 app **未占用**的键上做切换，避免打断 app 自身功能。
 
 - 上/下：当前不是图片 app → 直接回图片；是图片 app → 放行（图片已声明占用，继续翻页）。
 - 确认键短按：当前是图片 app → 切到 `m_last_guest_app`（最近一次切入的非图片 app，含 BLE 远程推送目标）；
   当前不是图片 app → 回图片。未推送过任何内容时放行，不盲切。
 
-> 按键占用现状：图片 = UP\|DOWN；动图 = SHORT\|UP\|DOWN；模板/时钟 = 无。
-> 因此简易模式下只有「图片 + 模板」在场，模板不占用任何键，上/下与确认键都能安全接管。
+> 按键占用现状：图片 = UP\|DOWN；动图 = SHORT\|UP\|DOWN；模板/时钟/设置 = 无（设置页用 UP\|DOWN\|SHORT，
+> 但长按留给"回主菜单"）。因此简易模式下只有「图片 + 模板」在场，模板不占用任何键，上/下与确认键都能安全接管。
 
-**切换菜单 UI（已确认）：**
-- 切换态**不绘制文字列表**，而以**每个 app 的封面 film**作为菜单项。
-- `app_render_switch_menu()` 读当前高亮 app 的封面 film 并整屏显示；UP/DOWN 滚动时刷新为对应 app 的封面，ENTER 确认后切到该 app。
-- 封面为 MonoFast 单帧 film，预置于 TF 卡 `/sdcard/app/<appname>/cover.film`（appname=`image` / `template` / `clock` / `animation`，与 `app_entry_t.name` 一致）。
-- 封面缺失时降级为日志告警（`app cover missing`），不绘制、不阻塞切换（保留上一帧画面）。封面可以完全不存在，简易模式本就不依赖封面。
+**主菜单 UI（已实现）：**
+- 菜单是 **LVGL 页面**（横向轮播 3 张卡片 + 指示点 + ACTIVE 大字 + 层级面板），不是直绘封面。
+- 图标来自 **SD 卡可替换资源**（`/sdcard/app/<app>/icon.bin`，FFUI 容器，80×80 1bpp）；
+  缺失/尺寸不符/头非法 → 回退固件内置默认图（`ui_defaults.c`）。
+- 选中项 = 实心黑板 + 反白图标 + 加粗描边；反色由固件对展开后的亮度缓冲取反（`~L8`）得到，**只需一份资源**。
+- 进入菜单时会把选中索引对齐到"刚离开的 app"，避免菜单高亮与当前画面脱节。
 
 ---
 
-## 9. 能力判定（封面菜单能力）
+## 9. 能力判定（主菜单可交互能力）
 
-用屏参数运行时判定，而非散落编译宏：
+用能力位运行时判定，而非散落编译宏：
 
 ```c
-// app_render.c：封面菜单需同时满足 3.7" 屏（MonoFast 快刷）+ 上/下导航与确认键
-int app_render_has_cover_menu(void)
+// app_render.c：主菜单是 UI 层页面 —— 要 UI 层编进来 + 面板能快刷 + 有上/下导航与确认键
+int app_render_has_app_menu(void)
 {
-    return (EPD_PANEL_ID == 0x02) && SYS_INPUT_HAS_NAV_ENTER;
+    if (SYS_UI_ENABLE == 0) return 0;
+    return app_render_has_monofast() && SYS_INPUT_HAS_NAV_ENTER;
 }
 ```
 
-- `SYS_APP_SWITCH_MODE == FULL` 且 `app_render_has_cover_menu() == 0` → 生效模式自动降级为 `SIMPLE`（启动日志给出 `cfg/effective/cover_menu` 三个值），因此**不需要保证 `sys_cfg.h` 与 `hal_epd.h` 手工同步**。
-- 该函数只回答「能否绘制封面菜单」，与「能否切换 app」解耦：简易模式在任何屏幕上都可切换。
+- `SYS_APP_SWITCH_MODE == FULL` 且 `app_render_has_app_menu() == 0` → 生效模式自动降级为 `SIMPLE`（启动日志给出 `cfg/effective/app_menu` 三个值），因此**不需要保证 `sys_cfg.h` 与 `hal_epd.h` 手工同步**。
+- 该函数只回答「能不能跑主菜单」，与「能不能切换 app」解耦：简易模式在任何屏幕上都可切换。
+
 
 
 ---
@@ -442,11 +452,11 @@ if (ext && strcmp(ext, FILM_FILE_EXT) == 0 && st.st_size >= FILM_HEADER_SIZE)
 - [x] service_film 是否彻底去掉 next/prev/clear —— **已确认：去掉**
 - [x] 动图播放循环归属 —— **已确认：app 层控制循环，service 渲染帧，启动后自动完成该帧刷相**
 - [x] v2 文件校验策略 —— **已确认：宽松校验（扩展名 + 最小大小）**
-- [x] app 切换菜单 UI —— **已确认：切换态用各 app 的封面 film（TF 卡 `/sdcard/app/<appname>/cover.film`，MonoFast 单帧），`app_render_display_full` 显示当前高亮 app 封面；无封面降级为文字条幅**
+- [x] app 切换菜单 UI —— **已落地：主菜单本身就是一个 UI 层 app（`APP_ID_MENU` / `g_app_menu_entry`），页面是 LVGL 横向轮播（卡片 + 指示点 + ACTIVE 大字 + 层级面板）；图标走 SD 可替换资源 `/sdcard/app/<app>/icon.bin`（FFUI 容器，缺失/非法回退内置默认图）。旧的 DIRECT 封面菜单（`cover.film` + `APP_SWITCH_SELECT` 超时状态机）已删除**
 - [x] 动图上传通道 —— **已确认：与图片同通道（BLE/WiFi/TF 直读），走同一 film 报文，不引入独立上传命令；接收/保存时按目录上下文自动落到 `/sdcard/animation`（切 app / 触发播放等控制指令仍走 `0x3E` 起新命令）**
 - [x] 模板 app 推图协议 —— **已确认：蓝牙直传 / WiFi 下载统一走 film 报文落盘，app 侧主动 `service_file_load()` 装载缓存后整屏渲染**
 - [x] 时钟 app 时间源 —— **已确认：WiFi + 蓝牙校时，本地 ESP32 RTC 兜底**
-- [x] 非 3.7 屏上动图/模板/时钟是"不可达"还是"降级显示" —— **已修订：可达性由 `SYS_APP_SWITCH_MODE` 决定。`NONE`/`SIMPLE` 只注册 图片+模板（时钟/动图不注册，远程也切不到）；`FULL` 全量注册，非 3.7 屏按键交互降级为 `SIMPLE` 但 4 个 app 仍可远程切换**
+- [x] 非 3.7 屏上动图/模板/时钟是"不可达"还是"降级显示" —— **已修订：可达性由 `SYS_APP_SWITCH_MODE` 决定。`NONE`/`SIMPLE` 只注册 图片+模板（时钟/动图不注册，远程也切不到）；`FULL` 全量注册（含 主菜单/系统设置），跑不动主菜单的屏按键交互降级为 `SIMPLE` 但全部 app 仍可远程切换**
 - [x] 各 app 默认启动 —— **已确认：首次开机默认进入图片（照片墙）**
 - [x] ColorFast（`0x03`）刷新入口 —— **已确认：底层 `epd_spectra_display_color(index8, mode)` 已支持 mode 分派（0=ColorFast/1=ColorQual），只需新增公开接口 `hal_epd_display_8bpp_mode` 暴露 mode，由 film 头 `Format` 声明并映射**
 

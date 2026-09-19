@@ -135,6 +135,11 @@ film_service → film_hal → film_sys → ESP-IDF
 | Dock 命令解析（BLE/USB 共用） | `firmware/frame_film_dock/components/film_service/src/service_cmd.c` |
 | Dock USB 描述符/CDC | `firmware/frame_film_dock/components/film_hal/src/hal_usb.c` |
 | Dock USB 传图工具 | `tools/framefilm-dock-upload/scripts/dock_upload.py` |
+| UI 层框架（LVGL 宿主/页面生命周期） | `firmware/frame_film/components/film_ui/src/ui_core.c` |
+| UI 层开关与显示链路 | `firmware/frame_film/components/film_ui/inc/{ui_conf.h,ui_ops.h}` + `src/ui_display.c` |
+| 开机画面 / 主菜单 / 系统设置 | `firmware/frame_film/components/film_app/src/app_{boot,menu,settings}.c` |
+| UI 页公共外壳（状态栏 + 提示行） | `firmware/frame_film/components/film_app/{inc/app_shell.h,src/app_shell.c}` |
+| SD 可替换图标（FFUI 容器） | `firmware/frame_film/components/film_ui/src/ui_assets.c` + `tools/ui-assets/gen_ui_assets.py` |
 | 协议文档 | `docs/blecmd/blecmd_protocol.md` |
 
 ## 常见陷阱（不要做）
@@ -148,6 +153,8 @@ film_service → film_hal → film_sys → ESP-IDF
 7. **不要机型宏与 sdkconfig 不匹配** — 编译前确认 `sys_cfg.h` 机型宏与 `sdkconfig_{std,pro,max}` 对应一致
 8. **不要给 dock 随便加 USB IN 端点** — ESP32-S3 的 IN 端点上限是 5（含 EP0），dock 已用满：HID + 音频 mic + 音频反馈 + CDC 数据。新增 USB 功能前必须先释放等量 IN 端点（CDC 的「通知端点」就是因此省掉的）
 9. **不要假设各机型 `0x42` 回包一致** — dock 返回 `面板ID(1)+宽(2)+高(2)`（LEN=5），冰箱贴只返回 `宽(2)+高(2)`（LEN=4）；客户端需按 LEN 区分解析
+10. **不要在 app_task 里碰 `lv_*`** — LVGL 非线程安全，只在 `ui_task` 上下文调用；要向页面推数据走 `ui_core_post()`（下行）、要回写服务层走 `app_manager_post_ui_msg()`（上行），两者都在 `film_app`/`film_ui` 里
+11. **不要在 ui_task 里读写 `g_service_param` / 电池 / WiFi / SD** — 那些没有跨任务保证。设置页只上报 `[行号, 候选下标]`，由 `settings_on_event()` 在 app 任务侧校验、写参数、落盘，再把整页快照回投给页面
 
 ## BLE 协议速览
 
@@ -193,4 +200,7 @@ idf.py build flash monitor
 - `docs/hardware/hardware_spec.md` — 硬件规格 + 启动流程
 - `docs/wifi/wifi_doc.md` — WiFi 功能说明（文档仍标注 Pro 版，待同步）
 - `docs/knowledge/` — AI 知识库（项目总览/架构/规范/命令速查）
+- `docs/knowledge/ui_layer.md` — UI 层设计（分层/线程模型/刷新策略/校准清单）
+- `tools/ui-mockup/index.html` — 设备端 UI 视觉设计稿（双击可开，零依赖）
+- `tools/ui-assets/gen_ui_assets.py` — UI 图标生成（SD 可替换资源 + 内置默认图）
 - `tools/framefilm-dock-upload/SKILL.md` — Dock USB 传图工具（用法 / 参数 / 排查表）

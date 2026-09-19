@@ -48,7 +48,7 @@ SPI 单帧数据量 = 480 × 360 = 172,800 字节
 
 单帧总耗时 = SPI 传输 + PON + REF（波形）+ POF。其中 **REF 是整屏扫描，与"改了多少像素"无关**。
 
-**实测（3.7" Pro，SPI 40MHz）**：封面菜单切换同一会话内的 mono 帧间隔 **约 410 ms**，
+**实测（3.7" Pro，SPI 40MHz）**：同一 mono 会话内连续两帧（旧封面菜单翻页时测得）的间隔 **约 410 ms**，
 即实际约 **2.4 Hz**；而彩色路径切入后的**首帧 mono 为 ~3350 ms**（含 spectra 会话建立 + 全屏 clear）。
 
 > 结论：40MHz 的 SPI 提速**几乎没改变上限**——410ms 里 SPI 传输只占约 35ms，
@@ -73,7 +73,7 @@ SPI 单帧数据量 = 480 × 360 = 172,800 字节
        ┌────────────────┴──────────────────┐
        ▼                                   ▼
  APP_LAYER_DIRECT                   APP_LAYER_UI
- 图片 / 模板 / 动图 / 封面菜单        时钟（及未来 UI app）
+ 图片 / 模板 / 动图                 时钟 / 主菜单 / 系统设置
        │                                   │
        │ app 自绘整帧                       ▼
        │ hal_epd_display_film()      film_ui：ui_core（独占 LVGL 的 ui_task）
@@ -116,7 +116,10 @@ components/film_ui/                  ← 新增组件（UI 框架层实现）
 ```
 components/film_app/
   inc/app_interface.h   ← 改：加 layer / ui_ops（含 ui_core.h，仍不含 lvgl）
-  src/app_manager.c     ← 改：按 layer 分流、封面菜单 pause/resume
+  src/app_manager.c     ← 改：按 layer 分流、主菜单接管/长按退出、跨线程消息
+  src/app_boot.c        ← 新：开机画面（首帧 mono，顺带整屏清场）
+  src/app_menu.c        ← 新：主菜单（轮播 + 指示点 + 层级面板）
+  src/app_settings.c    ← 新：系统设置（设备信息 + 参数，写回经 post_ui_msg）
   src/app_clock.c       ← 改：从"自绘 mono 帧"改为"实现 app_ui_ops_t"
   CMakeLists.txt        ← 改：REQUIRES 增加 film_ui
 ```
@@ -195,7 +198,7 @@ int  ui_core_is_ready(void);                /* 当前屏是否支持 UI 层（mo
 void ui_core_page_enter(uint8_t app_id, const app_ui_ops_t *ops);   /* 建页面 */
 void ui_core_page_exit(void);                                       /* 删页面 */
 
-void ui_core_pause(void);    /* 暂停输出（直绘场景临时占屏：封面菜单）；保留页面 */
+void ui_core_pause(void);    /* 暂停输出（直绘场景临时占屏）；保留页面 */
 void ui_core_resume(void);   /* 恢复输出，并强制整屏重绘一次 */
 
 int  ui_core_post(uint32_t cmd, const void *data, uint8_t len);     /* app_task → ui_task */
@@ -212,8 +215,8 @@ int  ui_core_post(uint32_t cmd, const void *data, uint8_t len);     /* app_task 
 
 ```
 LVGL 逻辑画布 480×720（竖屏）
-  └ I1 缓冲 480×720/8 = 43,200 B      ← LVGL 直接渲染目标
-        │ flush_cb：一次 90° 转置
+  └ 显示缓冲 = 8 B 调色板 + I1 数据 480×720/8 = 43,200 B   ← LVGL 直接渲染目标
+        │ flush_cb：跳过调色板前缀 → 一次 90° 转置
         ▼
   mono 位图 720×480/8 = 43,200 B      ← 直接喂给 hal_epd_display_mono()
 ```
@@ -225,21 +228,34 @@ LVGL 逻辑画布 480×720（竖屏）
 | `LV_COLOR_FORMAT_I1` | 启用 | 1bpp 索引色，显存 43,200 B（RGB565 要 675 KB）|
 | `LV_DRAW_SW_SUPPORT_I1` | 已默认为 `y` | LVGL 有专门的 I1 混色实现 `lv_draw_sw_blend_to_i1.c` |
 | `LV_DISPLAY_RENDER_MODE_FULL` | 使用 | 整屏单缓冲；`flush_cb` 一次拿到整屏，与 EPD 的整帧推送模型天然吻合 |
-| 缓冲大小 | 43,200 B | 由 `ui_core` 用 `heap_caps_malloc(..., MALLOC_CAP_INTERNAL)` 分配（不走 LVGL 内存池，见 §9.2）|
+| 缓冲大小 | **43,208 B** = 8（调色板）+ 43,200 | 分配时**必须多这 8 字节**，否则 LVGL 会写越界 |
+| 调色板 | 索引 0 = 黑、1 = 白 | 每次 flush 写一次，保证索引色语义确定 |
 
 ```c
 /* ui_display.c 核心流程 */
 static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
-    /* RENDER_MODE_FULL 下 area 恒为整屏，px_map 即整块 I1 缓冲 */
+    /* 索引色格式：px_map 指向缓冲区开头，前 8 字节是 LVGL 的调色板 */
     if(lv_display_flush_is_last(disp))
     {
-        ui_i1_to_mono(px_map, m_mono_frame);      /* 90° 转置 + 位序/极性对齐 */
-        hal_epd_display_mono(m_mono_frame);       /* 阻塞式：约 35ms @40MHz + 波形时间 */
+        ui_i1_to_mono(px_map + UI_I1_PALETTE_BYTES, m_mono_frame);  /* 跳过调色板再转置 */
+        hal_epd_display_mono(m_mono_frame);   /* 阻塞式：约 35ms @40MHz + 波形时间 */
     }
-    lv_display_flush_ready(disp);                 /* 必须在推送之后 */
+    lv_display_flush_ready(disp);             /* 必须在推送之后 */
 }
 ```
+
+> **`px_map` 前面有调色板 —— 这是踩过的坑，务必记住。**
+> LVGL 把索引色的调色板**存在缓冲区开头**（[lv_draw_buf.c](../../firmware/frame_film/managed_components/lvgl__lvgl/src/draw/lv_draw_buf.c) 里的 `/*Skip palette*/`），
+> 官方 SDL 驱动也是 `px_map += LV_COLOR_INDEXED_PALETTE_SIZE(I1) * 4` 之后才取像素。
+> I1 有 2 个索引 → **8 字节**前缀。
+>
+> 漏跳这 8 字节会同时产生**两个**看似无关的现象：
+> ① 8 字节 = 64 个 I1 像素 → 整幅画面**横移 64px 并环绕**（每行最右侧 64px 绕到最左）；
+> ② 8 不是行跨度（480/8 = 60 字节）的整数倍 → 绕回的那 64px **跨了一行**，于是它相对主体**再差 1px 纵向**。
+>
+> 当时误判成"控制器 DTM1 行原点偏移"，加了两个补偿常量去凑（已删除，见 ui_conf.h 注记）。
+> 判别捷径：**彩色图片正常、只有 UI 偏** → 说明驱动/面板都对，问题在 UI 层的缓冲读法。
 
 > `hal_epd_display_mono()` 是阻塞的，且 `flush_ready()` 在其后 → LVGL **不会堆积帧**，
 > 自动形成"面板能多快就多快"的节流。这正是我们要的行为，无需额外丢帧逻辑。
@@ -394,10 +410,10 @@ app_task                                ui_task
 |---|---|---|---|
 | `IDLE` | 否 | 无 | display 与缓冲已就绪，仅等命令 |
 | `ACTIVE` | 是 | 有 | 正常 UI app 运行 |
-| `PAUSED` | 否 | **保留** | 面板被直绘场景临时占用（封面菜单）|
+| `PAUSED` | 否 | **保留** | 面板被直绘场景临时占用（当前无调用方，保留能力）|
 
-**为什么 PAUSED 要保留页面**：封面菜单是一次短暂的临时占屏（长按进入 → 选择或超时退出），
-销毁再重建页面毫无必要，也丢失页面内部状态。
+**为什么 PAUSED 要保留页面**：暂停是一次短暂的临时占屏，销毁再重建页面毫无必要，也丢失页面内部状态
+（页面内 `lv_timer`、滚动位置等）。
 
 ### 8.2 显示会话：什么时候会闪
 
@@ -409,11 +425,11 @@ app_task                                ui_task
 |---|---|---|
 | DIRECT 彩色 app → UI app | UI 首帧重建 spectra 会话（`prepare()` 全屏 clear）| **闪一次** |
 | UI app → DIRECT 彩色 app | 彩色路径自行硬复位 | 不涉及 |
-| 进 UI 页 / 从菜单恢复 | `ui_clean_panel()` 强制复位（见下）| **闪一次** |
-| 进封面菜单 | 同为 mono 会话，复用上一帧做差分 | 不闪 |
+| 进 UI 页 / 从暂停恢复 | `ui_clean_panel()` 强制复位（见下）| **闪一次** |
+| UI app → UI app（如 主菜单 → 设置）| 同层换页，`ui_clean_panel()` 强制复位 | **闪一次** |
 
-**为什么"进 UI 页"要强制清场**：封面菜单与 UI 页同属一个 mono（`spectra state=2`）会话，
-差分快刷只驱动变化像素，且快刷波形**没有彻底擦除的相位**——实测从菜单选中时钟后，
+**为什么"进 UI 页"要强制清场**：直绘内容（各 app 的 mono 帧）与 UI 页同属一个 mono（`spectra state=2`）会话，
+差分快刷只驱动变化像素，且快刷波形**没有彻底擦除的相位**——实测从旧封面菜单选中时钟后，
 菜单里那张时钟封面（圆环+指针）会以淡痕留在屏上。
 
 处置：`ui_page_build()` 与 `UI_CMD_RESUME` 都调 `ui_clean_panel()`（即 `hal_epd_display_init()`）。
@@ -449,43 +465,41 @@ else {
 service_param_app_current_set((uint8_t)id);
 ```
 
-封面菜单（`app_manager_process_input` 的 `SWITCH_SELECT` 分支与 `app_switch_restore`）：
+主菜单（`app_manager_process_input` 的 `APP_ID_MENU` 分支与 `app_menu_open`）：
 
 ```c
-/* 长按进入菜单 */
-if(app_is_ui_layer(m_current_app)) { ui_core_pause(); }   /* 让出面板，页面保留 */
-m_switch_state = APP_SWITCH_SELECT;
-app_render_menu_show(...);
+/* 菜单态：接管全部按键（页面只显示，on_key = NULL） */
+if(m_current_app == APP_ID_MENU) {
+    UP/DOWN: m_menu_sel 循环 + ui_core_post(APP_UI_MSG_MENU_SEL);   /* 页面重绘 */
+    ENTER  : app_do_switch(m_menu_entries[m_menu_sel]);
+    return APP_INPUT_CONSUMED;
+}
 
-/* 确认：选中项 ≠ 当前 app → 正常切换 */
-app_do_switch(m_switch_highlight);
-m_switch_state = APP_SWITCH_RUN;
-
-/* 确认：选中项 == 当前 app；或超时 → 只收菜单 */
-app_switch_restore();
+/* 其余 app：长按确认键回主菜单 */
+if(key == INPUT_PRESS_LONG && app_menu_available()) { app_menu_open(); return APP_INPUT_CONSUMED; }
 ```
 
-`app_switch_restore()` 对 UI 层走 `ui_core_resume()`（不重建页面，保留页面状态与页面内定时器），
-对直绘层则清掉 running 标志后强制重绘当前 app。
+> **主菜单是"同层切换"，不再需要 pause/resume。**
+> 早先的设计是"封面菜单保持 DIRECT 直绘，进菜单时 `ui_core_pause()`、退出时 `ui_core_resume()`"；
+> 落地时改成了"菜单本身就是 UI 层页面"，于是 UI app → 主菜单 = 同层换页（`page_exit` + `page_enter`），
+> 只有 UI app → DIRECT app 才跨层。
+> `ui_core_pause()/resume()` 仍保留（用户明确要求 "UI 框架可挂起"，且 `resume` 只在 `PAUSED` 态生效，
+> 重复调用不额外付清场代价），当前唯一调用点是 `app_do_switch()` 的早退分支 —— 兜底"页面曾被直绘占屏暂停"。
 
 > **踩过的坑：菜单里选中"当前 app"会让画面看起来卡死。**
-> `app_do_switch()` 开头有 `if(id == m_current_app && m_app_running) return;` 的早退，
-> 于是"选中的就是当前 app"时既不会重绘、也不会恢复 UI 输出——菜单画面一直留在屏上，
-> 按键也无可见反应（实测现象：时钟 app → 长按进菜单 → 高亮时钟封面 → 确认 → 死住）。
-> 处置：SHORT 分支先判 `m_switch_highlight == m_current_app` 走 `app_switch_restore()`；
-> `app_do_switch()` 的早退分支里也补了对 UI 层的 `ui_core_resume()`
-> （覆盖 BLE 在菜单期间切到当前 app 的情况）。
->
-> 另：`ui_core_resume()` **只在 `PAUSED` 态生效**——否则每次误调都要白付一次全清场
-> （数秒 + 一次闪）。
+> （针对旧的 DIRECT 封面菜单）`app_do_switch()` 开头有 `if(id == m_current_app && m_app_running) return;` 的早退，
+> 于是"选中的就是当前 app"时既不会重绘、也不会恢复 UI 输出——菜单画面一直留在屏上。
+> 新模型下这个现象不复存在：菜单态与内容 app 是**不同 app**，选中当前项时
+> `app_do_switch(APP_ID_MENU)` 走的是正常的层间切换路径。
 
 ### 8.4 输入路由
 
 | 当前状态 | 输入去向 |
 |---|---|
-| UI 层 app，`ACTIVE` | `ui_core` → `ops->on_key`（或 LVGL `lv_indev`，见下）|
-| UI 层 app，`PAUSED`（菜单中）| app_manager 接管（滚动高亮 / 确认）|
-| DIRECT 层 app | 现状不变 |
+| 主菜单（`APP_ID_MENU`）| app_manager 接管：上/下换选中索引、确认键进入 |
+| UI 层 app，`ACTIVE` | 长按 → app_manager 回主菜单；其余 → `ui_core` → `ops->on_key` |
+| UI 层 app，`PAUSED`（被直绘占屏）| app_manager 与 `ui_core` 都不驱动 UI（当前无调用方）|
+| DIRECT 层 app | 各 app 自己的按键语义；长按 → app_manager 回主菜单 |
 
 是否需要 `lv_indev`：时钟页无交互，**v1 先只用 `ops->on_key`**，不引入 indev。
 若未来 UI app 需要焦点导航（列表/菜单），再加 `LV_INDEV_TYPE_ENCODER`，
@@ -676,7 +690,7 @@ static void clock_timer_cb(lv_timer_t *t)
 | 6 | app 用声明式 `layer` 字段归属显示层 | 与既有 `keys`/`events`/`state` 声明式风格一致；`app_manager` 单点分流 |
 | 7 | UI app 的周期行为交给**页面内 LVGL 定时器** | app_task 完全不参与，零跨线程；比 app_manager 转发 tick 更简洁 |
 | 8 | 跨线程只留 `ui_core_post` / `ops->on_msg` 一条通道 | 把"什么时候必须跨线程"收窄到唯一入口，便于审查 |
-| 9 | 封面菜单保持 DIRECT 直绘，进/出时 `pause`/`resume` UI 层 | 改动最小、风险最低；两者同为 mono 会话可共享差分基准（不闪）|
+| 9 | **主菜单本身就是 UI 层页面**，`pause`/`resume` 退为兜底能力 | 菜单与内容 app 同层=同层换页，只有 UI↔DIRECT 才跨层；`pause`/`resume` 保留（"UI 框架可挂起"是硬需求），不再有唯一使用者 |
 | 10 | 禁用 LVGL 动画/滚动（约定，非配置） | 每个动画帧 = 一次全屏刷新，会打满面板带宽 |
 | 11 | 时钟不显示秒 | 上屏频率从 1Hz 降到 1/60Hz，代价差 60 倍，而秒针在 EPD 上本就不实用 |
 
@@ -687,15 +701,17 @@ static void clock_timer_cb(lv_timer_t *t)
 | 项 | 说明 | 处置 |
 |---|---|---|
 | **SPI 40MHz 稳定性** | 本次直接从 10MHz 提到 40MHz | 出现花屏/丢帧 → 回退 20MHz（[hal_epd_370.c](../../firmware/frame_film/components/film_hal/src/hal_epd_370.c) 的 `clock_speed_hz`）|
-| **旋转方向** | 90° 顺时针 / 逆时针取决于装配方向 | `UI_ROTATE_90_CW` 一行切换 |
-| **mono 极性** | 已从 `lv_draw_sw_blend_to_i1.c` 源码推导出"I1 白=1"，与 `.film` 相反 | 若首次点亮整体反色，翻 `UI_I1_BIT_BLACK`（0↔1）一行 |
-| **I1 作为 display 格式** | LVGL 有 `lv_draw_sw_blend_to_i1.c`，且 `lv_display_set_color_format` 无格式限制；但"display 级 I1"未经实测 | 不行则退 `L8` + 阈值二值化（345KB 缓冲 + 一次阈值扫描，仍在预算内）|
-| **stride 假设** | 转置按"行字节数 = 宽/8"计算（480/8=60），依赖 `CONFIG_LV_DRAW_BUF_STRIDE_ALIGN=1` | 若改成其他对齐值，需改按 `lv_draw_buf_width_to_stride()` 取行跨度 |
+| **旋转方向** | 90° 顺时针 / 逆时针取决于装配方向 | ✅ 已上机确认 `UI_ROTATE_90_CW = 1` 正确 |
+| **mono 极性** | 已从 `lv_draw_sw_blend_to_i1.c` 源码推导出"I1 白=1"，与 `.film` 相反 | ✅ 已上机确认 `UI_I1_BIT_BLACK = 0` 正确 |
+| **I1 作为 display 格式** | LVGL 有 `lv_draw_sw_blend_to_i1.c`，且 `lv_display_set_color_format` 无格式限制 | ✅ 已上机跑通（见 §6 的调色板前缀陷阱）|
+| **索引色调色板前缀** | `px_map` 前 8 字节是调色板，且显存要多申请这 8 字节 | ✅ 已修（`UI_I1_PALETTE_BYTES`）；漏跳会表现为"横移 64px + 绕回带差 1px 纵向" |
+| **stride 假设** | 转置按"行字节数 = 宽/8"计算（480/8 = 60 字节），依赖 `CONFIG_LV_DRAW_BUF_STRIDE_ALIGN=1` | ✅ 已核对 sdkconfig（为 1）；若改成其他对齐值，需改按 `lv_draw_buf_width_to_stride()` 取行跨度 |
 | **切页会打印警告** | LVGL 删除活动 screen 时会打 `the active screen was deleted` | 属正常（LVGL 内部把 `act_scr` 置 NULL，随后 `lv_screen_load` 复位）；仅日志噪音 |
 | **I1 文字质量** | I1 无法抗锯齿，大字可能出现台阶 | 可接受则继续；不可接受退 `L8` + 阈值二值化 |
 | **REF 波形时间未知** | PON/REF/POF 的真实耗时未测 | UI 只做低频更新，不依赖该数值；若将来要做动画，需先实测 |
 | **PRO 4MB flash** | LVGL + 三档字体 | 关 EXAMPLES/DEMOS；必要时用 `SYS_UI_ENABLE` 整层裁掉 |
 | **`LV_MEM_SIZE` 静态占用** | 128KB 进 `.bss`（内部 RAM）| 若紧张，改 `LV_USE_STDLIB_MALLOC` 指向 PSRAM |
+| **`#if` 用未定义宏会静默失效** | `#if (UI_XXX == 1)` 里的 `UI_XXX` 若未定义，预处理器按 0 处理（本工程未开 `-Wundef`），分支被静默跳过 | 用任何 `UI_*` 配置宏的文件**必须 include `ui_conf.h`**；踩过一次（app_init.c 漏 include）|
 
 ---
 
@@ -706,9 +722,13 @@ static void clock_timer_cb(lv_timer_t *t)
 3. **`film_ui` 骨架**：`ui_conf.h` / `ui_core.h` / `ui_ops.h` / `ui_display.h` + `ui_core.c`（lv_init、display、tick、队列、任务、状态机、pause/resume 握手）。✅ 已完成
 4. **显示链路**：`ui_display.c` 的 `flush_cb` + `ui_i1_to_mono()`（转置 + 极性）。✅ 已完成
 5. **接口接线**：`app_interface.h` 加 `layer`/`ui_ops`；`film_app` CMake 加 `REQUIRES film_ui`。✅ 已完成
-6. **调度分流**：`app_manager` 的 `app_do_switch` 按层分流 + 封面菜单 `pause`/`resume` + UI 层输入路由。✅ 已完成
+6. **调度分流**：`app_manager` 的 `app_do_switch` 按层分流 + UI 层输入路由 + 主菜单接管/长按退出 + 跨线程消息（`app_manager_post_ui_msg` / `ui_core_post`）。✅ 已完成
 7. **时钟改造**：`app_clock.c` 重写为 UI app（竖屏布局、分钟级刷新、页面内 `lv_timer`）。✅ 已完成
-8. **待上机验证**：见 §12 —— SPI 40MHz 稳定性、旋转方向、I1 极性/渲染质量；并回归图片/模板/动图/封面菜单与 UI 层来回切换。
+8. **UI 页面三件套 + 资源层**：`app_boot.c`（开机画面：徽章/遥测/分段进度）、`app_menu.c`（主菜单：轮播/指示点/层级面板）、`app_settings.c`（设备信息 + 系统参数，写参数经 `post_ui_msg` 回 app 任务落盘）、`ui_assets.c`（SD 可替换图标，FFUI 容器 + 内置默认图回退）。✅ 已完成
+9. **公共外壳**：`app_shell.c` 提供"顶部状态栏（品牌 + 电量/WiFi/蓝牙指示块）+ 底部操作提示行"，三个 UI 页共用同一套版式；状态栏数据由 app 任务侧采集后经 `APP_UI_MSG_STATUS` 回投（设置页复用已有的整页快照，不额外往返）。✅ 已完成
+10. **上电流程**：FULL 模式固定 BOOT（约 2.5s 步进）→ MENU，首帧 mono 顺带完成整屏清场；非 FULL / UI 层不可用时沿用"恢复上次 app"。✅ 已完成
+11. **索引色调色板前缀修正**：flush 跳过 `px_map` 前 8 字节（I1 调色板），显存多申请 8 字节，并在每次 flush 写死调色板（索引 0 = 黑、1 = 白）。✅ 已完成（详见 §6）
+12. **待上机验证**：见 §12 —— SPI 40MHz 稳定性、I1 渲染质量；并回归图片/模板/动图/时钟/设置页与主菜单来回切换（含长按退出的残影表现）。
 
 > 时间源（§10.4）本次**未实现**：`app_clock.c` 仍直接使用 `time()`，设备重启后时间需依赖后续的
 > SNTP / 蓝牙校时 + RTC 兜底补齐。这是本次改造遗留的已知缺口。
@@ -717,7 +737,7 @@ static void clock_timer_cb(lv_timer_t *t)
 
 ## 14. 后续可选（不在本次范围）
 
-- **封面菜单 UI 化**：把封面 film 作为 LVGL 图像显示，菜单变成真正的 UI 页面（与 §8.3 的 pause/resume 简化为同层切换）
+- ~~**封面菜单 UI 化**~~：✅ 已落地——主菜单就是 LVGL 页面（见 §8.3 / `app_menu.c`），旧的 DIRECT 封面菜单（`app_render_switch_menu` + 超时状态机）已删除
 - **`lv_indev` 焦点导航**：UI app 需要列表/设置页时的输入方案（§8.4）
 - **控制器轻量 mono 模式探索**：若能找到比 4bit/像素更紧凑的传输格式（`JD7601_CMD_UNK_41/E6` 等语义待确认命令），单帧 payload 可从 172,800 B 降到 86,400 B 甚至 43,200 B → 刷新率上限显著提高
 - **局部刷新的可行性**：`EPD_CAP_PARTIAL` 已定义但无人实现；JD7601 是否有窗口命令仍待确认
