@@ -6,6 +6,7 @@
  */
 #include <stdint.h>
 #include "hal_input.h"
+#include "ui_core.h"    /* app_ui_ops_t 前向声明 + ui_core_* 声明（本身不含 lvgl） */
 
 /*********************************************************************
  * CPPMIX
@@ -52,6 +53,20 @@ typedef enum {
 } app_id_t;
 
 /**
+ * @brief 显示层归属
+ *
+ * app 层内有两个互斥的显示层，由各 app 在 app_entry_t.layer 声明：
+ * - DIRECT：直接显示层，app 自己把整帧交给 hal_epd 显示（图片/模板/动图）
+ * - UI：UI 框架层，由 film_ui 承载 LVGL 页面（时钟及未来 UI app）
+ *
+ * 进入 DIRECT 层 app 时 UI 层会被挂起（释放面板），反之亦然。
+ */
+typedef enum {
+    APP_LAYER_DIRECT = 0,  // 默认层，可省略不写
+    APP_LAYER_UI,
+} app_layer_t;
+
+/**
  * @brief 应用事件类型
  */
 typedef enum {
@@ -90,6 +105,16 @@ typedef struct {
     void (*on_exit)(void);                  // 离开该 app
     void (*on_event)(const app_event_t *e); // 按键/BLE/网络/下载事件
     void (*on_tick)(void);                  // 周期性刷新（可选，时钟/动图用）
+
+    /* ---- 显示层归属 ---- */
+    app_layer_t layer;              // 跑在哪一层；默认 APP_LAYER_DIRECT
+    const app_ui_ops_t *ui_ops;     // layer == APP_LAYER_UI 时必填（页面契约）
+    /* UI 层语义差异（由 app_manager 保证）：
+     *   on_enter/on_exit  → 不调用，由 ui_ops->create/destroy 取代
+     *   on_tick/tick_ms   → 不调用，页面的周期行为用页面内的 lv_timer 承担
+     *   on_event          → 仍调用，但运行在 app_task，禁止触碰 lv_*，需用 ui_core_post() 投递
+     *   keys              → 仍用于暂停期间（封面菜单）的按键避让
+     */
 
     /* ---- 状态持久化（框架负责 NVS 读写，app 零 NVS 代码） ---- */
     void *state;                 // 指向 app 状态结构体；NULL 或 state_size=0 表示不持久化

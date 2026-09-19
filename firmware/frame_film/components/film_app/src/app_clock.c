@@ -19,9 +19,10 @@
  *
  *
  * FileName : /film_app/src/app_clock.c
- * Author: Kiritro  Version: v0.1  Date: 2026/9/9
- * Description: 时钟 app：设备端生成时间，MonoFast 差分局刷（WiFi/蓝牙校时 + 本地 RTC 兜底）
- * ChangeLog: Change Notes
+ * Author: Kiritro  Version: v0.2  Date: 2026/9/17
+ * Description: 时钟 app（UI 框架层）：LVGL 竖屏页面显示 年月日 / 时分 / 星期
+ * ChangeLog:
+ *   v0.2  改为 UI 框架层实现（LVGL 页面），从"自绘 mono 帧"迁移
  *
  *********************************************************************/
 
@@ -29,262 +30,199 @@
  * INCLUDES
  */
 #include <stdio.h>
-#include <string.h>
 #include <time.h>
 
-#include "esp_heap_caps.h"
-
 #include "sys_log.h"
-#include "sys_event.h"
-#include "hal_epd.h"
+
+#include "ui_ops.h"     /* app_ui_ops_t（含 lvgl.h） */
 #include "app_clock.h"
-#include "app_render.h"
-#include "hal_input.h"
 
 /*********************************************************************
  * MACROS
  */
 #define APP_CLOCK_TAG       "app_clock"
 
-// 1bpp mono 帧缓冲字节数（行优先，MSB 在左）
-#define CLOCK_MONO_BYTES    ((EPD_WIDTH * EPD_HEIGHT) / 8)
-
-// 5x7 字体绘制尺度（由屏宽自适应，保证内容完整且居中）
-#define CLOCK_SCALE_MIN     (8)
-#define CLOCK_SCALE_MAX     (22)
-
-// 时钟刷新周期（毫秒）：秒级刷新即可，避免 EPD 无谓刷新
+/* 定时器周期（毫秒）：1s 一拍以便及时捕获"分钟跳变"。
+ * 注意：只有内容真正变化时才会 set_text，LVGL 也只在 dirty 时渲染，
+ * 因此实际约每分钟上屏一次，而不是每秒刷新 EPD。 */
 #define CLOCK_TICK_MS       (1000)
 
-/*********************************************************************
-* TYPEDEFS
-*/
+/* 页面布局（逻辑竖屏 480x720，以屏幕中心为基准的纵向偏移） */
+#define CLOCK_DATE_Y_OFS    (-140)
+#define CLOCK_WEEK_Y_OFS    (140)
 
 /*********************************************************************
  * CONSTANTS
  */
-
-// 5x7 点阵数字（低 5 位有效，bit4=最左列）
-static const uint8_t FONT_DIGIT[10][7] = {
-    {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},   // 0
-    {0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},   // 1
-    {0x0E,0x11,0x01,0x02,0x04,0x08,0x1F},   // 2
-    {0x0E,0x11,0x01,0x06,0x01,0x11,0x0E},   // 3
-    {0x02,0x06,0x0A,0x12,0x1F,0x02,0x02},   // 4
-    {0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E},   // 5
-    {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E},   // 6
-    {0x1F,0x01,0x02,0x04,0x08,0x08,0x08},   // 7
-    {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},   // 8
-    {0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},   // 9
-};
-
-// 冒号（上下两圆点）
-static const uint8_t FONT_COLON[7] = {
-    0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00,
-};
-
-// 空白（未定义字符）
-static const uint8_t FONT_BLANK[7] = {
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/* 星期缩写：不使用中文（LVGL 内置字体不含 CJK），用拉丁三字母 */
+static const char *const WEEK_NAME[7] = {
+    "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"
 };
 
 /*********************************************************************
  * LOCAL VARIABLES
  */
-static uint8_t *m_mono_buf = NULL;      // SPIRAM mono 帧缓冲（懒加载，常驻）
-static char m_last_text[16] = {0};      // 上一次显示内容，用于去重（避免每 tick 无谓刷屏）
+static lv_obj_t   *m_time_label = NULL;
+static lv_obj_t   *m_date_label = NULL;
+static lv_obj_t   *m_week_label = NULL;
+static lv_timer_t *m_timer = NULL;
 
-// 关注的全局事件：数据落地（WiFi/蓝牙校时）后重新生成时间显示
-static const uint16_t m_clock_events[] = {
-    SYS_EVT_FILE_SAVED,
-    0,
-};
+/* 上次刷新的"分钟/日"，用于抑制无谓的 set_text（每次上屏都是一次 EPD 全帧刷新） */
+static int m_last_min  = -1;
+static int m_last_mday = -1;
 
 /*********************************************************************
  * LOCAL FUNCTIONS
  */
-static void app_clock_on_enter(void);
-static void app_clock_on_exit(void);
-static void app_clock_on_event(const app_event_t *e);
-static void app_clock_on_tick(void);
-static const uint8_t *clock_font_char(char c);
-static void clock_set_pixel(uint8_t *bin, int x, int y);
-static void clock_draw_char(uint8_t *bin, int x, int y, int scale, const uint8_t *glyph);
-static void clock_draw_string(uint8_t *bin, const char *s, int scale);
-static int clock_render_now(void);
+static void clock_ui_create(lv_obj_t *root);
+static void clock_ui_destroy(void);
+static void clock_timer_cb(lv_timer_t *timer);
+static void clock_ui_update(void);
 
 /*********************************************************************
  * GLOBAL VARIABLES
  */
+/**
+ * @brief UI 页面契约
+ *
+ * 四个回调都在 ui_task 上下文执行（独占 LVGL），故可安全调用 lv_*。
+ * 时钟页面无交互、无外部消息，on_msg / on_key 留空。
+ */
+static const app_ui_ops_t g_clock_ui_ops = {
+    .create  = clock_ui_create,
+    .destroy = clock_ui_destroy,
+    .on_msg  = NULL,
+    .on_key  = NULL,
+};
+
 const app_entry_t g_app_clock_entry = {
     .id = APP_ID_CLOCK,
     .name = "clock",
     .data_dir = NULL,        // 时钟为设备端生成，不占用文件目录
     .keys = APP_KEY_NONE,    // 不占用按键
-    .tick_ms = CLOCK_TICK_MS,
-    .events = m_clock_events,
-    .on_enter = app_clock_on_enter,
-    .on_exit = app_clock_on_exit,
-    .on_event = app_clock_on_event,
-    .on_tick = app_clock_on_tick,
+    .tick_ms = 0,            // UI 层不用 app_task 的 tick（周期行为由页面内 lv_timer 承担）
+    .events = NULL,
+
+    /* UI 层：页面由 film_ui 在 ui_task 上下文创建，故 on_enter/on_exit/on_tick 均不参与 */
+    .layer = APP_LAYER_UI,
+    .ui_ops = &g_clock_ui_ops,
 };
 
 /*********************************************************************
  * LOCAL FUNCTIONS
  */
 
-static void app_clock_on_enter(void)
+/**
+ * @brief 按当前时间刷新三个标签
+ *
+ * 仅在"分钟"或"日"变化时更新：EPD 每次上屏都是全帧刷新，代价与改动面积无关，
+ * 所以抑制无谓的 set_text 比减少控件重绘更重要。
+ */
+static void clock_ui_update(void)
 {
-    sys_logi(APP_CLOCK_TAG, "enter clock app");
-    clock_render_now();
-}
-
-static void app_clock_on_exit(void)
-{
-    sys_logi(APP_CLOCK_TAG, "exit clock app");
-}
-
-static void app_clock_on_tick(void)
-{
-    // 每 CLOCK_TICK_MS 触发一次，仅在内容变化（秒数改变）时重绘，避免 EPD 无谓刷新
-    clock_render_now();
-}
-
-static void app_clock_on_event(const app_event_t *e)
-{
-    if(e == NULL || e->type != APP_EVT_SYS)
-    {
-        return;
-    }
-
-    // 数据落地（WiFi/蓝牙校时等）：重新生成时间显示
-    if((sys_event_id_t)e->cmd == SYS_EVT_FILE_SAVED)
-    {
-        clock_render_now();
-    }
-}
-
-static const uint8_t *clock_font_char(char c)
-{
-    if(c >= '0' && c <= '9')
-    {
-        return FONT_DIGIT[c - '0'];
-    }
-    if(c == ':')
-    {
-        return FONT_COLON;
-    }
-    return FONT_BLANK;
-}
-
-static void clock_set_pixel(uint8_t *bin, int x, int y)
-{
-    if(x < 0 || y < 0 || x >= EPD_WIDTH || y >= EPD_HEIGHT)
-    {
-        return;
-    }
-    uint32_t idx = (uint32_t)y * EPD_WIDTH + x;
-    bin[idx >> 3] |= (0x80 >> (idx & 7));   // MSB 在左
-}
-
-static void clock_draw_char(uint8_t *bin, int x, int y, int scale, const uint8_t *glyph)
-{
-    for(int gy = 0; gy < 7; gy++)
-    {
-        uint8_t bits = glyph ? glyph[gy] : 0x00;
-        for(int gx = 0; gx < 5; gx++)
-        {
-            if(bits & (0x10 >> gx))
-            {
-                for(int dy = 0; dy < scale; dy++)
-                {
-                    for(int dx = 0; dx < scale; dx++)
-                    {
-                        clock_set_pixel(bin, x + gx * scale + dx, y + gy * scale + dy);
-                    }
-                }
-            }
-        }
-    }
-}
-
-static void clock_draw_string(uint8_t *bin, const char *s, int scale)
-{
-    int n = (int)strlen(s);
-    if(n <= 0)
-    {
-        return;
-    }
-
-    int slot_digit = 5 * scale;
-    int slot_colon = 3 * scale;
-    int gap = scale;
-
-    int total = 0;
-    for(int i = 0; i < n; i++)
-    {
-        total += (s[i] == ':') ? slot_colon : slot_digit;
-    }
-    total += (n - 1) * gap;
-
-    int x = (EPD_WIDTH - total) / 2;
-    int y = (EPD_HEIGHT - (7 * scale)) / 2;
-
-    for(int i = 0; i < n; i++)
-    {
-        char c = s[i];
-        int slot_w = (c == ':') ? slot_colon : slot_digit;
-        clock_draw_char(bin, x, y, scale, clock_font_char(c));
-        x += slot_w + gap;
-    }
-}
-
-static int clock_render_now(void)
-{
-    if(!app_render_has_monofast())
-    {
-        sys_logw(APP_CLOCK_TAG, "monofast not supported, clock display off");
-        return 0;
-    }
-
     time_t now = time(NULL);
     struct tm tmv;
+    char buf[40];
+    int wday;
+    unsigned year, month, mday, hour, minute;
+
+    if(m_time_label == NULL || m_date_label == NULL || m_week_label == NULL)
+    {
+        return;
+    }
+
     localtime_r(&now, &tmv);
 
-    char text[16];
-    snprintf(text, sizeof(text), "%02d:%02d:%02d", tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
-
-    if(strcmp(text, m_last_text) == 0)
+    if(tmv.tm_min == m_last_min && tmv.tm_mday == m_last_mday)
     {
-        return 0;   // 内容未变，跳过
+        return;   // 显示内容未变，跳过
     }
-    strncpy(m_last_text, text, sizeof(m_last_text) - 1);
+    m_last_min  = tmv.tm_min;
+    m_last_mday = tmv.tm_mday;
 
-    if(m_mono_buf == NULL)
+    /* 按字段宽度收敛值域：本地时间字段本不会越界，但 -Wformat-truncation 按 int 全域
+       （每项最多 11 字节）推演，会判定 snprintf 可能截断；本项目开了 -Werror，直接编译失败。
+       掩码后 GCC 可推导出上界；缓冲另按最保守推演留足余量，双保险。 */
+    year   = (unsigned)(tmv.tm_year + 1900) & 0xFFFFu;   // ≤ 5 位
+    month  = (unsigned)(tmv.tm_mon + 1)     & 0xFFu;     // ≤ 3 位
+    mday   = (unsigned)tmv.tm_mday          & 0xFFu;     // ≤ 3 位
+    hour   = (unsigned)tmv.tm_hour          & 0xFFu;     // ≤ 3 位
+    minute = (unsigned)tmv.tm_min           & 0xFFu;     // ≤ 3 位
+
+    snprintf(buf, sizeof(buf), "%02u:%02u", hour, minute);
+    lv_label_set_text(m_time_label, buf);
+
+    snprintf(buf, sizeof(buf), "%04u-%02u-%02u", year, month, mday);
+    lv_label_set_text(m_date_label, buf);
+
+    wday = (tmv.tm_wday >= 0 && tmv.tm_wday < 7) ? tmv.tm_wday : 0;
+    lv_label_set_text(m_week_label, WEEK_NAME[wday]);
+
+    sys_logi(APP_CLOCK_TAG, "clock update: %04u-%02u-%02u %s %02u:%02u",
+             year, month, mday, WEEK_NAME[wday], hour, minute);
+}
+
+static void clock_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    clock_ui_update();
+}
+
+/**
+ * @brief 创建时间标签（统一字体/颜色，避免主题的中间灰被 I1 阈值化后不可预期）
+ */
+static lv_obj_t *clock_make_label(lv_obj_t *root, const lv_font_t *font, int32_t y_ofs)
+{
+    lv_obj_t *label = lv_label_create(root);
+
+    lv_obj_set_style_text_font(label, font, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_black(), LV_PART_MAIN);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, y_ofs);
+
+    return label;
+}
+
+static void clock_ui_create(lv_obj_t *root)
+{
+    sys_logi(APP_CLOCK_TAG, "create clock page");
+
+    /* 竖屏 480x720：上部日期、中部时间（最大字号）、下部星期 */
+    m_date_label = clock_make_label(root, &lv_font_montserrat_24, CLOCK_DATE_Y_OFS);
+    lv_label_set_text(m_date_label, "----.--.--");
+
+    m_time_label = clock_make_label(root, &lv_font_montserrat_48, 0);
+    lv_label_set_text(m_time_label, "--:--");
+
+    m_week_label = clock_make_label(root, &lv_font_montserrat_24, CLOCK_WEEK_Y_OFS);
+    lv_label_set_text(m_week_label, "---");
+
+    /* 立即填一次真实时间，避免首帧停留在占位文本 */
+    m_last_min  = -1;
+    m_last_mday = -1;
+    clock_ui_update();
+
+    /* 周期行为由页面内的 LVGL 定时器承担：app_task 完全不参与，零跨线程 */
+    m_timer = lv_timer_create(clock_timer_cb, CLOCK_TICK_MS, NULL);
+    if(m_timer == NULL)
     {
-        m_mono_buf = (uint8_t*)heap_caps_malloc(CLOCK_MONO_BYTES, MALLOC_CAP_SPIRAM);
-        if(m_mono_buf == NULL)
-        {
-            sys_loge(APP_CLOCK_TAG, "mono buffer alloc failed: %d bytes", CLOCK_MONO_BYTES);
-            return 0;
-        }
+        sys_loge(APP_CLOCK_TAG, "create timer failed, clock will not tick");
     }
+}
 
-    memset(m_mono_buf, 0, CLOCK_MONO_BYTES);   // 白底
+static void clock_ui_destroy(void)
+{
+    sys_logi(APP_CLOCK_TAG, "destroy clock page");
 
-    int scale = EPD_WIDTH / 46;
-    if(scale < CLOCK_SCALE_MIN)
+    /* 定时器不在 root 的对象树里，必须自己删；标签由 ui_core 随 root 一并删除 */
+    if(m_timer != NULL)
     {
-        scale = CLOCK_SCALE_MIN;
-    }
-    if(scale > CLOCK_SCALE_MAX)
-    {
-        scale = CLOCK_SCALE_MAX;
+        lv_timer_delete(m_timer);
+        m_timer = NULL;
     }
 
-    clock_draw_string(m_mono_buf, text, scale);
-    app_render_display_mono(m_mono_buf);
-
-    sys_logi(APP_CLOCK_TAG, "clock render: %s", text);
-    return 1;
+    m_time_label = NULL;
+    m_date_label = NULL;
+    m_week_label = NULL;
+    m_last_min  = -1;
+    m_last_mday = -1;
 }

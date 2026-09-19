@@ -1,15 +1,35 @@
 dependencies:
   esp-idf-lib/encoder:
+    component_hash: 0ac3bb66deff664544512216b30b38f05c6c45f42329afb8f089d196a6c6d30c
     dependencies: []
     source:
-      path: H:\FrameFilm\firmware\frame_film\managed_components\esp-idf-lib__encoder
-      type: local
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32
+    - esp32c2
+    - esp32c3
+    - esp32c5
+    - esp32c6
+    - esp32c61
+    - esp32h2
+    - esp32p4
+    - esp32s2
+    - esp32s3
     version: 3.0.2
   espressif/button:
-    dependencies: []
+    component_hash: 30a3f495c3862d505ce6e41adbbd218b2750e9723ab2151feff00e9fe685b326
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    - name: idf
+      require: private
+      version: '>=4.0'
     source:
-      path: H:\FrameFilm\firmware\frame_film\managed_components\espressif__button
-      type: local
+      registry_url: https://components.espressif.com/
+      type: service
     version: 3.5.0
   espressif/cmake_utilities:
     component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
@@ -18,32 +38,61 @@ dependencies:
       require: private
       version: '>=4.1'
     source:
-      registry_url: https://components.espressif.com/
+      registry_url: https://components.espressif.com
       type: service
     version: 0.5.3
   espressif/led_strip:
-    dependencies: []
+    component_hash: 28621486f77229aaf81c71f5e15d6fbf36c2949cf11094e07090593e659e7639
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
     source:
-      path: H:\FrameFilm\firmware\frame_film\managed_components\espressif__led_strip
-      type: local
-    version: 3.0.1
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 3.0.3
   idf:
     source:
       type: idf
     version: 5.5.2
   lvgl/lvgl:
-    dependencies: []
+    component_hash: 7d82410747bbfb319531449749e940f440f8414f041f9eaba13f0d1dd7f58cdd
+    dependencies:
+    - name: espressif/freetype
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: idf_version >=5.5 && $CONFIG{LV_USE_FREETYPE} == True
+      version: ^2.14.3
+    - name: espressif/libjpeg-turbo
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: idf_version >=5.5 && $CONFIG{LV_USE_LIBJPEG_TURBO} == True
+      version: ^3.1.1
+    - name: espressif/libpng
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: idf_version >=5.5 && $CONFIG{LV_USE_LIBPNG} == True
+      version: ^1.6.58
+    - name: espressif/lz4
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: idf_version >=5.5 && $CONFIG{LV_USE_LZ4} == True && $CONFIG{LV_USE_LZ4_INTERNAL}
+          == False
+      version: ^1.10.0
     source:
-      path: H:\FrameFilm\firmware\frame_film\managed_components\lvgl__lvgl
-      type: local
+      registry_url: https://components.espressif.com/
+      type: service
     version: 9.6.0~1
 direct_dependencies:
 - esp-idf-lib/encoder
 - espressif/button
-- espressif/cmake_utilities
 - espressif/led_strip
 - idf
 - lvgl/lvgl
-manifest_hash: 327900de1ada4440a337389791925ac3732d52f8ff4fb34199ec36d2249020b0
+manifest_hash: 1adf63c648e902513d1d003089203dd8de1fd18beee884214368d831c4658901
 target: esp32s3
 version: 2.0.0

@@ -831,7 +831,12 @@ static void file_load_event(uint32_t file_id)
     m_file_state.psram_buffer = (uint8_t*)heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
     if(m_file_state.psram_buffer == NULL)
     {
-        sys_loge(FILE_TAG, "Allocate PSRAM buffer failed");
+        // 带上堆余量：PSRAM 申请失败时区分"文件异常大"与"PSRAM 真没空间"
+        sys_loge(FILE_TAG, "Allocate PSRAM buffer failed: size=%u psram_free=%u psram_largest=%u internal_free=%u",
+                 (unsigned)file_size,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
         fclose(file);
         m_file_state.load_complete = FILE_LOAD_STATE_NONE;
         return;

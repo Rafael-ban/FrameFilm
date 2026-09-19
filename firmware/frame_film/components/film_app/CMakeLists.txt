@@ -9,7 +9,7 @@ set(srcs "src/app_init.c"
 
 set(public_include "inc")
 
-set(requires film_service film_hal film_sys)
+set(requires film_service film_hal film_sys film_ui)
 
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS ${public_include}

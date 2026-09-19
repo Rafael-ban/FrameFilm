@@ -658,7 +658,9 @@ static void spi_init(void)
 
     spi_device_interface_config_t devcfg =
     {
-        .clock_speed_hz = 10000000,
+        /* mono 全帧单次要推 172800 字节，10MHz 需 138ms，是刷新率的第一瓶颈；
+           40MHz 降到约 35ms。若出现花屏/丢帧请回退到 20MHz（见 docs/knowledge/ui_layer.md）。 */
+        .clock_speed_hz = 40000000,
         .mode = 0,
         .spics_io_num = -1,
         .queue_size = 1,

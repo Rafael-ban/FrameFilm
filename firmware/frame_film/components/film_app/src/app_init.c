@@ -29,6 +29,8 @@
 /*********************************************************************
  * INCLUDES
  */
+#include "esp_heap_caps.h"
+
 #include "sys_log.h"
 #include "hal_epd.h"
 #include "service_ble.h"
@@ -65,13 +67,31 @@ void film_app_init(void)
 {
     sys_logi(APP_INIT_TAG, "app layer init start");
 
+    /* 启动内存快照：PSRAM 的分片/余量直接决定能否加载大 film
+       （8bpp v2 film 需 345KB 连续，4bpp v1 需 172KB） */
+    sys_logi(APP_INIT_TAG, "heap: psram total=%u free=%u largest=%u | internal total=%u free=%u largest=%u",
+             (unsigned)heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
     /* 1. 创建 app 任务 + 事件队列 + 周期 tick 心跳定时器 */
     app_manager_init();
 
-    /* 2. 注册 app：图片/模板为通用底座（模板承接蓝牙/WiFi 的任意实时推送内容）；
+    /* 2. UI 框架层（LVGL）：必须在任何 app 切换之前就绪，
+          否则首个 UI 层 app（时钟）的 page_enter 会因队列未建而被丢弃。
+          面板不支持 mono 时内部直接返回错误，UI 层保持不可用。 */
+    if(ui_core_init() != 0)
+    {
+        sys_logw(APP_INIT_TAG, "ui core init failed, ui layer unavailable");
+    }
+
+    /* 3. 注册 app：图片/模板为通用底座（模板承接蓝牙/WiFi 的任意实时推送内容）；
           仅全功能模式额外注册时钟/动图，简易/关闭模式省下这部分 flash 与运行开销。
           注意按“配置模式”而非“生效模式”判定：FULL 在非 3.7 屏上虽降级为简易交互，
-          仍保留 4 个 app 的注册，使连接端远程切换（BLE 0x43）行为不变。 */
+          仍保留 4 个 app 的注册，使连接端远程切换（BLE 0x4B）行为不变。 */
     app_manager_register(&g_app_image_entry);
     app_manager_register(&g_app_template_entry);
 #if (SYS_APP_SWITCH_MODE == SYS_APP_SWITCH_FULL)
@@ -79,18 +99,18 @@ void film_app_init(void)
     app_manager_register(&g_app_animation_entry);
 #endif
 
-    /* 3. 切换交互形态日志（cfg 与生效值可能不同：FULL 在无封面菜单的屏上降级为 SIMPLE） */
+    /* 4. 切换交互形态日志（cfg 与生效值可能不同：FULL 在无封面菜单的屏上降级为 SIMPLE） */
     sys_logi(APP_INIT_TAG, "app switch cfg=%d effective=%d cover_menu=%d panel=%#x",
              (int)SYS_APP_SWITCH_MODE, (int)app_manager_get_switch_mode(),
              app_render_has_cover_menu(), (unsigned)EPD_PANEL_ID);
 
-    /* 4. 注册 BLE→app 查询回调（切换/保存完成等上行事件已走 sys_event 总线） */
+    /* 5. 注册 BLE→app 查询回调（切换/保存完成等上行事件已走 sys_event 总线） */
     service_ble_set_app_id_get_cb(app_init_ble_app_id_get);
 
-    /* 5. 注册输入回调并统一转发到 app_manager */
+    /* 6. 注册输入回调并统一转发到 app_manager */
     app_init_register_inputs();
 
-    /* 6. 恢复上次运行的 app：被当前模式裁剪掉的 app（简易模式下无 clock/动图）、
+    /* 7. 恢复上次运行的 app：被当前模式裁剪掉的 app（简易模式下无 clock/动图）、
           首次开机（无记录）或记录非法 → 回落图片（照片墙） */
     int last = service_param_app_current_get();
     if(last < 0 || last >= APP_ID_MAX || !app_manager_is_registered((app_id_t)last))
@@ -99,7 +119,7 @@ void film_app_init(void)
     }
     app_manager_switch((app_id_t)last);
 
-    /* 7. 投递一次 BOOT 事件：首个 app 据此执行“开机自动”行为（自动切图 / 自动拉取） */
+    /* 8. 投递一次 BOOT 事件：首个 app 据此执行“开机自动”行为（自动切图 / 自动拉取） */
     app_manager_notify_boot();
 
     sys_logi(APP_INIT_TAG, "app layer init done");

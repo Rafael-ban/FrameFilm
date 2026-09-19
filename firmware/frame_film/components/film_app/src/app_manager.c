@@ -141,12 +141,60 @@ static void app_ensure_running(void)
     if(!m_app_running)
     {
         const app_entry_t *app = m_app_registry[m_current_app];
-        if(app && app->on_enter)
+        /* UI 层 app 的"进入"动作是建页面，由 ui_core 在 ui_task 上下文完成；
+           此处不调 on_enter——那样会在 app_task 里触碰 lv_*，违反 LVGL 单任务约束 */
+        if(app && app->layer != APP_LAYER_UI && app->on_enter)
         {
             app->on_enter();
         }
         m_app_running = 1;
     }
+}
+
+/**
+ * @brief 停掉当前 app（按显示层分流）
+ *
+ * UI 层：page_exit 会同步关掉输出闸门，随后 DIRECT 层 app 即可安全绘制面板。
+ */
+static void app_stop_current(void)
+{
+    const app_entry_t *old = m_app_registry[m_current_app];
+
+    if(old != NULL && old->layer == APP_LAYER_UI)
+    {
+        ui_core_page_exit();
+        return;
+    }
+
+    if(old && old->on_exit)
+    {
+        old->on_exit();
+    }
+}
+
+/**
+ * @brief 启动当前 app（按显示层分流）
+ */
+static void app_start_current(void)
+{
+    const app_entry_t *app = m_app_registry[m_current_app];
+
+    if(app != NULL && app->layer == APP_LAYER_UI)
+    {
+        if(!ui_core_is_ready())
+        {
+            sys_logw(APP_MANAGER_TAG, "app %s needs ui layer but panel unsupported", app->name);
+        }
+        else
+        {
+            /* 异步：ui_task 建页面并开闸门 */
+            ui_core_page_enter((uint8_t)m_current_app, app->ui_ops);
+        }
+        m_app_running = 1;   // 页面构建由 ui_task 负责，这里只标记已启动
+        return;
+    }
+
+    app_ensure_running();
 }
 
 /**
@@ -183,6 +231,15 @@ static app_switch_mode_t app_switch_effective_mode(void)
 static int app_is_registered(app_id_t id)
 {
     return (id < APP_ID_MAX) && (m_app_registry[id] != NULL);
+}
+
+/**
+ * @brief 指定 app 是否运行在 UI 框架层
+ */
+static int app_is_ui_layer(app_id_t id)
+{
+    const app_entry_t *app = (id < APP_ID_MAX) ? m_app_registry[id] : NULL;
+    return (app != NULL) && (app->layer == APP_LAYER_UI);
 }
 
 /**
@@ -355,6 +412,14 @@ static void app_handle_event(const app_event_t *e)
         {
             return;
         }
+
+        /* 未消费的按键：当前 app 属 UI 层时交给 ui_core（LVGL 非线程安全，
+           必须投递到 ui_task 处理），不透传给 on_event */
+        if(app_is_ui_layer(m_current_app))
+        {
+            ui_core_post_key((uint8_t)e->input);
+            return;
+        }
     }
 
     /* 全局总线事件：统一走 APP_EVT_SYS，避免兼容路径绕过 app_entry.events 过滤 */
@@ -398,6 +463,12 @@ static void app_do_switch(app_id_t id)
     }
     if(id == m_current_app && m_app_running)
     {
+        /* 已是当前 app，正常无需动作。但若它是 UI 层且刚被菜单暂停过，
+           必须把输出恢复，否则页面会永远停在暂停态（屏上留着菜单画面）。 */
+        if(app_is_ui_layer(id))
+        {
+            ui_core_resume();
+        }
         return;   // 已是当前运行 app
     }
 
@@ -407,11 +478,9 @@ static void app_do_switch(app_id_t id)
         m_last_guest_app = id;
     }
 
-    const app_entry_t *old = m_app_registry[m_current_app];
-    if(old && old->on_exit)
-    {
-        old->on_exit();
-    }
+    /* ① 先停旧层：UI 层会同步关掉输出闸门并删页面，
+       避免切换途中 ui_task 把 UI 帧推上屏、覆盖正要绘制的 DIRECT 画面 */
+    app_stop_current();
     /* 切出兜底保存（幂等，覆盖 app 内部未显式保存的改动）。
        仅在旧 app 确实运行过时保存：启动首次切换时它尚未 on_enter/载入状态，
        直接保存会把空结构体写回 NVS，覆盖掉待载入的持久化数据。 */
@@ -433,19 +502,28 @@ static void app_do_switch(app_id_t id)
         sys_logi(APP_MANAGER_TAG, "switch data dir=%s count=%u", app->data_dir, (unsigned)count);
     }
 
-    app_state_load();   // ② 切入先载入状态，再 on_enter
-    app_ensure_running();
+    app_state_load();   // ② 切入先载入状态，再启动（按显示层分流）
+    app_start_current();
     service_param_app_current_set((uint8_t)id);   // ③ 记录当前 app，供下次启动恢复
 }
 
 /**
- * @brief 退出切换菜单：回 RUN 并重绘当前 app，恢复完整画面
+ * @brief 退出切换菜单：回 RUN 并恢复完整画面
  * @note 先清 running 标志，否则 app_do_switch 会因“已是当前 app”而早退，
  *       导致菜单残影无法被 app 画面覆盖。
  */
 static void app_switch_restore(void)
 {
     m_switch_state = APP_SWITCH_RUN;
+
+    /* UI 层：进菜单时只是暂停了输出、页面仍然保留，此处恢复输出
+       （内部会强制整屏重绘，覆盖菜单残影）即可，无需重建页面。 */
+    if(app_is_ui_layer(m_current_app))
+    {
+        ui_core_resume();
+        return;
+    }
+
     m_app_running = 0;
     app_do_switch(m_current_app);
 }
@@ -473,6 +551,15 @@ static app_input_result_t app_manager_process_input(input_press_type_t key)
             app_render_menu_show(m_switch_highlight);
             break;
         case INPUT_PRESS_SHORT: // 确认切换
+            if(m_switch_highlight == m_current_app)
+            {
+                /* 选中的就是当前 app：app_do_switch 会因"已是当前 app"直接早退，
+                   既不重绘也不会恢复 UI 层输出，菜单画面就一直留在屏上（看起来像卡死）。
+                   故走 restore 路径：UI 层恢复输出并强制清场重绘，直绘层强制重绘当前 app。 */
+                app_switch_restore();
+                break;
+            }
+
             app_do_switch(m_switch_highlight);
             m_switch_state = APP_SWITCH_RUN;
             break;
@@ -485,6 +572,14 @@ static app_input_result_t app_manager_process_input(input_press_type_t key)
     /* FULL：长按确认键进入封面菜单 */
     if(m_switch_mode == APP_SWITCH_MODE_FULL && key == INPUT_PRESS_LONG)
     {
+        /* 当前是 UI 层 app：暂停 UI 输出并把面板让给封面菜单直绘。
+           ui_core_pause() 内部会等 ui_task 停稳，返回后即可安全直绘。
+           页面保留不销毁，退出菜单时只需 resume。 */
+        if(app_is_ui_layer(m_current_app))
+        {
+            ui_core_pause();
+        }
+
         m_switch_state = APP_SWITCH_SELECT;
         m_switch_highlight = m_current_app;
         m_switch_last_tick = xTaskGetTickCount();

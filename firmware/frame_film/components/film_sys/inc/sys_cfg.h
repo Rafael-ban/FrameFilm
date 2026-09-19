@@ -42,6 +42,10 @@ extern "C" {
 #error "App 切换模式配置错误：SYS_APP_SWITCH_MODE 只能取 NONE/SIMPLE/FULL"
 #endif
 
+// UI 框架层（LVGL）编译开关：0 = 整层裁掉（ui_core_* 退化为空实现，LVGL 不参与链接）
+// 运行期还会再按面板能力判定（需 MonoFast，即 3.7" 屏）；两者都满足 UI 层才真正可用。
+#define SYS_UI_ENABLE                  1
+
 #if FRAMEFILM_STD == 1
 #define SYS_DEVICE_NAME                "FRAMEFILM"
 #define SYS_MANUFACTURER_NAME          "FRAMEFILM"
