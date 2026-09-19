@@ -112,6 +112,18 @@ void app_manager_boot_show(const app_ui_ops_t *ops);
 void app_manager_boot_end(void);
 
 /**
+ * @brief 展示休眠卡（手动休眠专用）
+ *
+ * 与开机画面同理：休眠卡不是 app，但占屏期间必须由调度器托管，否则任何事件
+ * 都可能经 app_ensure_running() 拉起某个 app 刷屏。区别是**它之后不再切回来** ——
+ * 页面画完后设备就进 deep sleep，这一帧是唯一一帧，所以托管期间除"切换 app"
+ * 外一律丢弃（实际上这段时间 app 任务也正阻塞在等按键松开，不会消费队列）。
+ *
+ * @param ops 休眠卡契约（常驻实例，见 app_sleep_ops()）
+ */
+void app_manager_sleep_show(const app_ui_ops_t *ops);
+
+/**
  * @brief 向当前 app 投递一条来自 UI 页面的请求（ui_task -> app_task）
  *
  * UI 页面在 ui_task 上下文运行，不能直接写 g_service_param（service_param

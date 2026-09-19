@@ -27,6 +27,7 @@ enum
     MSG_LED_MANAGER = 0x01,
     MSG_BATTERY_MANAGER,
     MSG_AUTO_SLEEP_MANAGER,
+    MSG_ENTER_SLEEP,        // 手动休眠（主菜单长按）：不经过休眠开关判定，直接进低功耗
 };
 
 typedef struct
@@ -58,6 +59,18 @@ typedef struct
  * GLOBAL FUNCTIONS
  */
 extern void service_monitor_init(void);
+
+/**
+ * @brief 请求立即进入低功耗（手动休眠）
+ *
+ * 只投一条消息，真正的 deinit + deep sleep 在 monitor 任务里做（那里是既有的、
+ * 已验证过的入睡路径）。与自动休眠不同，**不看休眠模式开关** —— 用户明确按下的
+ * 动作就该执行；定时唤醒参数仍按既有规则生效（sleep_auto && sleep_time > 0）。
+ *
+ * 调用方须自行确认唤醒条件已解除（见 hal_pwr_wake_condition_met），
+ * 否则唤醒源的电平条件当场成立、设备会立刻醒回来。
+ */
+extern void service_monitor_request_sleep(void);
 
 #ifdef __cplusplus
 }

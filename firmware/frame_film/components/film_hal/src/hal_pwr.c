@@ -207,3 +207,11 @@ bool hal_pwr_check_wakeup(void)
     sys_logi(PWR_TAG, "Wakeup from other source: %d", wakeup_reason);
     return false;
 }
+
+bool hal_pwr_wake_condition_met(void)
+{
+    /* 查的就是 hal_pwr_enter_sleep() 里 esp_sleep_enable_ext0_wakeup() 配的那一路。
+       用 WAKEUP_GPIO_LEVEL 而不是某颗键的有效电平：这是"唤醒源"的语义，
+       不是"按键"的语义，两者恰好重合但不该混为一谈。 */
+    return (gpio_get_level(WAKEUP_GPIO_NUM) == WAKEUP_GPIO_LEVEL) ? true : false;
+}

@@ -45,6 +45,7 @@
 #include "service_param.h"
 #include "app_manager.h"
 #include "app_render.h"
+#include "app_sleep.h"  /* app_sleep_run：主菜单长按 = 手动休眠 */
 #include "ui_conf.h"    /* UI_CALIB_FRAME：标定帧模式下的开机页行为 */
 
 /*********************************************************************
@@ -98,6 +99,7 @@ static const app_id_t m_menu_entries[APP_MENU_ENTRY_NUM] = {
 };
 static uint8_t m_menu_sel = 0;   // 主菜单当前选中索引
 static uint8_t m_boot_page = 0;  // 开机画面占屏中（此期间不进入任何 app，按键丢弃）
+static uint8_t m_sleep_page = 0; // 休眠卡占屏中（同上；此后设备就断电了）
 
 /* 参数通道反查表：param_ch / param_ch+1 → 归属 app。注册时构建，与“当前 app”无关，
    手机可在显示图片时预设动图参数，事件照样送达目标 app */
@@ -377,25 +379,29 @@ static void app_handle_event(const app_event_t *e)
         return;
     }
 
-    /* 开机画面占屏期间：除“切换 app”外，任何事件都不驱动 app —— 此刻没有 app 处于
-       运行态，放行会让 on_tick / on_event（进而 app_ensure_running）直接刷屏，
+    /* 开机画面 / 休眠卡占屏期间：除“切换 app”外，任何事件都不驱动 app —— 此刻没有 app
+       处于运行态，放行会让 on_tick / on_event（进而 app_ensure_running）直接刷屏，
        与 ui_task 的 flush 抢 SPI。
+       休眠卡更紧：它之后设备就断电了，那一帧是**唯一**一帧，绝不能被别的内容盖掉。
        BLE 参数通道已在前面处理（手机仍可预设参数）；BLE 切换 app 走上面的 SWITCH 分支，
        并在 app_do_switch() 里结束开机画面。 */
-    if(m_boot_page)
+    if(m_boot_page || m_sleep_page)
     {
-        /* 开机页走完进度后由**页面**上报可以切页（时序见 app_boot.h） */
-        if(e->type == APP_EVT_UI_MSG && e->cmd == APP_UI_REQ_BOOT_DONE)
+        if(m_boot_page)
         {
-            app_manager_boot_end();
-        }
+            /* 开机页走完进度后由**页面**上报可以切页（时序见 app_boot.h） */
+            if(e->type == APP_EVT_UI_MSG && e->cmd == APP_UI_REQ_BOOT_DONE)
+            {
+                app_manager_boot_end();
+            }
 #if (UI_CALIB_FRAME == 1)
-        /* 标定帧模式下开机页不自动前进，短按确认键手动进主菜单（见 ui_conf.h） */
-        else if(e->type == APP_EVT_INPUT && e->input == INPUT_PRESS_SHORT)
-        {
-            app_manager_boot_end();
-        }
+            /* 标定帧模式下开机页不自动前进，短按确认键手动进主菜单（见 ui_conf.h） */
+            else if(e->type == APP_EVT_INPUT && e->input == INPUT_PRESS_SHORT)
+            {
+                app_manager_boot_end();
+            }
 #endif
+        }
         return;
     }
 
@@ -511,6 +517,7 @@ static void app_do_switch(app_id_t id)
     m_app_running = 0;
     m_tick_acc_ms = 0;
     m_boot_page = 0;   // 切到任何 app 即结束开机画面（含 BLE 远程切换）
+    m_sleep_page = 0;  // 同理：切到 app 就意味着不再处于"占屏托管"状态
 
     /* 数据源切换：按 app 声明的目录同步等待文件列表刷新，
        on_enter 即可安全读取列表（避免异步刷新导致的空列表误判）。 */
@@ -554,6 +561,13 @@ static app_input_result_t app_manager_process_input(input_press_type_t key)
             {
                 sys_logw(APP_MANAGER_TAG, "menu entry %u not registered", (unsigned)m_menu_sel);
             }
+        }
+        /* 长按 = 手动休眠。菜单是调度器的"根"，它的长按此刻是空的
+           （其余 app 的长按是"退回主菜单"）。本调用不返回：画完休眠卡就进 deep sleep。
+           注意**不看休眠模式开关** —— 那个开关管的是自动休眠，用户明确按下的动作就该执行。 */
+        else if(key == INPUT_PRESS_LONG)
+        {
+            app_sleep_run();
         }
         return APP_INPUT_CONSUMED;
     }
@@ -695,6 +709,7 @@ void app_manager_init(void)
     m_app_running = 0;
     m_menu_sel = 0;
     m_boot_page = 0;
+    m_sleep_page = 0;
     m_last_guest_app = APP_ID_MAX;
 
     /* 解析生效的按键切换模式：FULL 在跑不动主菜单的屏上自动降级为 SIMPLE */
@@ -803,6 +818,19 @@ void app_manager_boot_end(void)
 
     m_boot_page = 0;
     app_manager_switch(APP_ID_MENU);
+}
+
+void app_manager_sleep_show(const app_ui_ops_t *ops)
+{
+    if(ops == NULL)
+    {
+        return;
+    }
+
+    /* 与开机画面同理用 APP_ID_MAX：休眠卡不是 app，不在注册表里也不参与切换。
+       区别是它不再切回来 —— app_sleep_run() 画完这帧就进 deep sleep。 */
+    ui_core_page_enter((uint8_t)APP_ID_MAX, ops);
+    m_sleep_page = 1;
 }
 
 int app_manager_post_ui_msg(uint32_t cmd, const void *data, uint8_t len)

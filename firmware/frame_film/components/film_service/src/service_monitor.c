@@ -124,6 +124,7 @@ static void monitor_timer_callback(TimerHandle_t xTimer);
 static void monitor_led_manage_event(void);
 static void monitor_battery_manage_event(void);
 static void monitor_auto_sleep_manage_event(void);
+static void monitor_manual_sleep_event(void);
 static void monitor_enter_low_power(void);
 static void monitor_encoder_activity_cb(void);
 
@@ -173,6 +174,22 @@ void service_monitor_init(void)
     hal_input_register_cb(INPUT_PRESS_DOWN, monitor_encoder_activity_cb);
 }
 
+void service_monitor_request_sleep(void)
+{
+    monitor_msg_t msg;
+
+    if(m_monitor_msg_hdl == NULL)
+    {
+        /* monitor 任务还没起来（或创建失败）：不能静默 —— 调用方以为睡了，其实没睡 */
+        sys_loge(MONITOR_TAG, "sleep request dropped: monitor task not ready");
+        return;
+    }
+
+    msg.ID = MSG_ENTER_SLEEP;
+    monitor_msg_send(&msg, 0);
+    sys_logi(MONITOR_TAG, "manual sleep requested");
+}
+
 static void monitor_task_handle(void *pvParameters)
 {
     m_monitor_msg_hdl = xQueueCreate( MONITOR_MSG_QUEUE_LENGTH, MONITOR_MSG_QUEUE_ITEM_SIZE );
@@ -193,6 +210,9 @@ static void monitor_task_handle(void *pvParameters)
             break;
         case MSG_AUTO_SLEEP_MANAGER :
             monitor_auto_sleep_manage_event();
+            break;
+        case MSG_ENTER_SLEEP :
+            monitor_manual_sleep_event();
             break;
         default :
             break;
@@ -316,6 +336,29 @@ static void monitor_auto_sleep_manage_event(void)
     {
         m_monitor_state.sleep_counter = 0;
     }
+}
+
+/**
+ * @brief 手动休眠（主菜单长按）：直接进低功耗
+ *
+ * **不看休眠模式开关**：用户明确按下的动作就该执行，那个开关管的是自动休眠。
+ * 定时唤醒仍按既有条件跟随参数（与自动休眠路径同一判据），
+ * 休眠卡页脚那句 AUTO WAKE 用的也是这个条件，两边必须一致。
+ */
+static void monitor_manual_sleep_event(void)
+{
+    if(g_service_param.sleep.sleep_auto && g_service_param.sleep.sleep_time > 0)
+    {
+        hal_pwr_set_timer_wakeup(g_service_param.sleep.sleep_time);
+        sys_logi(MONITOR_TAG, "manual sleep, timer wake in %d min",
+                 g_service_param.sleep.sleep_time);
+    }
+    else
+    {
+        sys_logi(MONITOR_TAG, "manual sleep, no timer wake");
+    }
+
+    monitor_enter_low_power();
 }
 
 static void monitor_enter_low_power(void)
