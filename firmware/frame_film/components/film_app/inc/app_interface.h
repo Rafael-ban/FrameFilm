@@ -49,8 +49,18 @@ typedef enum {
     APP_ID_TEMPLATE,       // 模板显示（蓝牙/WiFi 实时推送内容到缓存显示：天气/日历等）
     APP_ID_CLOCK,          // 时钟
     APP_ID_ANIMATION,      // 动图
+    APP_ID_SETTINGS,       // 系统设置（UI 层：设备信息 + 系统参数）
+    APP_ID_MENU,           // 主菜单（UI 层：调度器的"根"状态，本身不在轮播列表里）
     APP_ID_MAX,
 } app_id_t;
+
+/**
+ * @brief 主菜单轮播的条目数
+ *
+ * 轮播 = 4 个内容 app + 系统设置；APP_ID_MENU 自身不是可选项（它就是菜单）。
+ * 显示顺序由 app_manager 的 m_menu_entries 定义，UI 页面侧的视觉表需与其一致。
+ */
+#define APP_MENU_ENTRY_NUM      (5)
 
 /**
  * @brief 显示层归属
@@ -75,7 +85,37 @@ typedef enum {
     APP_EVT_SWITCH,      // 内部：请求切换 app（app_manager 消费）
     APP_EVT_SYS,         // 全局事件总线事件（sys_event，按 app_entry.events 过滤）
     APP_EVT_BOOT,        // 启动后仅投递一次给首个 app（开机自动行为，如自动切图/拉取）
+    APP_EVT_UI_MSG,      // UI 页面在 ui_task 发来的请求（cmd + payload），由 app 在 app_task 消费
 } app_evt_type_t;
+
+/**
+ * @brief UI 页面 <-> app 任务 的消息约定
+ *
+ * 上行（页面在 ui_task -> app 任务）：app_manager_post_ui_msg()，经 APP_EVT_UI_MSG 投递，
+ * 由当前 app 的 on_event 消费 —— 设置页写参数必须走这条路，不能直接在 ui_task 调
+ * service_param_*（该模块无内部锁，依赖"只在 app 任务串行调用"）。
+ *
+ * 下行（app 任务 -> 页面）：ui_core_post()，由页面的 ui_ops->on_msg 接收。
+ */
+/**
+ * @brief 壳层状态栏数据（各 UI 页顶部状态栏共用）
+ *
+ * 由 app 在 app_task 侧采集（电池 / 参数服务），经 ui_core_post(APP_UI_MSG_STATUS)
+ * 下发给页面；页面只渲染，不碰服务层。
+ */
+typedef struct {
+    uint8_t bat_pct;    // 电量 0~100
+    uint8_t wifi_on;    // WiFi 开关 0/1
+    uint8_t bt_on;      // 蓝牙开关 0/1
+} app_status_t;
+
+#define APP_UI_REQ_SETTINGS_APPLY   (0x01)  // 上行：payload = [row(1)][value(1)]
+#define APP_UI_REQ_SETTINGS_SYNC    (0x02)  // 上行：无负载，请求下发起始快照（页面 create 时发出）
+#define APP_UI_REQ_STATUS_SYNC      (0x03)  // 上行：无负载，请求下发状态栏数据（页面 create 时发出）
+#define APP_UI_MSG_MENU_SEL         (0x11)  // 下行：payload = [选中索引(1)]
+#define APP_UI_MSG_BOOT_STEP        (0x12)  // 下行：payload = [步骤(1)]
+#define APP_UI_MSG_SETTINGS_SNAPSHOT (0x13) // 下行：payload = settings_snapshot_t
+#define APP_UI_MSG_STATUS           (0x14)  // 下行：payload = app_status_t
 
 /**
  * @brief 应用事件
@@ -113,7 +153,7 @@ typedef struct {
      *   on_enter/on_exit  → 不调用，由 ui_ops->create/destroy 取代
      *   on_tick/tick_ms   → 不调用，页面的周期行为用页面内的 lv_timer 承担
      *   on_event          → 仍调用，但运行在 app_task，禁止触碰 lv_*，需用 ui_core_post() 投递
-     *   keys              → 仍用于暂停期间（封面菜单）的按键避让
+     *   keys              → 仅简易切换模式（SIMPLE）用其做按键避让，声明哪些键归页面自己
      */
 
     /* ---- 状态持久化（框架负责 NVS 读写，app 零 NVS 代码） ---- */

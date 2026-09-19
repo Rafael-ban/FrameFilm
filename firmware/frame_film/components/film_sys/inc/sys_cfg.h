@@ -34,7 +34,7 @@ extern "C" {
 // App 切换交互模式三选一
 #define SYS_APP_SWITCH_NONE            0   // 关闭按键切换（BLE 远程切换仍有效，纯相框）
 #define SYS_APP_SWITCH_SIMPLE          1   // 简易：图片 <-> 最近推送的 app，上/下回图片，确认键互切
-#define SYS_APP_SWITCH_FULL            2   // 全功能：长按进封面菜单（需屏幕支持，否则自动降级为简易模式）
+#define SYS_APP_SWITCH_FULL            2   // 全功能：主菜单（上电落在主菜单，其余 app 长按退出回它；需 UI 层支持，否则自动降级为简易模式）
 #define SYS_APP_SWITCH_MODE            SYS_APP_SWITCH_FULL
 #if (SYS_APP_SWITCH_MODE != SYS_APP_SWITCH_NONE) && \
     (SYS_APP_SWITCH_MODE != SYS_APP_SWITCH_SIMPLE) && \
@@ -76,7 +76,7 @@ extern "C" {
 // app 状态持久化（与整包 ServiceParam_Def_t 隔离，避免改一个 app 状态就重写整包）
 #define SYS_M_NVS_APP_NAMESPACE        "FRAMEFILM_APP"    // NVS namespace 上限 15 字符
 #define SYS_M_NVS_APP_KEY_CURRENT      "cur_app"          // 框架当前 app id
-#define SYS_M_NVS_APP_KEY_PREFIX       "app"              // app 状态 key 前缀：app0 ~ app3
+#define SYS_M_NVS_APP_KEY_PREFIX       "app"              // app 状态 key 前缀：app0 ~ app5
 
 // spiffs
 #define BACE_PATH                      "/spiffs"

@@ -70,7 +70,7 @@ void ui_core_page_exit(void);
 /**
  * @brief 暂停 UI 输出（保留页面）
  *
- * 用于直绘场景临时占用面板（如封面菜单）：停止 lv_timer_handler 驱动，
+ * 用于直绘场景临时占用面板：停止 lv_timer_handler 驱动，
  * 并让 flush 不再把帧推给面板，避免覆盖直绘内容。
  */
 void ui_core_pause(void);

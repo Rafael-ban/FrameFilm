@@ -45,6 +45,7 @@
 #include "service_param.h"
 #include "app_manager.h"
 #include "app_render.h"
+#include "ui_conf.h"    /* UI_CALIB_FRAME：标定帧模式下的开机页行为 */
 
 /*********************************************************************
  * MACROS
@@ -57,7 +58,6 @@
 #define APP_TASK_STACK          (4096)
 #define APP_TASK_NAME           "app_task"
 
-#define APP_SWITCH_TIMEOUT_MS   (30000)  // 切换菜单无输入超时，回 RUN
 #define APP_TICK_MS             (100)    // 周期 on_tick 心跳（时钟 1s 去重、动图叠加 frame 推进）
 
 #define APP_PARAM_GET_BUF_MAX   (60)     // 参数查询回包缓冲区（与 BLE 回包上限对齐）
@@ -66,18 +66,10 @@
  * TYPEDEFS
  */
 /**
- * @brief 切换状态机
- */
-typedef enum {
-    APP_SWITCH_RUN = 0,      // 正常运行态
-    APP_SWITCH_SELECT,       // 封面菜单态（FULL 模式专用）
-} app_switch_state_t;
-
-/**
  * @brief 输入路由结果（app_manager 内部使用）
  */
 typedef enum {
-    APP_INPUT_CONSUMED = 0,  // 输入已由调度器/切换菜单消费，不再下发
+    APP_INPUT_CONSUMED = 0,  // 输入已由调度器/主菜单消费，不再下发
     APP_INPUT_PASS,          // 输入未消费，放行给当前 app
 } app_input_result_t;
 
@@ -95,12 +87,17 @@ static TimerHandle_t m_app_timer = NULL;   // on_tick 心跳
 static const app_entry_t *m_app_registry[APP_ID_MAX] = {0};
 static app_id_t m_current_app = APP_ID_IMAGE;
 static uint8_t m_app_running = 0;
-static app_switch_state_t m_switch_state = APP_SWITCH_RUN;
-static app_id_t m_switch_highlight = APP_ID_IMAGE;
 static uint32_t m_tick_acc_ms = 0;         // 当前 app 的 on_tick 累计时长（按 tick_ms 分频）
-static TickType_t m_switch_last_tick = 0;  // 切换菜单最近一次输入时刻（无操作超时判定）
 static app_switch_mode_t m_switch_mode = APP_SWITCH_MODE_NONE;  // 生效模式（init 时解析）
 static app_id_t m_last_guest_app = APP_ID_MAX;  // 最近一次切入的非图片 app（简易模式确认键切换目标）
+
+/* 主菜单轮播表：下标即选择索引（UI 页据此显示"第 N 项"）。
+   顺序必须与 app_menu.c 的 MENU_ITEMS 一致——那边是视觉表，这里是行为表。 */
+static const app_id_t m_menu_entries[APP_MENU_ENTRY_NUM] = {
+    APP_ID_IMAGE, APP_ID_TEMPLATE, APP_ID_CLOCK, APP_ID_ANIMATION, APP_ID_SETTINGS,
+};
+static uint8_t m_menu_sel = 0;   // 主菜单当前选中索引
+static uint8_t m_boot_page = 0;  // 开机画面占屏中（此期间不进入任何 app，按键丢弃）
 
 /* 参数通道反查表：param_ch / param_ch+1 → 归属 app。注册时构建，与“当前 app”无关，
    手机可在显示图片时预设动图参数，事件照样送达目标 app */
@@ -123,7 +120,6 @@ static void app_timer_callback(TimerHandle_t xTimer);
 static void app_handle_event(const app_event_t *e);
 static void app_do_switch(app_id_t id);
 static int app_param_ch_route(uint8_t ch, const uint8_t *data, uint8_t len);
-static void app_switch_restore(void);
 static app_input_result_t app_manager_process_input(input_press_type_t key);
 static void app_input_dispatch(input_press_type_t key);
 static int app_state_save_of(const app_entry_t *app);
@@ -198,19 +194,10 @@ static void app_start_current(void)
 }
 
 /**
- * @brief 绘制切换菜单中某个 app 的封面（名称来自注册表，避免 id→名 硬编码映射）
- */
-static void app_render_menu_show(app_id_t id)
-{
-    const app_entry_t *app = (id < APP_ID_MAX) ? m_app_registry[id] : NULL;
-    app_render_switch_menu(app ? app->name : NULL);
-}
-
-/**
  * @brief 解析生效的按键切换模式
  *
- * FULL 需要屏幕具备封面菜单能力（整屏封面 + MonoFast 快刷），否则自动降级为
- * SIMPLE，避免 sys_cfg.h 的配置与屏幕宏不一致时切换功能整体失效。
+ * FULL 需要屏幕能跑主菜单（UI 层页面 + 快刷 + 导航键），否则自动降级为
+ * SIMPLE，避免 sys_cfg.h 的配置与硬件不一致时切换功能整体失效。
  */
 static app_switch_mode_t app_switch_effective_mode(void)
 {
@@ -220,7 +207,7 @@ static app_switch_mode_t app_switch_effective_mode(void)
     }
     if(SYS_APP_SWITCH_MODE == SYS_APP_SWITCH_FULL)
     {
-        return app_render_has_cover_menu() ? APP_SWITCH_MODE_FULL : APP_SWITCH_MODE_SIMPLE;
+        return app_render_has_app_menu() ? APP_SWITCH_MODE_FULL : APP_SWITCH_MODE_SIMPLE;
     }
     return APP_SWITCH_MODE_SIMPLE;
 }
@@ -243,24 +230,38 @@ static int app_is_ui_layer(app_id_t id)
 }
 
 /**
- * @brief 在“已注册 app”集合内循环取相邻项
+ * @brief 主菜单是否可用
  *
- * @param from 起点
- * @param step +1 下一项，-1 上一项
- * @return 相邻的已注册 app；若集合中只有自身则原样返回
+ * 主菜单是 UI 层页面：需生效模式为 FULL（面板具备快刷能力）且该 app 已注册。
+ * 不可用时按键交回各 app，避免"按了没反应"。
  */
-static app_id_t app_cycle_registered(app_id_t from, int step)
+static int app_menu_available(void)
 {
-    app_id_t id = from;
-    for(int i = 0; i < APP_ID_MAX; i++)
+    return (m_switch_mode == APP_SWITCH_MODE_FULL) && app_is_registered(APP_ID_MENU);
+}
+
+/**
+ * @brief 进入主菜单
+ *
+ * 选择索引先对齐"刚离开的 app"，避免菜单高亮与当前画面脱节；随后切页并把索引
+ * 同步给页面。ui_core_post 与 ui_core_page_enter 走同一 FIFO 队列，故该消息
+ * 必然在页面 create 之后被处理。
+ */
+static void app_menu_open(void)
+{
+    uint8_t i;
+
+    for(i = 0; i < APP_MENU_ENTRY_NUM; i++)
     {
-        id = (app_id_t)((id + APP_ID_MAX + step) % APP_ID_MAX);
-        if(m_app_registry[id] != NULL)
+        if(m_menu_entries[i] == m_current_app)
         {
-            return id;
+            m_menu_sel = i;
+            break;
         }
     }
-    return from;
+
+    app_do_switch(APP_ID_MENU);
+    (void)ui_core_post(APP_UI_MSG_MENU_SEL, &m_menu_sel, 1);
 }
 
 /**
@@ -368,24 +369,28 @@ static void app_handle_event(const app_event_t *e)
         }
     }
 
-    /* 切换菜单态：仅输入事件参与交互，周期心跳与总线事件挂起，
-       避免时钟/动图/推送内容刷新覆盖菜单封面。
-       心跳（100ms）比菜单超时（10s）频繁得多，故超时判定放在心跳里做。 */
-    if(m_switch_state == APP_SWITCH_SELECT && e->type != APP_EVT_INPUT)
-    {
-        if(e->type == APP_EVT_TIMER &&
-           (xTaskGetTickCount() - m_switch_last_tick) >= pdMS_TO_TICKS(APP_SWITCH_TIMEOUT_MS))
-        {
-            app_switch_restore();
-        }
-        return;
-    }
-
     /* 切换事件：由调度器消费 */
     if(e->type == APP_EVT_SWITCH)
     {
         app_id_t target = (app_id_t)(uintptr_t)e->data;
         app_do_switch(target);
+        return;
+    }
+
+    /* 开机画面占屏期间：除“切换 app”外，任何事件都不驱动 app —— 此刻没有 app 处于
+       运行态，放行会让 on_tick / on_event（进而 app_ensure_running）直接刷屏，
+       与 ui_task 的 flush 抢 SPI。
+       BLE 参数通道已在前面处理（手机仍可预设参数）；BLE 切换 app 走上面的 SWITCH 分支，
+       并在 app_do_switch() 里结束开机画面。 */
+    if(m_boot_page)
+    {
+#if (UI_CALIB_FRAME == 1)
+        /* 标定帧模式下开机页不自动前进，短按确认键手动进主菜单（见 ui_conf.h） */
+        if(e->type == APP_EVT_INPUT && e->input == INPUT_PRESS_SHORT)
+        {
+            app_manager_boot_end();
+        }
+#endif
         return;
     }
 
@@ -405,7 +410,7 @@ static void app_handle_event(const app_event_t *e)
         return;
     }
 
-    /* 输入事件：切换菜单态先由 app_manager 接管 */
+    /* 输入事件：主菜单/长按退出先由 app_manager 裁决 */
     if(e->type == APP_EVT_INPUT)
     {
         if(app_manager_process_input(e->input) == APP_INPUT_CONSUMED)
@@ -443,6 +448,13 @@ static void app_handle_event(const app_event_t *e)
         }
     }
 
+    /* UI 页面请求只有"当前是 UI 层 app"才可能发出；迟到的请求（页面已随层切换销毁）
+       不应落到 DIRECT 层 app 的 on_event 上 */
+    if(e->type == APP_EVT_UI_MSG && !app_is_ui_layer(m_current_app))
+    {
+        return;
+    }
+
     /* 进入当前 app 后转发给它的 on_event */
     app_ensure_running();
     const app_entry_t *app = m_app_registry[m_current_app];
@@ -463,8 +475,9 @@ static void app_do_switch(app_id_t id)
     }
     if(id == m_current_app && m_app_running)
     {
-        /* 已是当前 app，正常无需动作。但若它是 UI 层且刚被菜单暂停过，
-           必须把输出恢复，否则页面会永远停在暂停态（屏上留着菜单画面）。 */
+        /* 已是当前 app，正常无需动作。但若它是 UI 层且被直绘场景暂停过输出，
+           必须恢复，否则页面会永远停在暂停态（屏上留着直绘内容）。
+           ui_core_resume 只在 PAUSED 态生效，重复调用不额外付清场代价。 */
         if(app_is_ui_layer(id))
         {
             ui_core_resume();
@@ -492,6 +505,7 @@ static void app_do_switch(app_id_t id)
     m_current_app = id;
     m_app_running = 0;
     m_tick_acc_ms = 0;
+    m_boot_page = 0;   // 切到任何 app 即结束开机画面（含 BLE 远程切换）
 
     /* 数据源切换：按 app 声明的目录同步等待文件列表刷新，
        on_enter 即可安全读取列表（避免异步刷新导致的空列表误判）。 */
@@ -507,27 +521,6 @@ static void app_do_switch(app_id_t id)
     service_param_app_current_set((uint8_t)id);   // ③ 记录当前 app，供下次启动恢复
 }
 
-/**
- * @brief 退出切换菜单：回 RUN 并恢复完整画面
- * @note 先清 running 标志，否则 app_do_switch 会因“已是当前 app”而早退，
- *       导致菜单残影无法被 app 画面覆盖。
- */
-static void app_switch_restore(void)
-{
-    m_switch_state = APP_SWITCH_RUN;
-
-    /* UI 层：进菜单时只是暂停了输出、页面仍然保留，此处恢复输出
-       （内部会强制整屏重绘，覆盖菜单残影）即可，无需重建页面。 */
-    if(app_is_ui_layer(m_current_app))
-    {
-        ui_core_resume();
-        return;
-    }
-
-    m_app_running = 0;
-    app_do_switch(m_current_app);
-}
-
 static app_input_result_t app_manager_process_input(input_press_type_t key)
 {
     if(key == INPUT_PRESS_NONE || m_switch_mode == APP_SWITCH_MODE_NONE)
@@ -535,55 +528,36 @@ static app_input_result_t app_manager_process_input(input_press_type_t key)
         return APP_INPUT_PASS;   // 未开启按键切换：全部按键放行给当前 app（BLE 远程切换不受影响）
     }
 
-    /* 封面菜单态（FULL）：由 app_manager 接管，不透明，绝不透传 */
-    if(m_switch_state == APP_SWITCH_SELECT)
+    /* 主菜单：上/下换选中项，确认键进入。菜单是调度器的"根"，
+       按键一律不往下传（页面本身不接 on_key） */
+    if(m_current_app == APP_ID_MENU)
     {
-        switch(key)
+        if(key == INPUT_PRESS_UP || key == INPUT_PRESS_DOWN)
         {
-        case INPUT_PRESS_UP:   // 下一项（只在已注册 app 间循环）
-            m_switch_highlight = app_cycle_registered(m_switch_highlight, 1);
-            m_switch_last_tick = xTaskGetTickCount();
-            app_render_menu_show(m_switch_highlight);
-            break;
-        case INPUT_PRESS_DOWN: // 上一项
-            m_switch_highlight = app_cycle_registered(m_switch_highlight, -1);
-            m_switch_last_tick = xTaskGetTickCount();
-            app_render_menu_show(m_switch_highlight);
-            break;
-        case INPUT_PRESS_SHORT: // 确认切换
-            if(m_switch_highlight == m_current_app)
+            int step = (key == INPUT_PRESS_UP) ? 1 : -1;
+            m_menu_sel = (uint8_t)((m_menu_sel + APP_MENU_ENTRY_NUM + step) % APP_MENU_ENTRY_NUM);
+            (void)ui_core_post(APP_UI_MSG_MENU_SEL, &m_menu_sel, 1);
+        }
+        else if(key == INPUT_PRESS_SHORT)
+        {
+            app_id_t target = m_menu_entries[m_menu_sel];
+            if(app_is_registered(target))
             {
-                /* 选中的就是当前 app：app_do_switch 会因"已是当前 app"直接早退，
-                   既不重绘也不会恢复 UI 层输出，菜单画面就一直留在屏上（看起来像卡死）。
-                   故走 restore 路径：UI 层恢复输出并强制清场重绘，直绘层强制重绘当前 app。 */
-                app_switch_restore();
-                break;
+                app_do_switch(target);
             }
-
-            app_do_switch(m_switch_highlight);
-            m_switch_state = APP_SWITCH_RUN;
-            break;
-        default:
-            break;
+            else
+            {
+                sys_logw(APP_MANAGER_TAG, "menu entry %u not registered", (unsigned)m_menu_sel);
+            }
         }
         return APP_INPUT_CONSUMED;
     }
 
-    /* FULL：长按确认键进入封面菜单 */
-    if(m_switch_mode == APP_SWITCH_MODE_FULL && key == INPUT_PRESS_LONG)
+    /* 其余 app：长按确认键退回主菜单（设计稿的"长按退出"）。
+       主菜单不可用（无 UI 层的机型）时按键交回 app，避免"按了没反应" */
+    if(key == INPUT_PRESS_LONG && app_menu_available())
     {
-        /* 当前是 UI 层 app：暂停 UI 输出并把面板让给封面菜单直绘。
-           ui_core_pause() 内部会等 ui_task 停稳，返回后即可安全直绘。
-           页面保留不销毁，退出菜单时只需 resume。 */
-        if(app_is_ui_layer(m_current_app))
-        {
-            ui_core_pause();
-        }
-
-        m_switch_state = APP_SWITCH_SELECT;
-        m_switch_highlight = m_current_app;
-        m_switch_last_tick = xTaskGetTickCount();
-        app_render_menu_show(m_switch_highlight);
+        app_menu_open();
         return APP_INPUT_CONSUMED;
     }
 
@@ -658,25 +632,15 @@ static void app_timer_callback(TimerHandle_t xTimer)
 
 static void app_task_handle(void *pvParameters)
 {
+    app_event_t evt;
+
+    (void)pvParameters;
+
     for(;;)
     {
-        app_event_t evt;
-
-        /* 切换菜单态带超时：无输入一段时间后自动回 RUN（取消切换） */
-        TickType_t timeout = portMAX_DELAY;
-        if(m_switch_state == APP_SWITCH_SELECT)
-        {
-            timeout = pdMS_TO_TICKS(APP_SWITCH_TIMEOUT_MS);
-        }
-
-        if(xQueueReceive(m_app_queue_hdl, &evt, timeout) == pdPASS)
+        if(xQueueReceive(m_app_queue_hdl, &evt, portMAX_DELAY) == pdPASS)
         {
             app_handle_event(&evt);
-        }
-        else
-        {
-            /* 心跳定时器未生效时的兜底：队列等待超时同样退出切换菜单 */
-            app_switch_restore();
         }
     }
 }
@@ -724,13 +688,14 @@ void app_manager_init(void)
     /* 默认 app 为图片（照片墙） */
     m_current_app = APP_ID_IMAGE;
     m_app_running = 0;
-    m_switch_state = APP_SWITCH_RUN;
+    m_menu_sel = 0;
+    m_boot_page = 0;
     m_last_guest_app = APP_ID_MAX;
 
-    /* 解析生效的按键切换模式：FULL 在无封面菜单能力的屏上自动降级为 SIMPLE */
+    /* 解析生效的按键切换模式：FULL 在跑不动主菜单的屏上自动降级为 SIMPLE */
     m_switch_mode = app_switch_effective_mode();
-    sys_logi(APP_MANAGER_TAG, "app switch mode cfg=%d effective=%d cover_menu=%d",
-             (int)SYS_APP_SWITCH_MODE, (int)m_switch_mode, app_render_has_cover_menu());
+    sys_logi(APP_MANAGER_TAG, "app switch mode cfg=%d effective=%d app_menu=%d",
+             (int)SYS_APP_SWITCH_MODE, (int)m_switch_mode, app_render_has_app_menu());
 }
 
 void app_manager_register(const app_entry_t *app)
@@ -810,6 +775,63 @@ void app_manager_notify_boot(void)
     e.type = APP_EVT_BOOT;
     e.input = INPUT_PRESS_NONE;
     xQueueSend(m_app_queue_hdl, &e, portMAX_DELAY);
+}
+
+void app_manager_boot_show(const app_ui_ops_t *ops)
+{
+    if(ops == NULL)
+    {
+        return;
+    }
+
+    /* 页面 id 用 APP_ID_MAX：开机画面不是 app，不在注册表里也不参与切换 */
+    ui_core_page_enter((uint8_t)APP_ID_MAX, ops);
+    m_boot_page = 1;
+}
+
+void app_manager_boot_end(void)
+{
+    if(!m_boot_page)
+    {
+        return;   // 已在开机画面期间被切走了（如 BLE 远程切换）：不覆盖用户的选择
+    }
+
+    m_boot_page = 0;
+    app_manager_switch(APP_ID_MENU);
+}
+
+int app_manager_post_ui_msg(uint32_t cmd, const void *data, uint8_t len)
+{
+    app_event_t e;
+
+    if(m_app_queue_hdl == NULL || cmd == 0)
+    {
+        return -1;
+    }
+    if(len > APP_EVENT_PAYLOAD_MAX)
+    {
+        sys_logw(APP_MANAGER_TAG, "ui msg cmd=%u len=%u exceeds %u, truncate",
+                 (unsigned)cmd, (unsigned)len, (unsigned)APP_EVENT_PAYLOAD_MAX);
+        len = APP_EVENT_PAYLOAD_MAX;
+    }
+
+    memset(&e, 0, sizeof(e));
+    e.type  = APP_EVT_UI_MSG;
+    e.input = INPUT_PRESS_NONE;
+    e.cmd   = cmd;
+    e.len   = len;
+    if(len > 0 && data != NULL)
+    {
+        memcpy(e.payload, data, len);
+    }
+
+    /* 非阻塞：调用方是 ui_task，阻塞会让整个 UI 卡住 */
+    if(xQueueSend(m_app_queue_hdl, &e, 0) != pdPASS)
+    {
+        sys_logw(APP_MANAGER_TAG, "ui msg cmd=%u dropped (queue full)", (unsigned)cmd);
+        return -1;
+    }
+    return 0;
 }
 
 /**

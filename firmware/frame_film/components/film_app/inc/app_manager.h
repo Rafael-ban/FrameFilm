@@ -17,12 +17,12 @@ extern "C" {
  * @brief 按键切换交互模式（生效值）
  *
  * 由 sys_cfg.h 的 SYS_APP_SWITCH_MODE 配置，运行期解析：
- * FULL 在屏幕不具备封面菜单能力时自动降级为 SIMPLE。
+ * FULL 在跑不动主菜单（UI 层不可用）的屏上自动降级为 SIMPLE。
  */
 typedef enum {
     APP_SWITCH_MODE_NONE = 0,   // 关闭按键切换（BLE 远程切换仍有效）
     APP_SWITCH_MODE_SIMPLE,     // 简易：图片 <-> 最近推送的 app
-    APP_SWITCH_MODE_FULL,       // 全功能：长按进封面菜单
+    APP_SWITCH_MODE_FULL,       // 全功能：主菜单（上电落在它上面；其余 app 长按退出回它）
 } app_switch_mode_t;
 
 /**
@@ -91,6 +91,39 @@ int app_manager_is_registered(app_id_t id);
  * 由 app_init 在恢复上次 app 后调用，驱动“开机自动”行为（自动切图 / 自动拉取）。
  */
 void app_manager_notify_boot(void);
+
+/**
+ * @brief 展示开机画面（上电流程专用）
+ *
+ * 开机画面不是 app：不在注册表里、不参与切换。但占屏这段时间必须由调度器托管 ——
+ * 否则此刻没有任何 app 处于运行态，一个按键就会经 app_ensure_running() 直接拉起
+ * 某个 app 抢面板，与 ui_task 的 flush 竞争 SPI。托管期间（到 app_manager_boot_end()
+ * 为止）按键一律丢弃。
+ *
+ * @param ops 开机页契约（常驻实例，见 app_boot_ops()）
+ */
+void app_manager_boot_show(const app_ui_ops_t *ops);
+
+/**
+ * @brief 结束开机画面，切到主菜单
+ *
+ * 页面销毁由 ui_core 在建立主菜单页面时完成（page_enter 内部先 teardown）。
+ */
+void app_manager_boot_end(void);
+
+/**
+ * @brief 向当前 app 投递一条来自 UI 页面的请求（ui_task -> app_task）
+ *
+ * UI 页面在 ui_task 上下文运行，不能直接写 g_service_param（service_param
+ * 无内部锁，依赖"只在 app 任务串行调用"）。页面把改动意向通过本接口投递回来，
+ * 由 app 的 on_event 在 app_task 侧落地并落盘。
+ *
+ * @param cmd  请求码（APP_UI_REQ_*）
+ * @param data 负载，可为 NULL
+ * @param len  负载长度，上限 APP_EVENT_PAYLOAD_MAX
+ * @return 0 成功；-1 队列未就绪或已满
+ */
+int app_manager_post_ui_msg(uint32_t cmd, const void *data, uint8_t len);
 
 /**
  * @brief 保存当前 app 的状态到 NVS

@@ -5,6 +5,10 @@ set(srcs "src/app_init.c"
          "src/app_template.c"
          "src/app_clock.c"
          "src/app_animation.c"
+         "src/app_boot.c"
+         "src/app_menu.c"
+         "src/app_settings.c"
+         "src/app_shell.c"
          )
 
 set(public_include "inc")

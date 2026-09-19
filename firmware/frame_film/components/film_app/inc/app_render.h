@@ -37,14 +37,14 @@ extern "C" {
 uint32_t app_render_get_capabilities(void);
 
 /**
- * @brief 封面菜单是否可用
+ * @brief 主菜单是否可交互
  *
- * 运行期按屏参数判定：仅 3.7" 屏（EPD_PANEL_ID 0x02，具备 MonoFast 快刷）
- * 能整屏绘制 app 封面并快速翻页；其余屏返回 0，切换模式应降级为简易模式。
+ * 运行期按能力判定：面板需具备 MonoFast 快刷（3.7" 屏）且设备有上/下导航与
+ * 确认键。不满足时 app 层应降级为简易切换模式。
  *
- * @return 1 可用，0 不可用
+ * @return 1 可交互，0 不可交互
  */
-int app_render_has_cover_menu(void);
+int app_render_has_app_menu(void);
 
 /**
  * @brief 当前屏是否支持 8bpp 索引色（ColorQual / ColorFast）
@@ -89,18 +89,6 @@ void app_render_display_mono(const unsigned char *mono_bitmap);
  * @brief 清屏为空白
  */
 void app_render_clear(void);
-
-/**
- * @brief 渲染应用切换菜单（仅 3.7 屏切换态调用）
- *
- * 以 app 的封面 .film 图（TF 卡 `/sdcard/app/<appname>/cover.film`）
- * 作为菜单项，读入后按文件头 Format 整屏渲染；封面缺失时降级为日志
- * 提示（不绘制，不阻塞切换）。UP/DOWN 滚动时刷新为对应 app 的封面。
- * 内部缓存最近一次封面，重复高亮同一 app 时不再重复读取。
- *
- * @param app_name 当前高亮 app 的名称（app_entry_t.name）
- */
-void app_render_switch_menu(const char *app_name);
 
 #ifdef __cplusplus
 }

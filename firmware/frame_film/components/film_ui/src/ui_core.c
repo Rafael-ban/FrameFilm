@@ -69,6 +69,7 @@ void ui_core_post_key(uint8_t key)                                  { (void)key;
 #include "lvgl.h"
 
 #include "ui_ops.h"
+#include "ui_assets.h"
 #include "ui_display.h"
 
 /*********************************************************************
@@ -160,8 +161,8 @@ static void ui_bringup(void)
 /**
  * @brief 把面板复位到干净状态，使下一次 mono 刷新先做一次完整清场（消除残影）
  *
- * 封面菜单与 UI 页同属一个 mono（spectra state=2）会话，若不做处理，
- * 差分快刷只驱动变化像素、且快刷波形没有彻底擦除的相位，会把菜单封面的痕迹留在屏上。
+ * 直绘内容（各 app 自己的 mono 画面）与 UI 页同属一个 mono（spectra state=2）会话，若不做处理，
+ * 差分快刷只驱动变化像素、且快刷波形没有彻底擦除的相位，会把上一幅画面的痕迹留在屏上。
  * 硬复位会让驱动把 mono 会话置为无效（`reset()` 里 `m_mono_inited = false`），
  * 下次 mono 刷新即重建会话并走 `epd_spectra_full_clear()`——这正是"用完整清场波形擦干净"的手段。
  *
@@ -189,6 +190,10 @@ static void ui_page_teardown(void)
         m_root = NULL;
     }
 
+    /* 图像对象已随 root 删除，此时再释放图标资源（L8 展开缓冲约 70KB PSRAM）。
+       不常驻：DIRECT 层的大 film 需要尽可能大的连续 PSRAM 块。 */
+    ui_assets_release();
+
     /* 归还显存与 display：UI 层与 DIRECT 层互斥，两块缓冲（共 86KB）不应常驻，
        否则会与图片 app 需要的大块连续 PSRAM（8bpp film 需 345KB）抢内存 */
     ui_display_release();
@@ -209,7 +214,7 @@ static void ui_page_build(const ui_cmd_t *c)
         return;
     }
 
-    /* 先把面板复位到干净状态：首帧会走全清场，避免残留上一幅 mono 画面（如封面菜单的封面） */
+    /* 先把面板复位到干净状态：首帧会走全清场，避免残留上一幅 mono 画面 */
     ui_clean_panel();
 
     m_ops = c->ops;
@@ -335,7 +340,7 @@ static void ui_handle_cmd(const ui_cmd_t *c)
            暂停由 app_task 同步关闸门、ui_task 置 PAUSED 两步完成，故这里看状态即可 */
         if(m_state == UI_STATE_PAUSED)
         {
-            /* 从封面菜单回来：菜单与页面同属 mono 会话，先强制一次清场消掉封面残影 */
+            /* 从直绘占屏回来：直绘内容与页面同属 mono 会话，先强制一次清场消掉残影 */
             ui_clean_panel();
 
             ui_display_set_output(1);
@@ -503,7 +508,7 @@ void ui_core_pause(void)
 {
     ui_cmd_t cmd;
 
-    /* 同上：封面菜单等直绘内容要立刻独占面板 */
+    /* 同上：直绘内容要立刻独占面板 */
     ui_display_set_output(0);
 
     memset(&cmd, 0, sizeof(cmd));

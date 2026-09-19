@@ -27,7 +27,9 @@ extern "C" {
 #define SERVICE_PARAM_APP_ID_TEMPLATE                              (1)
 #define SERVICE_PARAM_APP_ID_CLOCK                                 (2)
 #define SERVICE_PARAM_APP_ID_ANIMATION                             (3)
-#define SERVICE_PARAM_APP_NUM                                      (4)
+#define SERVICE_PARAM_APP_ID_SETTINGS                              (4)
+#define SERVICE_PARAM_APP_ID_MENU                                  (5)
+#define SERVICE_PARAM_APP_NUM                                      (6)
 
 /* 单个 app 状态 blob 中 app 数据的最大字节数（不含 6 字节头）。
  * 各 app 的状态结构体大小不得超过该值，app 侧以 _Static_assert 自行校验。 */

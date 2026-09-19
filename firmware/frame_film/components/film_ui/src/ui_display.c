@@ -58,6 +58,20 @@ void ui_display_invalidate_all(void)        { }
  */
 #define UI_DISPLAY_TAG      "ui_disp"
 
+/* LVGL 把索引色的**调色板放在缓冲区的开头**（`lv_draw_buf.c` 的 "Skip palette"），
+ * 图像数据在其之后：
+ *   · flush 回调拿到的 px_map 前 8 字节是调色板，必须先跳过才能拿到像素
+ *   · 显存必须多申请这 8 字节（否则 LVGL 会写越界 8 字节）
+ * 官方 SDL 驱动的 flush 就是 `px_map += LV_COLOR_INDEXED_PALETTE_SIZE(I1) * 4`。
+ *
+ * 漏跳这 8 字节的后果：8 字节 = 64 个 I1 像素 → 画面整体横移 64px；
+ * 且 8 不是行跨度的整数倍（480/8 = 60 字节）→ 绕回的那 64px 跨了一行，再差 1px 纵向。 */
+#define UI_I1_PALETTE_ENTRIES   (2u)   /* I1 = 2^1 个索引 */
+#define UI_I1_PALETTE_BYTES     (UI_I1_PALETTE_ENTRIES * sizeof(lv_color32_t))
+
+/* 显存实际字节数 = 调色板 + 图像数据 */
+#define UI_I1_ALLOC_BYTES       (UI_I1_PALETTE_BYTES + UI_FB_BYTES)
+
 /*********************************************************************
  * LOCAL VARIABLES
  */
@@ -132,6 +146,8 @@ static uint8_t *ui_display_alloc(size_t size, const char *what)
  * 逻辑坐标 (sx, sy) ∈ 480x720 → 物理坐标 (dx, dy) ∈ 720x480。
  * 逐像素实现（345,600 像素，240MHz 下约 1~3ms）；UI 层是低频更新场景，
  * 不做位级快速转置以换取可读性与正确性。
+ *
+ * 注意：入参 i1 必须已**跳过调色板**（见 UI_I1_PALETTE_BYTES 与 ui_flush_cb）。
  */
 static void ui_i1_to_mono(const uint8_t *i1, uint8_t *mono)
 {
@@ -164,7 +180,7 @@ static void ui_i1_to_mono(const uint8_t *i1, uint8_t *mono)
 /**
  * @brief LVGL flush 回调
  *
- * RENDER_MODE_FULL 下 area 恒为整屏，px_map 即整块 I1 缓冲，
+ * RENDER_MODE_FULL 下 area 恒为整屏，px_map 即整块 I1 缓冲（含调色板前缀），
  * 故一帧只推一次面板；推送在 flush_ready 之前，天然形成"面板能多快就多快"的节流。
  */
 static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
@@ -173,7 +189,16 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
 
     if(m_output_enabled && lv_display_flush_is_last(disp))
     {
-        ui_i1_to_mono(px_map, m_mono_buf);
+        /* px_map 指向缓冲区开头，前 UI_I1_PALETTE_BYTES 字节是调色板：
+           每次 flush 顺手写一次，保证索引色语义确定（索引 0 = 黑、1 = 白，
+           与 UI_I1_BIT_BLACK "位 1 = 白" 一致；黑白在任意字节序下都一样，
+           故按字节写，不依赖结构体字段顺序） */
+        uint8_t *pal = px_map;
+
+        pal[0] = 0x00; pal[1] = 0x00; pal[2] = 0x00; pal[3] = 0xFF;   /* 索引 0：黑 */
+        pal[4] = 0xFF; pal[5] = 0xFF; pal[6] = 0xFF; pal[7] = 0xFF;   /* 索引 1：白 */
+
+        ui_i1_to_mono(px_map + UI_I1_PALETTE_BYTES, m_mono_buf);
         hal_epd_display_mono(m_mono_buf);   /* 阻塞：约 35ms@40MHz + 波形时间 */
     }
 
@@ -191,13 +216,14 @@ int ui_display_acquire(void)
         return 0;   // 已申请
     }
 
-    /* 两块缓冲共 86KB；只在 UI 页存在期间持有（见 ui_display_acquire 说明） */
-    m_i1_buf = ui_display_alloc(UI_FB_BYTES, "i1 framebuffer");
+    /* 两块缓冲共 86KB；只在 UI 页存在期间持有（见 ui_display_acquire 说明）。
+       I1 缓冲要多申请调色板那 8 字节（见 UI_I1_PALETTE_BYTES） */
+    m_i1_buf = ui_display_alloc(UI_I1_ALLOC_BYTES, "i1 framebuffer");
     m_mono_buf = ui_display_alloc(UI_MONO_BYTES, "mono frame");
     if(m_i1_buf == NULL || m_mono_buf == NULL)
     {
-        sys_loge(UI_DISPLAY_TAG, "alloc failed (fb=%d mono=%d): psram_free=%u psram_largest=%u internal_free=%u internal_largest=%u",
-                 UI_FB_BYTES, UI_MONO_BYTES,
+        sys_loge(UI_DISPLAY_TAG, "alloc failed (fb=%d+%d mono=%d): psram_free=%u psram_largest=%u internal_free=%u internal_largest=%u",
+                 UI_I1_PALETTE_BYTES, UI_FB_BYTES, UI_MONO_BYTES,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -205,7 +231,7 @@ int ui_display_acquire(void)
         ui_display_release();
         return -1;
     }
-    memset(m_i1_buf, UI_I1_WHITE_BYTE, UI_FB_BYTES);
+    memset(m_i1_buf, UI_I1_WHITE_BYTE, UI_I1_ALLOC_BYTES);
     memset(m_mono_buf, UI_MONO_WHITE_BYTE, UI_MONO_BYTES);
 
     m_disp = lv_display_create(UI_LOGICAL_W, UI_LOGICAL_H);
@@ -218,12 +244,13 @@ int ui_display_acquire(void)
 
     lv_display_set_color_format(m_disp, LV_COLOR_FORMAT_I1);
     lv_display_set_flush_cb(m_disp, ui_flush_cb);
-    /* 全屏单缓冲：flush_cb 一次拿到整屏，与 EPD 的整帧推送模型吻合 */
-    lv_display_set_buffers(m_disp, m_i1_buf, NULL, UI_FB_BYTES, LV_DISPLAY_RENDER_MODE_FULL);
+    /* 全屏单缓冲：flush_cb 一次拿到整屏，与 EPD 的整帧推送模型吻合。
+       入参 size 用整块分配大小（含调色板），避免 LVGL 的边界判断按 43200 去算 */
+    lv_display_set_buffers(m_disp, m_i1_buf, NULL, UI_I1_ALLOC_BYTES, LV_DISPLAY_RENDER_MODE_FULL);
 
     m_output_enabled = 0;
-    sys_logi(UI_DISPLAY_TAG, "display acquired: %dx%d I1, fb=%d bytes",
-             UI_LOGICAL_W, UI_LOGICAL_H, UI_FB_BYTES);
+    sys_logi(UI_DISPLAY_TAG, "display acquired: %dx%d I1, fb=%u+%d bytes (palette+data)",
+             UI_LOGICAL_W, UI_LOGICAL_H, (unsigned)UI_I1_PALETTE_BYTES, UI_FB_BYTES);
     return 0;
 }
 
