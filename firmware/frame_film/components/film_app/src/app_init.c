@@ -60,13 +60,10 @@
  */
 #define APP_INIT_TAG    "app_init"
 
-#define APP_BOOT_STEP_MS    (500)   // 开机自检每步停留时长（5 步 ≈ 2.5s）
-
 /*********************************************************************
  * LOCAL VARIABLES
  */
-static TimerHandle_t m_boot_timer = NULL;
-static uint8_t m_boot_step = 0;
+static TimerHandle_t m_boot_timer = NULL;   // 开机页"到点进主菜单"的单次定时器
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -78,7 +75,9 @@ static void app_init_input_down(void);
 static void app_init_register_inputs(void);
 static uint8_t app_init_ble_app_id_get(void);
 static void app_init_boot_start(void);
-static void app_init_boot_tick(TimerHandle_t xTimer);
+#if (UI_CALIB_FRAME == 0)
+static void app_init_boot_fallback(TimerHandle_t xTimer);
+#endif
 
 /*********************************************************************
  * GLOBAL FUNCTIONS
@@ -169,10 +168,16 @@ void film_app_init(void)
  */
 
 /**
- * @brief 展示开机画面并启动自检步进
+ * @brief 展示开机画面，并挂一个兜底定时器
  *
  * 开机画面是本次上电的首帧 mono，顺带完成整屏清场（实测约 3s），故这条路径
  * 不额外多付一次闪屏。遥测行取真实值，全部只读、无副作用。
+ *
+ * 进度条与切页时机都**不在这里驱动**：页面内的 lv_timer 一格一格推进，
+ * 走满并停留后上报 APP_UI_REQ_BOOT_DONE，调度器据此切主菜单。早先按"外部投
+ * 步骤消息"驱动时，首帧 flush 会阻塞 ui_task 约 3.3s，期间投递的步骤全堆在
+ * 队列里被一次性消费，进度条看起来完全不动；用一个固定延时去猜切页时机，
+ * 也会因为这段阻塞而落在进度条走到一半的位置。
  */
 static void app_init_boot_start(void)
 {
@@ -198,9 +203,15 @@ static void app_init_boot_start(void)
 
     /* 交给调度器托管（按键在此期间被丢弃），页面在 ui_task 异步建立 */
     app_manager_boot_show(app_boot_ops());
-    app_boot_advance(0);
 
-    m_boot_timer = xTimerCreate("boot_seq", pdMS_TO_TICKS(APP_BOOT_STEP_MS), pdTRUE, NULL, app_init_boot_tick);
+#if (UI_CALIB_FRAME == 1)
+    /* 标定帧模式：停在开机页不自动前进（短按确认键继续，见 ui_conf.h） */
+    sys_logi(APP_INIT_TAG, "calib frame: hold boot page, press ENTER to continue");
+    (void)m_boot_timer;
+#else
+    /* 单次定时器只是兜底：正常路径由开机页走完进度后上报（见 app_boot.h） */
+    m_boot_timer = xTimerCreate("boot_fallback", pdMS_TO_TICKS(APP_BOOT_FALLBACK_MS), pdFALSE, NULL,
+                                app_init_boot_fallback);
     if(m_boot_timer != NULL)
     {
         xTimerStart(m_boot_timer, 0);
@@ -211,30 +222,24 @@ static void app_init_boot_start(void)
         sys_loge(APP_INIT_TAG, "boot timer create failed, jump to menu");
         app_manager_boot_end();
     }
-}
-
-/**
- * @brief 开机自检步进：推进一步，走完最后一步即切到主菜单
- *
- * 定时器任务上下文：只做计数 + 投递（ui_core_post / 队列），不触碰 lv_*。
- */
-static void app_init_boot_tick(TimerHandle_t xTimer)
-{
-#if (UI_CALIB_FRAME == 1)
-    /* 标定帧模式：停在开机页不自动前进，短按确认键才继续（见 ui_conf.h） */
-    (void)xTimer;
-    (void)m_boot_step;
-#else
-    m_boot_step++;
-    app_boot_advance(m_boot_step);
-
-    if(m_boot_step >= APP_BOOT_STEP_NUM)
-    {
-        xTimerStop(xTimer, 0);
-        app_manager_boot_end();
-    }
 #endif
 }
+
+#if (UI_CALIB_FRAME == 0)
+/**
+ * @brief 兜底：页面没能上报进度完成时，到点也切到主菜单
+ *
+ * 定时器任务上下文：只投递一条与页面同款的上报消息，不在此直接切页。
+ * `app_manager_boot_end()` 会走 app_do_switch（SD 目录刷新、NVS 落盘等），
+ * 那些开销不该出现在 Timer 服务任务里；投递后由 app_task 消费并切页。
+ */
+static void app_init_boot_fallback(TimerHandle_t xTimer)
+{
+    (void)xTimer;
+    sys_logw(APP_INIT_TAG, "boot page did not report done, fallback to menu");
+    (void)app_manager_post_ui_msg(APP_UI_REQ_BOOT_DONE, NULL, 0);
+}
+#endif
 
 static void app_init_input_short(void)
 {

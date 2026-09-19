@@ -112,8 +112,8 @@ typedef struct {
 #define APP_UI_REQ_SETTINGS_APPLY   (0x01)  // 上行：payload = [row(1)][value(1)]
 #define APP_UI_REQ_SETTINGS_SYNC    (0x02)  // 上行：无负载，请求下发起始快照（页面 create 时发出）
 #define APP_UI_REQ_STATUS_SYNC      (0x03)  // 上行：无负载，请求下发状态栏数据（页面 create 时发出）
+#define APP_UI_REQ_BOOT_DONE        (0x04)  // 上行：无负载，开机页进度走完，可以进主菜单了
 #define APP_UI_MSG_MENU_SEL         (0x11)  // 下行：payload = [选中索引(1)]
-#define APP_UI_MSG_BOOT_STEP        (0x12)  // 下行：payload = [步骤(1)]
 #define APP_UI_MSG_SETTINGS_SNAPSHOT (0x13) // 下行：payload = settings_snapshot_t
 #define APP_UI_MSG_STATUS           (0x14)  // 下行：payload = app_status_t
 

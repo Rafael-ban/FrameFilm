@@ -19,8 +19,10 @@ extern "C" {
 /* 资源槽位尺寸（资源规格）：SD 卡替换必须精确匹配这两组尺寸，固件不做缩放 */
 #define UI_ICON_W           (80)
 #define UI_ICON_H           (80)
-#define UI_BADGE_W          (176)
-#define UI_BADGE_H          (176)
+/* 徽章横向 304、纵向 272：由 tools/ui-assets/gen_ui_assets.py 按源图 icon1.png 的
+ * 宽高比（641:573）从 300 取整到 8 的倍数而得。改这里必须同步改脚本的 BADGE_W/H。 */
+#define UI_BADGE_W          (304)
+#define UI_BADGE_H          (272)
 
 /* SD 卡资源根目录与容器头长度（FFUI 容器，见 tools/ui-assets/gen_ui_assets.py） */
 #define UI_ASSET_ROOT       "/sdcard/app"

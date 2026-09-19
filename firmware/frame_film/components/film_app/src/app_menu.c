@@ -53,6 +53,8 @@
 #define ROW_HEADER_H        (14)     // SELECT APPLICATION --- 01 / 05
 #define CAROUSEL_H          (290)    // 轮播（比当前卡片高，给上下留呼吸）
 #define ROW_DOTS_H          (5)      // 指示点
+#define DOTS_CUR_W          (26)     // 当前项指示点宽（实心）
+#define DOTS_SIDE_W         (18)     // 其余指示点宽（描边）
 #define DOTS_PAD_TOP        (8)
 #define DOTS_PAD_BOT        (20)
 #define ROW_RULE_H          (1)
@@ -87,6 +89,7 @@ static const menu_item_t MENU_ITEMS[APP_MENU_ENTRY_NUM] = {
  * LOCAL VARIABLES
  */
 static lv_obj_t *m_carousel = NULL;   // 轮播容器（选中项变化时整块重建）
+static lv_obj_t *m_dots[APP_MENU_ENTRY_NUM] = {0};  // 指示点（选中项变化时改宽/填充）
 static lv_obj_t *m_idx_label = NULL;  // "03 / 05"
 static lv_obj_t *m_name_label = NULL; // ACTIVE 后面的 app 名
 static lv_obj_t *m_desc_label = NULL;
@@ -216,8 +219,21 @@ static void menu_rebuild_carousel(void)
 static void menu_apply_sel(void)
 {
     const menu_item_t *it = &MENU_ITEMS[m_sel];
+    uint8_t i;
 
     menu_rebuild_carousel();
+
+    /* 指示点：当前项 26x5 实心，其余 18x5 描边。宽度变化会影响 flex 重排，
+       所以"高亮"是改宽度 + 填充两件事，都要跟着 m_sel 走。 */
+    for(i = 0; i < APP_MENU_ENTRY_NUM; i++)
+    {
+        if(m_dots[i] == NULL)
+        {
+            continue;
+        }
+        lv_obj_set_width(m_dots[i], (i == m_sel) ? DOTS_CUR_W : DOTS_SIDE_W);
+        lv_obj_set_style_bg_opa(m_dots[i], (i == m_sel) ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+    }
 
     if(m_idx_label != NULL)
     {
@@ -324,14 +340,14 @@ static void menu_ui_create(lv_obj_t *root)
 
         lv_obj_remove_style_all(d);
         lv_obj_set_scrollable(d, false);
-        lv_obj_set_size(d, (i == m_sel) ? 26 : 18, ROW_DOTS_H);
+        lv_obj_set_size(d, (i == m_sel) ? DOTS_CUR_W : DOTS_SIDE_W, ROW_DOTS_H);
         lv_obj_set_style_border_width(d, 1, LV_PART_MAIN);
         lv_obj_set_style_border_color(d, lv_color_black(), LV_PART_MAIN);
-        if(i == m_sel)
-        {
-            lv_obj_set_style_bg_color(d, lv_color_black(), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(d, LV_OPA_COVER, LV_PART_MAIN);
-        }
+        /* 底色一律先写好，只靠 opa 开关填充：这样 menu_apply_sel() 里
+           来回切高亮时不用再设颜色 */
+        lv_obj_set_style_bg_color(d, lv_color_black(), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(d, (i == m_sel) ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+        m_dots[i] = d;
     }
 
     /* ---- 分隔线 ---- */
@@ -405,6 +421,7 @@ static void menu_ui_destroy(void)
     sys_logi(APP_MENU_TAG, "destroy menu page");
 
     m_carousel = NULL;
+    memset(m_dots, 0, sizeof(m_dots));
     m_idx_label = NULL;
     m_name_label = NULL;
     m_desc_label = NULL;

@@ -70,7 +70,7 @@ void ui_assets_release(void)                                { }
 #define UI_ASSET_BIN_NAME   "icon.bin"
 #define UI_ASSET_BADGE_NAME "badge.bin"
 
-#define UI_ASSET_MAX_ROW    (UI_BADGE_W / 8)   /* 最大行字节数（176/8 = 22） */
+#define UI_ASSET_MAX_ROW    (UI_BADGE_W / 8)   /* 最大行字节数（304/8 = 38） */
 
 /*********************************************************************
 * TYPEDEFS

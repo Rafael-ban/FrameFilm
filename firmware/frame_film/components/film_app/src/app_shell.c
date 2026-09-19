@@ -141,7 +141,7 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
         lv_obj_set_style_bg_opa(mark, LV_OPA_COVER, LV_PART_MAIN);
     }
     {
-        lv_obj_t *brand = shell_label(status, lv_color_black(), "FRAMEFILM");
+        lv_obj_t *brand = shell_label(status, lv_color_black(), "ENDFIELD");
 
         lv_obj_set_style_text_letter_space(brand, 1, LV_PART_MAIN);
     }

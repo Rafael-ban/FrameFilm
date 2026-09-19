@@ -38,21 +38,20 @@
 #include "ui_conf.h"    /* UI_CALIB_FRAME：上机标定帧开关 */
 #include "ui_ops.h"
 #include "app_shell.h"
+#include "app_manager.h"    /* app_manager_post_ui_msg：进度走完上报切页 */
 #include "app_boot.h"
 
 /*********************************************************************
  * MACROS
  */
 #define APP_BOOT_TAG        "app_boot"
-#define BOOT_SEG_NUM        (24)     // 进度条分段数
 
 /*********************************************************************
  * LOCAL VARIABLES
  */
-static lv_obj_t *m_seg[BOOT_SEG_NUM];
+static lv_obj_t *m_seg[APP_BOOT_SEG_NUM];
 static lv_obj_t *m_pct_label = NULL;
 static lv_obj_t *m_tele_ok[8] = {0};
-static lv_obj_t *m_bar_fill = NULL;
 
 /* 开机页不是 app（不参与切换、也没有 app 任务侧的 on_event），
    故状态栏取不到实时数据，保持初始的 "BAT --%" 与空指示块。
@@ -61,7 +60,11 @@ static app_shell_t m_shell;
 
 static app_boot_tele_t m_tele[8];
 static uint8_t m_tele_num = 0;
-static uint8_t m_step = 0;
+
+/* 进度：每次回调**只点亮一格**，保证一格一格走（见 app_boot.h 的节拍说明） */
+static lv_timer_t *m_prog_timer = NULL;
+static uint8_t m_seg_on = 0;      // 已点亮格数
+static uint8_t m_done_ticks = 0;  // 走满后的停留节拍数
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -200,7 +203,6 @@ static void boot_ui_create_calib(lv_obj_t *body)
 
 static void boot_ui_create(lv_obj_t *root);
 static void boot_ui_destroy(void);
-static void boot_ui_on_msg(uint32_t cmd, const void *data, uint8_t len);
 #if (UI_CALIB_FRAME == 1)
 static void boot_ui_create_calib(lv_obj_t *body);
 #endif
@@ -229,35 +231,78 @@ static lv_obj_t *boot_rule(lv_obj_t *parent)
 }
 
 /**
- * @brief 按步骤刷新进度条与遥测行的 OK/--
+ * @brief 按"已点亮格数"刷新进度条、百分比标签与遥测行的 OK/--
+ *
+ * 入参是**格数**而不是百分比：两者若来回换算（格数→pct→格数）会因为整除
+ * 丢精度，第 1 格要点亮时算出来的 on 仍是 0（如 16 格时 1 格 = 6%，
+ * 16×6/100 = 0），看起来像"卡了一格才动"。
+ *
+ * @param seg_on 已点亮格数 0~APP_BOOT_SEG_NUM
  */
-static void boot_apply_step(void)
+static void boot_apply_progress(uint8_t seg_on)
 {
-    uint8_t on = (uint8_t)((uint32_t)BOOT_SEG_NUM * m_step / APP_BOOT_STEP_NUM);
+    uint32_t pct;
     uint8_t i;
 
-    for(i = 0; i < BOOT_SEG_NUM; i++)
+    if(seg_on > APP_BOOT_SEG_NUM)
+    {
+        seg_on = APP_BOOT_SEG_NUM;
+    }
+    pct = (uint32_t)seg_on * 100u / APP_BOOT_SEG_NUM;
+
+    for(i = 0; i < APP_BOOT_SEG_NUM; i++)
     {
         if(m_seg[i] == NULL)
         {
             continue;
         }
         lv_obj_set_style_bg_color(m_seg[i], lv_color_black(), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(m_seg[i], (i < on) ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(m_seg[i], (i < seg_on) ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
     }
 
     if(m_pct_label != NULL)
     {
-        lv_label_set_text_fmt(m_pct_label, "%u%%", (unsigned)(on * 100u / BOOT_SEG_NUM));
+        lv_label_set_text_fmt(m_pct_label, "%u%%", (unsigned)pct);
     }
 
     for(i = 0; i < m_tele_num && i < 8; i++)
     {
         if(m_tele_ok[i] != NULL)
         {
-            /* 第 i 步完成即该项 OK：单调推进，不回退 */
-            lv_label_set_text(m_tele_ok[i], (m_step > i) ? "OK" : "--");
+            /* 各项依次点亮：单调推进，不回退 */
+            uint32_t due = (uint32_t)(i + 1) * 100u / (uint32_t)m_tele_num;
+
+            lv_label_set_text(m_tele_ok[i], (pct >= due) ? "OK" : "--");
         }
+    }
+}
+
+/**
+ * @brief 进度推进回调（ui_task 上下文）
+ *
+ * 每次回调**只点亮一格**，且节拍（APP_BOOT_STEP_MS）不小于 mono 单帧耗时，
+ * 所以画面上永远是一格一格走，不会一次跳两格。
+ * 走满后停留 APP_BOOT_DONE_HOLD_TICKS 个节拍，再上报"可以进主菜单"——由**页面**决定切页
+ * 时机，而不是在 app_init 里用一个固定延时去猜首帧清场那 ~3.3s。
+ */
+static void boot_prog_cb(lv_timer_t *timer)
+{
+    (void)timer;
+
+    if(m_seg_on < APP_BOOT_SEG_NUM)
+    {
+        m_seg_on++;
+        boot_apply_progress(m_seg_on);
+        return;
+    }
+
+    m_done_ticks++;
+    if(m_done_ticks >= APP_BOOT_DONE_HOLD_TICKS)
+    {
+        /* 先删定时器再上报：避免上报后到切页之间又触发一轮 */
+        lv_timer_delete(m_prog_timer);
+        m_prog_timer = NULL;
+        (void)app_manager_post_ui_msg(APP_UI_REQ_BOOT_DONE, NULL, 0);
     }
 }
 
@@ -269,6 +314,10 @@ static void boot_ui_create(lv_obj_t *root)
     lv_obj_t *segs;
     lv_obj_t *tele_box;
     uint8_t i;
+    /* 徽章尺寸来自资源规格（ui_assets.h 的 UI_BADGE_W/H），下面所有内容的 y 都从
+       徽章底部推算，换徽章尺寸时只改资源规格即可，不用逐个挪坐标 */
+    const int32_t badge_top = 44;
+    const int32_t badge_bot = badge_top + (int32_t)UI_BADGE_H;
 
     sys_logi(APP_BOOT_TAG, "create boot page, %u telemetry lines", (unsigned)m_tele_num);
 
@@ -314,25 +363,25 @@ static void boot_ui_create(lv_obj_t *root)
     {
         lv_image_set_src(badge, src);
     }
-    lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, badge_top);
 
     /* ---- 品牌字标 ---- */
     {
-        lv_obj_t *brand = boot_label(body, &lv_font_montserrat_48, lv_color_black(), "FRAMEFILM");
+        lv_obj_t *brand = boot_label(body, &lv_font_montserrat_48, lv_color_black(), "ARKNIGHTS");
 
         lv_obj_set_style_text_letter_space(brand, 6, LV_PART_MAIN);
-        lv_obj_align(brand, LV_ALIGN_TOP_MID, 0, 232);
+        lv_obj_align(brand, LV_ALIGN_TOP_MID, 0, badge_bot + 12);
     }
     {
         lv_obj_t *r = boot_rule(body);
 
-        lv_obj_set_pos(r, 60, 300);
+        lv_obj_set_pos(r, 60, badge_bot + 80);
         lv_obj_set_width(r, 320);
     }
     {
         lv_obj_t *sub = boot_label(body, &lv_font_unscii_8, lv_color_black(), "COLOR E-PAPER TERMINAL");
 
-        lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, 312);
+        lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, badge_bot + 92);
     }
 
     /* ---- 分段进度条 ---- */
@@ -340,10 +389,10 @@ static void boot_ui_create(lv_obj_t *root)
     lv_obj_remove_style_all(segs);
     lv_obj_set_scrollable(segs, false);
     lv_obj_set_size(segs, LV_PCT(100), 10);
-    lv_obj_set_pos(segs, 0, 356);
+    lv_obj_set_pos(segs, 0, badge_bot + 136);
     lv_obj_set_flex_flow(segs, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(segs, 2, LV_PART_MAIN);
-    for(i = 0; i < BOOT_SEG_NUM; i++)
+    for(i = 0; i < APP_BOOT_SEG_NUM; i++)
     {
         lv_obj_t *s = lv_obj_create(segs);
 
@@ -362,7 +411,7 @@ static void boot_ui_create(lv_obj_t *root)
         lv_obj_remove_style_all(row);
         lv_obj_set_scrollable(row, false);
         lv_obj_set_size(row, LV_PCT(100), 14);
-        lv_obj_set_pos(row, 0, 372);
+        lv_obj_set_pos(row, 0, badge_bot + 152);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         boot_label(row, &lv_font_unscii_8, lv_color_black(), "SYSTEM INIT");
@@ -382,7 +431,7 @@ static void boot_ui_create(lv_obj_t *root)
     lv_obj_remove_style_all(tele_box);
     lv_obj_set_scrollable(tele_box, false);
     lv_obj_set_size(tele_box, LV_PCT(100), 120);
-    lv_obj_set_pos(tele_box, 0, 400);
+    lv_obj_set_pos(tele_box, 0, badge_bot + 180);
     for(i = 0; i < m_tele_num && i < 8; i++)
     {
         int32_t y = (int32_t)i * 22;
@@ -395,16 +444,26 @@ static void boot_ui_create(lv_obj_t *root)
         lv_obj_align(m_tele_ok[i], LV_ALIGN_TOP_RIGHT, 0, y);
     }
 
-    boot_apply_step();
+    /* 进度：从 0 起，之后每 APP_BOOT_STEP_MS 点亮一格（见 boot_prog_cb） */
+    m_seg_on = 0;
+    m_done_ticks = 0;
+    boot_apply_progress(0);
+    m_prog_timer = lv_timer_create(boot_prog_cb, APP_BOOT_STEP_MS, NULL);
 }
 
 static void boot_ui_destroy(void)
 {
+    /* 页面内定时器必须在这里删掉：它挂在已销毁的控件上，不删会野指针 */
+    if(m_prog_timer != NULL)
+    {
+        lv_timer_delete(m_prog_timer);
+        m_prog_timer = NULL;
+    }
+
     memset(m_seg, 0, sizeof(m_seg));
     memset(m_tele_ok, 0, sizeof(m_tele_ok));
     memset(&m_shell, 0, sizeof(m_shell));
     m_pct_label = NULL;
-    m_bar_fill = NULL;
     sys_logi(APP_BOOT_TAG, "destroy boot page");
 }
 
@@ -414,7 +473,7 @@ static void boot_ui_destroy(void)
 static const app_ui_ops_t g_boot_ui_ops = {
     .create  = boot_ui_create,
     .destroy = boot_ui_destroy,
-    .on_msg  = boot_ui_on_msg,
+    .on_msg  = NULL,     // 进度由页面内定时器自走，不需要外部投消息
     .on_key  = NULL,
 };
 
@@ -431,28 +490,4 @@ void app_boot_set_telemetry(const app_boot_tele_t *items, uint8_t count)
     }
     memcpy(m_tele, items, sizeof(app_boot_tele_t) * count);
     m_tele_num = count;
-}
-
-void app_boot_advance(uint8_t step)
-{
-    if(step > APP_BOOT_STEP_NUM)
-    {
-        step = APP_BOOT_STEP_NUM;
-    }
-    /* 本函数由 app_init 在 app_task 调用，**不能直接碰 lv_***：
-       投递给 ui_task，由页面的 on_msg 落地 */
-    (void)ui_core_post(APP_UI_MSG_BOOT_STEP, &step, 1);
-}
-
-static void boot_ui_on_msg(uint32_t cmd, const void *data, uint8_t len)
-{
-    if(cmd == APP_UI_MSG_BOOT_STEP && data != NULL && len >= 1)
-    {
-        m_step = ((const uint8_t *)data)[0];
-        if(m_step > APP_BOOT_STEP_NUM)
-        {
-            m_step = APP_BOOT_STEP_NUM;
-        }
-        boot_apply_step();
-    }
 }

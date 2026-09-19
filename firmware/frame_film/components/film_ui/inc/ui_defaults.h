@@ -22,7 +22,7 @@ extern const uint8_t ui_def_icon_animation[800];
 /* 80x80, 800 B */
 extern const uint8_t ui_def_icon_settings[800];
 
-/* 176x176, 3872 B */
-extern const uint8_t ui_def_badge[3872];
+/* 304x272, 10336 B */
+extern const uint8_t ui_def_badge[10336];
 
 #endif /* __UI_DEFAULTS_H__ */

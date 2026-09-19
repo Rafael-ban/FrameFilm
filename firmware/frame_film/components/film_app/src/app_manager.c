@@ -384,9 +384,14 @@ static void app_handle_event(const app_event_t *e)
        并在 app_do_switch() 里结束开机画面。 */
     if(m_boot_page)
     {
+        /* 开机页走完进度后由**页面**上报可以切页（时序见 app_boot.h） */
+        if(e->type == APP_EVT_UI_MSG && e->cmd == APP_UI_REQ_BOOT_DONE)
+        {
+            app_manager_boot_end();
+        }
 #if (UI_CALIB_FRAME == 1)
         /* 标定帧模式下开机页不自动前进，短按确认键手动进主菜单（见 ui_conf.h） */
-        if(e->type == APP_EVT_INPUT && e->input == INPUT_PRESS_SHORT)
+        else if(e->type == APP_EVT_INPUT && e->input == INPUT_PRESS_SHORT)
         {
             app_manager_boot_end();
         }

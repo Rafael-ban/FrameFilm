@@ -42,8 +42,8 @@
 #define BUTTON_TAG                        "HAL_BUTTON"
 
 #if FRAMEFILM_PRO == 1
-#define BUTTON_PIN_UP                     (4)    // 上/右按键
-#define BUTTON_PIN_DOWN                   (6)    // 下/左按键
+#define BUTTON_PIN_UP                     (6)    // 上/右按键
+#define BUTTON_PIN_DOWN                   (4)    // 下/左按键
 #define BUTTON_PIN_CONFIRM                (5)    // 确认按键
 #define BUTTON_ACTIVE_LEVEL               (0)    // 按键激活电平为低电平
 #endif
