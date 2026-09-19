@@ -206,7 +206,7 @@ app_id_t app_manager_get_current(void);
 它不像图片 app 那样是"被切进去的内容"，而是所有内容 app 的入口：
 
 ```
-BOOT 页 ──2.5s 自检步进──→ [MENU] ──上/下──→ 换高亮项（下标下发 UI 页重绘）
+BOOT 页 ──8s（进度条在页面内自走）──→ [MENU] ──上/下──→ 换高亮项（下标下发 UI 页重绘）
                               │  确认键 → app_do_switch(m_menu_entries[m_menu_sel])
                               │
   [IMAGE/TEMPLATE/CLOCK/ANIMATION/SETTINGS] ──长按确认键──→ [MENU]
