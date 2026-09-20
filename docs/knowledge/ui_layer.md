@@ -742,6 +742,11 @@ static void clock_timer_cb(lv_timer_t *t)
     - 查询只放在 `hal_pwr`（`hal_pwr_wake_condition_met()`，读的就是 `hal_pwr_enter_sleep()` 里 ext0 配的那路 GPIO），**输入驱动零改动**：按键库回答不了这个问题 —— PRO/MAX 现在没注册 press/release 事件，STD 的库虽有 `RE_ET_BTN_RELEASED` 但 `hal_encoder.c` 的映射表把它丢了，而 HAL 里现成那份 `button_pressed` 在长按上报时就被置 false（此刻手指还在键上）
     - 低功耗仍走 monitor 任务既有路径：新增 `service_monitor_request_sleep()` + `MSG_ENTER_SLEEP`，只投消息，deinit + `hal_pwr_enter_sleep()` 都在 monitor 任务里做
 13. **待上机验证**：见 §12 —— SPI 40MHz 稳定性、I1 渲染质量；并回归图片/模板/动图/时钟/设置页与主菜单来回切换（含长按退出的残影表现）、以及主菜单长按休眠 → 按 ENTER 唤醒的完整往返。
+14. **主菜单优化轮（2026-09-19）**：✅ 已完成
+    - **状态栏三档**（`app_shell`）：关闭 → 整项隐藏（`LV_OBJ_FLAG_HIDDEN`，隐藏的 flex 子项不占位）；已开启 → 文字 + 空框；已连接 → 文字 + 实心框。连接态来自 `service_wifi_get_connect_status()` / `service_ble_gatts_get_connect()`，只在 **create 与换选中项**时同步（1-bit 每次更新都是全帧 + 闪，不做周期刷新）。设置页复用快照，`settings_snapshot_t` 补了 `wifi_conn` / `bt_conn` 两字节
+    - **蓝牙开关对齐 WiFi**：`service_ble_init()` 在 `ble_enable == 0` 时跳过（原来无条件初始化）；新增 `service_ble_apply_enable()` 供设置页与心跳下发做运行期起停（关 = disconnect + `gatt_server_uninit`，开 = `gatt_server_reinit`；只有从未拉起过才整栈 init，因为 `uninit` 不关 bluedroid）
+    - **进入前预检**：`app_entry_t.enter_block_reason`（返回 NULL 才可进入）。图片/动图目录为空时原本 `on_enter` 只打日志不绘制 → 切过去屏幕停在上一帧，像"已经进去了"。现在 `app_do_switch()` 里在 `service_file_set_dir_sync()` 之后、`app_stop_current()` 之前判；不通过则还原目录并原路退回，原因经 `APP_UI_MSG_MENU_NOTICE` 显示在菜单面板下方的留白里（换选中项 / 离开菜单即作废）
+    - **选中卡片左下角切角**：设计稿是 9×9 的 45° 拉削（`.chamfer-bl`）。`lv_obj_set_style_clip_corner()` 对 radius=0 的方角没有任何效果（原来那行等于没写），而 LVGL 边框宽度是全边统一的、也没有 `clip-path`；改为程序生成一张 9×9 白三角 L8 位图（`0xFF` 白 / `0x00` 黑，与 ui_assets 的 L8 约定一致），挂在**轮播容器**下用 `LV_OBJ_FLAG_IGNORE_LAYOUT` 自己定位 —— 卡片的子对象会被裁到内容区（3px 描边之内），盖不住外角
 
 > 时间源（§10.4）本次**未实现**：`app_clock.c` 仍直接使用 `time()`，设备重启后时间需依赖后续的
 > SNTP / 蓝牙校时 + RTC 兜底补齐。这是本次改造遗留的已知缺口。

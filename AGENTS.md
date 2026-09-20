@@ -160,6 +160,8 @@ film_service → film_hal → film_sys → ESP-IDF
 11. **不要在 ui_task 里读写 `g_service_param` / 电池 / WiFi / SD** — 那些没有跨任务保证。设置页只上报 `[行号, 候选下标]`，由 `settings_on_event()` 在 app 任务侧校验、写参数、落盘，再把整页快照回投给页面
 12. **不要在唤醒条件还成立的时候进 deep sleep** — ext0 是**电平**触发（`hal_pwr.c`，STD/PRO = GPIO5 低有效、MAX = GPIO13 高有效）。长按是**按住期间**上报的，那一刻唤醒脚必然还满足条件 → 按着断电会当场醒回来（表现为"长按后闪一下就恢复"）。`app_sleep_run()` 入睡前要同时满足两件事，**缺一不可**：① `hal_pwr_wake_condition_met()` 为 false（等手指抬起）——它只会让入睡更晚、不会更早，是叠加项；② 距切页已过 **4s**（`SP_DRAW_WAIT_MS`）——`ui_core_page_enter()` 是异步的，**没有回调能告诉你"第一帧已上屏"**，只能按时间兜。这个值**不要**按"单帧 940ms"去推：上机实测 2s 不够（卡还没刷出来就断电，屏幕停在旧画面/半张卡），换页后第一次上屏的耗时明显大于稳态单帧。**EPD 挂在外设供电轨上，断电即停在半途**。别用按键库自己的状态顶替 ①：PRO/MAX 现在根本没发 press/release 事件，STD 的库虽有 `RE_ET_BTN_RELEASED` 但 HAL 的映射表把它丢了，而 HAL 里那份 `button_pressed` 在长按上报时就被置 false（手指还在键上）
 13. **不要假设"长按"在菜单里有别的含义** — 各 app 的长按是"回主菜单"，菜单是调度器的根、它的长按专门留给手动休眠；改这块时别把两条语义搅在一起
+14. **不要让 app 在"进不去"的状态下被切过去** — 图片/动图目录为空时它们的 `on_enter` 只打日志、不绘制，切过去屏幕会停在上一帧，用户会以为已经进到那个 app 了（切换还会先把面板停一次、白闪一帧）。改用 `app_entry_t.enter_block_reason` 预检：返回 NULL 才切，否则放弃切换并把原因经 `APP_UI_MSG_MENU_NOTICE` 显示在主菜单面板下方那块留白里。预检的调用点必须在 `app_do_switch()` 里 `service_file_set_dir_sync()` **之后**（文件列表是异步刷新的，早于它就问不准），也必须在 `app_stop_current()` 之前（那之前的退回是无副作用的，只需把目录还原）
+15. **不要在关闭状态下初始化蓝牙** — `service_ble_init()` 与 WiFi 同款：`ble_enable == 0` 直接跳过，不拉协议栈。运行期开关走 `service_ble_apply_enable()`（关 = disconnect + `gatt_server_uninit`；开 = 栈若活着就 `gatt_server_reinit`，只有从未拉起过才整栈 init）。设置页与心跳下发两条路径都用它，别只改参数
 
 ## BLE 协议速览
 
