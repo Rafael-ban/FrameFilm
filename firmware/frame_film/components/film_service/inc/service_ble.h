@@ -145,6 +145,15 @@ typedef struct
  * GLOBAL FUNCTIONS
  */
 extern void service_ble_init(void);
+
+/**
+ * @brief 蓝牙开关：运行期起停协议栈（参考 WiFi 的开关语义）
+ *
+ * 关：停广播并注销服务；开：重新注册并恢复广播（从未拉起过则整栈初始化）。
+ * 与 service_ble_init() 一致：**不开启就不初始化**。
+ * 内部会写 g_service_param.ble.ble_enable，但**不落盘**，调用方自行 service_param_save()。
+ */
+extern void service_ble_apply_enable(uint8_t on);
 extern void service_ble_msg_send(void *p_msg, bool in_isr);
 extern void service_ble_msg_gatts_cmd_send( uint8_t const *p_data, uint16_t len );
 extern void service_ble_msg_gatts_data_send( uint8_t const *p_data, uint16_t len, uint8_t ch);

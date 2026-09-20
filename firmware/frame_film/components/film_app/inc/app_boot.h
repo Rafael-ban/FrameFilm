@@ -41,7 +41,7 @@ typedef struct {
  * 改这里就等于改开机页时长：16 格 × 900ms ≈ 15s，加上首帧清场那 ~3.3s ≈ 18s。 */
 #define APP_BOOT_SEG_NUM        (16)    // 进度条格数
 #define APP_BOOT_STEP_MS        (900)   // 每格节拍（≈ 单帧耗时，保证一格一格走）
-#define APP_BOOT_DONE_HOLD_TICKS (1)    // 走满后停留几个节拍（让 100% 被看清）
+#define APP_BOOT_DONE_HOLD_TICKS (0)    // 走满后停留几个节拍（让 100% 被看清）
 
 /* 兜底超时：正常路径由**页面**走完进度后上报（APP_UI_REQ_BOOT_DONE），
  * 这个定时器只在页面没能上报时（构建/渲染失败等）保证不把用户卡在开机页。

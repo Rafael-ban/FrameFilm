@@ -44,6 +44,8 @@ typedef struct {
     char    storage[24];    // "23 FILM / 1.2G FREE"
     char    fw[24];         // "1.0.0  SN 000001"
     uint8_t bat_pct;        // 电量条填充百分比
+    uint8_t wifi_conn;      // WiFi 已连接 0/1（状态栏第二档：开启=空框、连接=实心）
+    uint8_t bt_conn;        // 蓝牙已连接 0/1
 
     /* 可操作项当前值 */
     uint8_t sleep_mode;     // 0/1

@@ -63,6 +63,14 @@
 #define ROW_SPACER_H        (16)
 #define ROW_PANEL_H         (68)     // APP/ENTRY 面板
 
+/* 进入失败提示：画在面板下方那块留白里（正文总高 626，上面这些行只占 509）。
+   默认隐藏，隐藏时 flex 不占位，故不影响其它行的排布。 */
+#define ROW_NOTICE_H        (34)
+#define NOTICE_MARGIN_TOP   (18)
+#define NOTICE_TAG_W        (62)
+#define NOTICE_TAG_H        (22)
+#define NOTICE_TEXT_MAX     (48)
+
 /* 轮播卡片：侧卡 132x200、当前卡 178x238、间距 10。
  * 5 张卡片总宽 746 > 屏宽，两侧被容器边界裁掉——这正是设计稿"继续延伸"的观感。 */
 #define PLATE_CUR_W         (178)
@@ -71,6 +79,12 @@
 #define PLATE_SIDE_H        (200)
 #define PLATE_GAP           (10)
 #define PLATE_SPAN          (2)      // 当前项左右各画 2 张（共 5 张，正好覆盖全部条目）
+
+/* 当前卡片在轮播容器里的位置：5 张共 746 宽 > 屏宽，"居中"排布后超出部分向两侧溢出，
+   于是当前卡（178 宽）正好水平居中；垂直也居中于容器。切角要从这里算。 */
+#define PLATE_CUR_LEFT      ((SHELL_W - PLATE_CUR_W) / 2)
+#define PLATE_CUR_BOTTOM    ((CAROUSEL_H + PLATE_CUR_H) / 2)
+#define PLATE_CHAMFER       (9)      // 左下角 45° 切角边长（设计稿 .chamfer-bl）
 
 /*********************************************************************
  * CONSTANTS
@@ -95,8 +109,14 @@ static lv_obj_t *m_name_label = NULL; // ACTIVE 后面的 app 名
 static lv_obj_t *m_desc_label = NULL;
 static lv_obj_t *m_panel_line1 = NULL;
 static lv_obj_t *m_panel_line2 = NULL;
+static lv_obj_t *m_notice_row = NULL;   // 进入失败提示整行（默认隐藏）
+static lv_obj_t *m_notice_label = NULL;
 static app_shell_t m_shell;           // 顶部状态栏（电量/WiFi/蓝牙）的动态控件
 static uint8_t   m_sel = 0;
+
+/* 选中卡片左下角的切角。位图是一次算好后常驻的，不随选择变化。 */
+static uint8_t m_chamfer_l8[PLATE_CHAMFER * PLATE_CHAMFER];
+static lv_image_dsc_t m_chamfer_dsc;
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -104,6 +124,8 @@ static uint8_t   m_sel = 0;
 static void menu_ui_create(lv_obj_t *root);
 static void menu_ui_destroy(void);
 static void menu_ui_on_msg(uint32_t cmd, const void *data, uint8_t len);
+static void menu_notice_clear(void);
+static void menu_notice_set(const void *data, uint8_t len);
 
 /* 统一的小工具：本工程是 1-bit 面板，颜色只有黑/白，故一切颜色显式指定，
    不依赖主题的中间灰（I1 下中间灰会被亮度阈值化，结果不可预期）。 */
@@ -155,8 +177,9 @@ static lv_obj_t *menu_make_plate(lv_obj_t *parent, uint8_t idx, int cur)
     {
         lv_obj_set_style_bg_color(plate, lv_color_black(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(plate, LV_OPA_COVER, LV_PART_MAIN);
-        /* 选中项左下角切一刀（终末地的"切削"语汇） */
-        lv_obj_set_style_clip_corner(plate, true, LV_PART_MAIN);
+        /* 选中项左下角要削一刀（终末地的"切削"语汇）。
+           LVGL 没有 clip-path、边框宽度也是全边统一的，做不出"只削一个角"，
+           故切角是另画的一张位图 —— 见 menu_plate_chamfer() */
     }
 
     /* 左上角编号 */
@@ -189,6 +212,51 @@ static lv_obj_t *menu_make_plate(lv_obj_t *parent, uint8_t idx, int cur)
 }
 
 /**
+ * @brief 给选中卡片补上左下角 45° 的切角
+ *
+ * LVGL 的边框宽度是全边统一的、也没有 clip-path，做不出"只削一个角"；所以这里
+ * 造一张白三角位图盖在那个角上：三角外填黑，与卡片底色融为一体，只有三角是"切掉"的。
+ *
+ * 它挂在**轮播容器**下而不是卡片下 —— 卡片的子对象会被裁到内容区（3px 描边之内），
+ * 盖不住外角。加在所有卡片之后，保证画在最上层。
+ */
+static void menu_plate_chamfer(void)
+{
+    lv_obj_t *img;
+    int x, y;
+
+    if(m_carousel == NULL)
+    {
+        return;
+    }
+
+    /* L8 用亮度直接表达黑白（0x00 = 黑、0xFF = 白），与 ui_assets 的图标同一约定 */
+    if(m_chamfer_dsc.data == NULL)
+    {
+        for(y = 0; y < PLATE_CHAMFER; y++)
+        {
+            for(x = 0; x < PLATE_CHAMFER; x++)
+            {
+                /* 45° 对角线以下（含）为白：被"切掉"的就是这块 */
+                m_chamfer_l8[y * PLATE_CHAMFER + x] = (y >= x) ? 0xFF : 0x00;
+            }
+        }
+        m_chamfer_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+        m_chamfer_dsc.header.cf = LV_COLOR_FORMAT_L8;
+        m_chamfer_dsc.header.w = PLATE_CHAMFER;
+        m_chamfer_dsc.header.h = PLATE_CHAMFER;
+        m_chamfer_dsc.header.stride = PLATE_CHAMFER;
+        m_chamfer_dsc.data_size = PLATE_CHAMFER * PLATE_CHAMFER;
+        m_chamfer_dsc.data = m_chamfer_l8;
+    }
+
+    img = lv_image_create(m_carousel);
+    lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);   // 不参与 flex 排布，自己定位
+    lv_image_set_src(img, &m_chamfer_dsc);
+    lv_obj_set_pos(img, PLATE_CUR_LEFT, PLATE_CUR_BOTTOM - PLATE_CHAMFER);
+}
+
+/**
  * @brief 重建轮播：当前项 ±PLATE_SPAN，循环取模
  *
  * 5 个条目取 ±2 正好覆盖全部（不重复），故不需要"两端空位"——
@@ -211,6 +279,50 @@ static void menu_rebuild_carousel(void)
 
         menu_make_plate(m_carousel, idx, (off == 0) ? 1 : 0);
     }
+
+    menu_plate_chamfer();   // 必须在最后：切角要盖在卡片之上
+}
+
+/**
+ * @brief 清除"进入失败"提示
+ */
+static void menu_notice_clear(void)
+{
+    if(m_notice_row != NULL)
+    {
+        lv_obj_add_flag(m_notice_row, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/**
+ * @brief 显示"进入失败"提示（切页/换选中项即作废，见 menu_apply_sel）
+ *
+ * 载荷是 app 给出的原因（如 "NO FILM IN /sdcard/animation"），页面补上前缀
+ * "<app 名> - "；长度按 NOTICE_TEXT_MAX 截断，超出部分宁可丢字也不越界。
+ */
+static void menu_notice_set(const void *data, uint8_t len)
+{
+    char buf[NOTICE_TEXT_MAX];
+    uint32_t n;
+
+    if(m_notice_row == NULL || m_notice_label == NULL)
+    {
+        return;
+    }
+    if(data == NULL || len == 0)
+    {
+        menu_notice_clear();
+        return;
+    }
+
+    n = snprintf(buf, sizeof(buf), "%s - %.*s",
+                 MENU_ITEMS[m_sel].name, (int)len, (const char *)data);
+    if(n >= sizeof(buf))
+    {
+        sys_logw(APP_MENU_TAG, "notice truncated (%u chars)", (unsigned)n);
+    }
+    lv_label_set_text(m_notice_label, buf);
+    lv_obj_remove_flag(m_notice_row, LV_OBJ_FLAG_HIDDEN);
 }
 
 /**
@@ -220,6 +332,9 @@ static void menu_apply_sel(void)
 {
     const menu_item_t *it = &MENU_ITEMS[m_sel];
     uint8_t i;
+
+    /* 换了选中项，上一条"进入失败"提示就指向别人了 —— 作废 */
+    menu_notice_clear();
 
     menu_rebuild_carousel();
 
@@ -257,6 +372,11 @@ static void menu_apply_sel(void)
     {
         lv_label_set_text_fmt(m_panel_line2, "ENTRY %s", it->entry);
     }
+
+    /* 状态栏顺手刷一次：换选中项本来就要整屏重绘，这次请求不额外付刷新代价。
+       （1-bit 面板每次更新都是全帧 + 闪一下，所以状态栏不做周期刷新，只在交互点同步；
+         页面 create 也会走到这里，故不必在别处再请求一次。） */
+    app_shell_request_status();
 }
 
 /*********************************************************************
@@ -410,10 +530,30 @@ static void menu_ui_create(lv_obj_t *root)
     m_panel_line2 = menu_label(panel, &lv_font_unscii_8, lv_color_black(), "");
     lv_obj_set_pos(m_panel_line2, 0, 22);
 
-    menu_apply_sel();
+    /* ---- 进入失败提示：面板下方的留白处，默认隐藏 ---- */
+    m_notice_row = lv_obj_create(stack);
+    lv_obj_remove_style_all(m_notice_row);
+    lv_obj_set_scrollable(m_notice_row, false);
+    lv_obj_set_size(m_notice_row, CONTENT_W, ROW_NOTICE_H);
+    lv_obj_set_style_margin_top(m_notice_row, NOTICE_MARGIN_TOP, LV_PART_MAIN);
+    lv_obj_set_flex_flow(m_notice_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(m_notice_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(m_notice_row, 12, LV_PART_MAIN);
+    {
+        /* 黑底反白标签，与 ACTIVE 那个同一套语汇：状态由实心块承载 */
+        lv_obj_t *tag = lv_obj_create(m_notice_row);
 
-    /* 状态栏的电量/WiFi/蓝牙由 app 任务侧采集后回投（页面不读服务层） */
-    app_shell_request_status();
+        lv_obj_remove_style_all(tag);
+        lv_obj_set_scrollable(tag, false);
+        lv_obj_set_size(tag, NOTICE_TAG_W, NOTICE_TAG_H);
+        lv_obj_set_style_bg_color(tag, lv_color_black(), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(tag, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_center(menu_label(tag, &lv_font_unscii_8, lv_color_white(), "FAILED"));
+
+        m_notice_label = menu_label(m_notice_row, &lv_font_unscii_8, lv_color_black(), "");
+    }
+
+    menu_apply_sel();
 }
 
 static void menu_ui_destroy(void)
@@ -427,18 +567,28 @@ static void menu_ui_destroy(void)
     m_desc_label = NULL;
     m_panel_line1 = NULL;
     m_panel_line2 = NULL;
+    m_notice_row = NULL;
+    m_notice_label = NULL;
     memset(&m_shell, 0, sizeof(m_shell));
 }
 
 static void menu_ui_on_msg(uint32_t cmd, const void *data, uint8_t len)
 {
+    if(cmd == APP_UI_MSG_MENU_NOTICE)
+    {
+        /* 进入失败的原因（app 给文案，页面补 app 名）。空负载 = 清除 */
+        menu_notice_set(data, len);
+        return;
+    }
+
     if(cmd == APP_UI_MSG_MENU_SEL && data != NULL && len >= 1)
     {
         uint8_t sel = ((const uint8_t *)data)[0];
 
         if(sel < APP_MENU_ENTRY_NUM)
         {
-            /* 与 app_manager 的选择索引对齐：值相同也要落一次（初次进入） */
+            /* 与 app_manager 的选择索引对齐：值相同也要落一次（初次进入）。
+               提示的作废在 menu_apply_sel() 里统一处理 */
             m_sel = sel;
             menu_apply_sel();
         }

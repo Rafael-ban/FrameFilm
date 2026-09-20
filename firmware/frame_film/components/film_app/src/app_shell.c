@@ -33,6 +33,8 @@
 #include "sys_log.h"
 #include "hal_bat.h"
 #include "service_param.h"
+#include "service_wifi.h"      /* WiFi 连接状态（状态栏第二档） */
+#include "service_ble_gatts.h" /* 蓝牙连接状态 */
 
 #include "ui_core.h"
 #include "app_shell.h"
@@ -70,9 +72,12 @@ static void shell_spacer(lv_obj_t *parent)
 }
 
 /**
- * @brief 状态指示块（9x9 描边方块；ON 时实心）
+ * @brief 状态指示块（9x9 方块）
  *
- * 1-bit 面板没有灰度，"亮/暗"只能靠"实心/描边"表达。
+ * 1-bit 面板没有灰度，"亮/暗"只能靠"实心/描边"表达。三档状态：
+ *   关闭   → 整项（文字 + 方块）都不显示
+ *   已开启 → 文字 + 空框（描边）
+ *   已连接 → 文字 + 实心框
  */
 static lv_obj_t *shell_pip(lv_obj_t *parent)
 {
@@ -88,12 +93,36 @@ static lv_obj_t *shell_pip(lv_obj_t *parent)
     return p;
 }
 
-static void shell_pip_set(lv_obj_t *pip, int on)
+/**
+ * @brief 落一个指示项的三档状态（文字 + 方块一起管）
+ */
+static void shell_ind_set(lv_obj_t *label, lv_obj_t *pip, uint8_t on, uint8_t conn)
 {
-    if(pip != NULL)
+    if(label != NULL)
     {
-        lv_obj_set_style_bg_opa(pip, on ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+        /* 用 HIDDEN 而不是透明：隐藏的 flex 子项不占位，关闭时右侧直接收成 "BAT 82%" */
+        if(on)
+        {
+            lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
+        }
+        else
+        {
+            lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+        }
     }
+    if(pip == NULL)
+    {
+        return;
+    }
+
+    if(!on)
+    {
+        lv_obj_add_flag(pip, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    lv_obj_remove_flag(pip, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_bg_opa(pip, conn ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
 }
 
 /*********************************************************************
@@ -113,7 +142,9 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
     {
         out->bat_label = NULL;
         out->bat_pip = NULL;
+        out->wifi_label = NULL;
         out->wifi_pip = NULL;
+        out->bt_label = NULL;
         out->bt_pip = NULL;
     }
 
@@ -149,19 +180,23 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
     {
         lv_obj_t *bat = shell_label(status, lv_color_black(), "BAT --%");
         lv_obj_t *bat_pip = shell_pip(status);
+        lv_obj_t *wifi_label;
         lv_obj_t *wifi_pip;
+        lv_obj_t *bt_label;
         lv_obj_t *bt_pip;
 
-        shell_label(status, lv_color_black(), "WIFI");
+        wifi_label = shell_label(status, lv_color_black(), "WIFI");
         wifi_pip = shell_pip(status);
-        shell_label(status, lv_color_black(), "BT");
+        bt_label = shell_label(status, lv_color_black(), "BT");
         bt_pip = shell_pip(status);
 
         if(out != NULL)
         {
             out->bat_label = bat;
             out->bat_pip = bat_pip;
+            out->wifi_label = wifi_label;
             out->wifi_pip = wifi_pip;
+            out->bt_label = bt_label;
             out->bt_pip = bt_pip;
         }
     }
@@ -199,9 +234,13 @@ void app_shell_apply(app_shell_t *s, const app_status_t *st)
     {
         lv_label_set_text_fmt(s->bat_label, "BAT %u%%", (unsigned)st->bat_pct);
     }
-    shell_pip_set(s->bat_pip, (st->bat_pct > 20) ? 1 : 0);   // 低电量时电量块留空
-    shell_pip_set(s->wifi_pip, st->wifi_on);
-    shell_pip_set(s->bt_pip, st->bt_on);
+    /* 电量块只有"实心/留空"两态（低电量留空），不参与隐藏逻辑 */
+    if(s->bat_pip != NULL)
+    {
+        lv_obj_set_style_bg_opa(s->bat_pip, (st->bat_pct > 20) ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+    }
+    shell_ind_set(s->wifi_label, s->wifi_pip, st->wifi_on, st->wifi_conn);
+    shell_ind_set(s->bt_label, s->bt_pip, st->bt_on, st->bt_conn);
 }
 
 int app_shell_handle_msg(app_shell_t *s, uint32_t cmd, const void *data, uint8_t len)
@@ -237,6 +276,10 @@ void app_shell_on_event(const app_event_t *e)
     st.bat_pct = (uint8_t)level;
     st.wifi_on = g_service_param.network.wifi_enable ? 1 : 0;
     st.bt_on   = g_service_param.ble.ble_enable ? 1 : 0;
+    /* 只有"开着"才去问"连上没有"：栈没起时那两个查询只会返回未连接，
+       但"关着"与"连着"在状态栏是两档不同的表现，别让它们混起来 */
+    st.wifi_conn = (st.wifi_on && service_wifi_get_connect_status()) ? 1 : 0;
+    st.bt_conn   = (st.bt_on && service_ble_gatts_get_connect()) ? 1 : 0;
 
     (void)ui_core_post(APP_UI_MSG_STATUS, &st, (uint8_t)sizeof(st));
 }

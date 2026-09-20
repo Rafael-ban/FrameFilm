@@ -121,6 +121,7 @@ static void app_task_handle(void *pvParameters);
 static void app_timer_callback(TimerHandle_t xTimer);
 static void app_handle_event(const app_event_t *e);
 static void app_do_switch(app_id_t id);
+static void app_menu_notice(const char *why);
 static int app_param_ch_route(uint8_t ch, const uint8_t *data, uint8_t len);
 static app_input_result_t app_manager_process_input(input_press_type_t key);
 static void app_input_dispatch(input_press_type_t key);
@@ -475,6 +476,27 @@ static void app_handle_event(const app_event_t *e)
     }
 }
 
+/**
+ * @brief 把"进不去"的原因显示在主菜单上
+ *
+ * 提示就画在菜单底部那块留白里（见 app_menu.c）。当前不是菜单时（例如 BLE 远程
+ * 切到一个进不去的 app）没有页面可承载，只留日志 —— 不为了提示去切页，
+ * 那样反而会造成"进去了"的错觉。
+ */
+static void app_menu_notice(const char *why)
+{
+    if(why == NULL)
+    {
+        return;
+    }
+    if(m_current_app != APP_ID_MENU || m_boot_page || m_sleep_page)
+    {
+        return;
+    }
+
+    (void)ui_core_post(APP_UI_MSG_MENU_NOTICE, why, (uint8_t)strlen(why));
+}
+
 static void app_do_switch(app_id_t id)
 {
     /* 未注册的 app 不可切换：BLE 传来的非法 id 或按模式裁剪掉的 app 会走到这里，
@@ -496,13 +518,44 @@ static void app_do_switch(app_id_t id)
         return;   // 已是当前运行 app
     }
 
+    const app_entry_t *app = m_app_registry[id];
+
+    /* ① 数据源切换 + 进入前预检
+         目录列表是异步刷新的，"这个 app 有没有内容"只有等列表就绪才问得准，
+         所以预检必须排在这一步之后；也只有在这一步退回是**无副作用**的 ——
+         旧 app 尚未被停、状态尚未改，把目录还回去即可当作没发生过。
+         预检不过就别切：切过去屏幕只会停在上一帧，用户会以为已经进到那个 app 了。 */
+    if(app != NULL && app->data_dir != NULL)
+    {
+        sys_logi(APP_MANAGER_TAG, "switch data dir=%s count=%u",
+                 app->data_dir, (unsigned)service_file_set_dir_sync(app->data_dir));
+    }
+
+    if(app != NULL && app->enter_block_reason != NULL)
+    {
+        const char *why = app->enter_block_reason();
+
+        if(why != NULL)
+        {
+            const app_entry_t *cur = m_app_registry[m_current_app];
+
+            if(cur != NULL && cur->data_dir != NULL)
+            {
+                (void)service_file_set_dir_sync(cur->data_dir);   // 还原旧 app 的数据源
+            }
+            sys_logw(APP_MANAGER_TAG, "switch to %s blocked: %s", app->name, why);
+            app_menu_notice(why);
+            return;
+        }
+    }
+
     /* 记录最近一次切入的非图片 app：简易模式下确认键在该 app 与图片之间互切 */
     if(id != APP_ID_IMAGE)
     {
         m_last_guest_app = id;
     }
 
-    /* ① 先停旧层：UI 层会同步关掉输出闸门并删页面，
+    /* ② 先停旧层：UI 层会同步关掉输出闸门并删页面，
        避免切换途中 ui_task 把 UI 帧推上屏、覆盖正要绘制的 DIRECT 画面 */
     app_stop_current();
     /* 切出兜底保存（幂等，覆盖 app 内部未显式保存的改动）。
@@ -519,18 +572,9 @@ static void app_do_switch(app_id_t id)
     m_boot_page = 0;   // 切到任何 app 即结束开机画面（含 BLE 远程切换）
     m_sleep_page = 0;  // 同理：切到 app 就意味着不再处于"占屏托管"状态
 
-    /* 数据源切换：按 app 声明的目录同步等待文件列表刷新，
-       on_enter 即可安全读取列表（避免异步刷新导致的空列表误判）。 */
-    const app_entry_t *app = m_app_registry[id];
-    if(app && app->data_dir != NULL)
-    {
-        uint32_t count = service_file_set_dir_sync(app->data_dir);
-        sys_logi(APP_MANAGER_TAG, "switch data dir=%s count=%u", app->data_dir, (unsigned)count);
-    }
-
-    app_state_load();   // ② 切入先载入状态，再启动（按显示层分流）
+    app_state_load();   // ③ 切入先载入状态，再启动（按显示层分流）
     app_start_current();
-    service_param_app_current_set((uint8_t)id);   // ③ 记录当前 app，供下次启动恢复
+    service_param_app_current_set((uint8_t)id);   // ④ 记录当前 app，供下次启动恢复
 }
 
 static app_input_result_t app_manager_process_input(input_press_type_t key)

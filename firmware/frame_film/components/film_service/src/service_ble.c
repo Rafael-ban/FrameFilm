@@ -88,6 +88,7 @@
  * LOCAL VARIABLES
  */
 static TaskHandle_t m_ble_task_hdl = NULL;
+static uint8_t m_ble_up = 0;   // 协议栈当前是否已拉起（运行期开关用）
 static QueueHandle_t m_ble_msg_hdl = NULL;
 static uint8_t m_film_trans_state = BLE_FILM_TRANS_IDLE;
 static uint8_t m_film_trans_filename[256];
@@ -119,9 +120,24 @@ static void ble_cmd_process(ble_cmd_t *cmd);
 
 /**
  * [service_ble_init 初始化ble服务]
+ *
+ * 开关逻辑与 WiFi 一致：**不开启就不初始化**（不拉协议栈、不占射频与栈空间）。
+ * 运行期开关走 service_ble_apply_enable()。
  */
 void service_ble_init(void)
 {
+    if(m_ble_up)
+    {
+        sys_logi(BEL_SERVICE_TAG, "BLE already initialized");
+        return;
+    }
+
+    if(!g_service_param.ble.ble_enable)
+    {
+        sys_logi(BEL_SERVICE_TAG, "BLE disabled, skip init");
+        return;
+    }
+
     // 初始化ble服务
     service_ble_gatt_server_init();
     service_ble_gatts_cmd_register_cb(service_ble_msg_gatts_cmd_send);
@@ -133,6 +149,51 @@ void service_ble_init(void)
             sys_loge(BEL_SERVICE_TAG, "ble task create error!");
         }
     }
+
+    m_ble_up = 1;
+}
+
+/**
+ * [service_ble_apply_enable 蓝牙开关：运行期起停]
+ *
+ * 参考 WiFi 的开关语义（置参数 -> 起停协议栈），由设置页与心跳下发调用。
+ *
+ * 关：停广播 + 注销服务（uninit 不关 bluedroid，栈仍活着，只是不再对外可见）。
+ * 开：栈若已拉起过，只需 reinit（重新注册并恢复广播）；从未拉起过则整栈初始化。
+ * 注意本函数**不落盘**：调用方负责 service_param_save()。
+ */
+void service_ble_apply_enable(uint8_t on)
+{
+    g_service_param.ble.ble_enable = on ? 1 : 0;
+
+    if(on)
+    {
+        if(m_ble_up)
+        {
+            return;
+        }
+        if(m_ble_task_hdl != NULL)
+        {
+            service_ble_gatt_server_reinit();   // 曾在运行中被关：栈还活着，重新注册 + 恢复广播
+            m_ble_up = 1;
+        }
+        else
+        {
+            service_ble_init();                 // 从未拉起过（开机时就是关的）
+        }
+    }
+    else
+    {
+        if(!m_ble_up)
+        {
+            return;
+        }
+        service_ble_gatts_dev_disconnect();
+        service_ble_gatt_server_uninit();
+        m_ble_up = 0;
+    }
+
+    sys_logi(BEL_SERVICE_TAG, "BLE %s", on ? "ON" : "OFF");
 }
 
 /**

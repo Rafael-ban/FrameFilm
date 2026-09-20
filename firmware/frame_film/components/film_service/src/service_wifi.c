@@ -49,6 +49,7 @@
 #include "service_param.h"
 #include "service_file.h"
 #include "service_wifi.h"
+#include "service_ble.h"       /* service_ble_apply_enable：心跳下发 ble_enable 时同款起停 */
 
 /*********************************************************************
  * MACROS
@@ -661,7 +662,8 @@ static void wifi_heartbeat_exec_cmd(cJSON *cmd)
             {
                 if(g_service_param.ble.ble_enable != (uint8_t)item->valueint)
                 {
-                    g_service_param.ble.ble_enable = (uint8_t)item->valueint;
+                    /* 与 WiFi 同款：置参数 + 起停协议栈（service_ble_apply_enable 内部写参数） */
+                    service_ble_apply_enable((uint8_t)item->valueint);
                     changed = true;
                 }
             }

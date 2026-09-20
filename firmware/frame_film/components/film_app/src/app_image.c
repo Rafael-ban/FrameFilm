@@ -105,6 +105,7 @@ static void app_image_param_set(const uint8_t *tlv, uint8_t len);
 static uint8_t app_image_param_get(uint8_t *out, uint8_t max);
 static void image_show(uint32_t file_id);
 static void image_show_next(void);
+static const char *app_image_enter_block_reason(void);
 
 /*********************************************************************
  * GLOBAL VARIABLES
@@ -120,6 +121,7 @@ const app_entry_t g_app_image_entry = {
     .on_exit = NULL,
     .on_event = app_image_on_event,
     .on_tick = app_image_on_tick,
+    .enter_block_reason = app_image_enter_block_reason,
 
     /* 状态持久化：休眠唤醒后仍能记住播放模式 / 间隔 / 当前下标 */
     .state = &m_image,
@@ -186,6 +188,22 @@ static void image_show_next(void)
  *
  * 数据目录由 app_manager 在切换时同步设置为 FILM_DIR，此处直接使用列表。
  */
+/**
+ * @brief 进入前预检：图片目录里没有 .film 就拦下来
+ *
+ * image_show() 在无文件时只打日志、不绘制，切过去屏幕仍停在上一帧 —— 用户会以为
+ * 已经进到图片 app 了。所以在这里（app_manager 已切好 FILM_DIR 之后）先判掉。
+ * 拦下后主菜单会显示原因，切换动作整体不生效。
+ */
+static const char *app_image_enter_block_reason(void)
+{
+    if(service_file_get_count() == 0)
+    {
+        return "NO FILM IN /sdcard/film";
+    }
+    return NULL;
+}
+
 static void app_image_on_enter(void)
 {
     sys_logi(APP_IMAGE_TAG, "enter image app, count=%u id=%u",

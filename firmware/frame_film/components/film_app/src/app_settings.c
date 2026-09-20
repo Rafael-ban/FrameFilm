@@ -39,6 +39,8 @@
 #include "service_file.h"
 #include "service_param.h"
 #include "service_wifi.h"
+#include "service_ble.h"        /* service_ble_apply_enable：蓝牙开关运行期起停 */
+#include "service_ble_gatts.h"  /* 蓝牙连接状态（状态栏第二档） */
 
 #include "ui_conf.h"    /* UI_CMD_DATA_MAX（快照尺寸断言） */
 #include "ui_ops.h"
@@ -234,9 +236,12 @@ static void settings_snapshot_pull(void)
 
     m_snap.wifi_on = g_service_param.network.wifi_enable ? 1 : 0;
     m_snap.bt_on   = g_service_param.ble.ble_enable ? 1 : 0;
+    m_snap.wifi_conn = (m_snap.wifi_on && service_wifi_get_connect_status()) ? 1 : 0;
+    m_snap.bt_conn   = (m_snap.bt_on && service_ble_gatts_get_connect()) ? 1 : 0;
     snprintf(m_snap.wifi, sizeof(m_snap.wifi), "%s",
-             m_snap.wifi_on ? (service_wifi_get_connect_status() ? "CONNECTED" : "IDLE") : "OFF");
-    snprintf(m_snap.bt, sizeof(m_snap.bt), "%s", m_snap.bt_on ? "ADVERTISING" : "OFF");
+             m_snap.wifi_on ? (m_snap.wifi_conn ? "CONNECTED" : "IDLE") : "OFF");
+    snprintf(m_snap.bt, sizeof(m_snap.bt), "%s",
+             m_snap.bt_on ? (m_snap.bt_conn ? "CONNECTED" : "ADVERTISING") : "OFF");
 
     snprintf(m_snap.panel, sizeof(m_snap.panel), "E6 %ux%u ID%02X",
              (unsigned)panel_w, (unsigned)panel_h, (unsigned)panel_id);
@@ -289,8 +294,8 @@ static void settings_apply(uint8_t row, uint8_t value)
 
     case F_BT_ON:
         if(value > 1) { return; }
-        /* BLE 无运行期注销接口，开关按启动时读取的 g_service_param 生效 */
-        g_service_param.ble.ble_enable = value;
+        /* 与 WiFi 同一套语义：置参数 + 立刻起停协议栈（不再等重启） */
+        service_ble_apply_enable(value);
         service_param_save();
         break;
 
@@ -708,10 +713,12 @@ static void set_ui_on_msg(uint32_t cmd, const void *data, uint8_t len)
         memcpy(&m_snap, data, sizeof(m_snap));
         set_apply();
 
-        /* 状态栏要的三项快照里都有，直接复用，省一次上行/下行往返 */
+        /* 状态栏要的几项快照里都有，直接复用，省一次上行/下行往返 */
         st.bat_pct = m_snap.bat_pct;
         st.wifi_on = m_snap.wifi_on;
+        st.wifi_conn = m_snap.wifi_conn;
         st.bt_on   = m_snap.bt_on;
+        st.bt_conn = m_snap.bt_conn;
         app_shell_apply(&m_shell, &st);
         return;
     }

@@ -105,8 +105,10 @@ typedef enum {
  */
 typedef struct {
     uint8_t bat_pct;    // 电量 0~100
-    uint8_t wifi_on;    // WiFi 开关 0/1
+    uint8_t wifi_on;    // WiFi 开关 0/1（协议栈是否已起）
+    uint8_t wifi_conn;  // WiFi 是否已连上 0/1（wifi_on 为 0 时无意义）
     uint8_t bt_on;      // 蓝牙开关 0/1
+    uint8_t bt_conn;    // 蓝牙是否已连接 0/1（bt_on 为 0 时无意义）
 } app_status_t;
 
 #define APP_UI_REQ_SETTINGS_APPLY   (0x01)  // 上行：payload = [row(1)][value(1)]
@@ -116,6 +118,7 @@ typedef struct {
 #define APP_UI_MSG_MENU_SEL         (0x11)  // 下行：payload = [选中索引(1)]
 #define APP_UI_MSG_SETTINGS_SNAPSHOT (0x13) // 下行：payload = settings_snapshot_t
 #define APP_UI_MSG_STATUS           (0x14)  // 下行：payload = app_status_t
+#define APP_UI_MSG_MENU_NOTICE      (0x15)  // 下行：payload = ASCII 提示文本（无 '\0'）；空负载 = 清除
 
 /**
  * @brief 应用事件
@@ -145,6 +148,18 @@ typedef struct {
     void (*on_exit)(void);                  // 离开该 app
     void (*on_event)(const app_event_t *e); // 按键/BLE/网络/下载事件
     void (*on_tick)(void);                  // 周期性刷新（可选，时钟/动图用）
+
+    /**
+     * @brief 进入前预检（可选，NULL 表示恒可进入）
+     *
+     * 返回 NULL 表示此刻可以进入；返回一段**静态**文案表示进不去（如动图没有可用帧）。
+     * app_manager 会放弃这次切换、留在原页面，并把文案作为提示显示在主菜单上 ——
+     * 否则用户看到"选了某个 app，画面却没变"，会误以为已经进去了。
+     *
+     * 调用点已在 app_do_switch() 里切好目标 app 的 data_dir 之后，故实现可以直接
+     * 用 service_file_get_count() 判断"这个目录里有没有内容"。
+     */
+    const char *(*enter_block_reason)(void);
 
     /* ---- 显示层归属 ---- */
     app_layer_t layer;              // 跑在哪一层；默认 APP_LAYER_DIRECT

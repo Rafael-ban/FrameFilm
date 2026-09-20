@@ -121,6 +121,7 @@ static void anim_step(int32_t delta, int persist);
 static void anim_toggle_mode(void);
 static void anim_next_round(void);
 static void app_animation_on_downloaded(void);
+static const char *app_animation_enter_block_reason(void);
 
 /*********************************************************************
  * GLOBAL VARIABLES
@@ -136,6 +137,7 @@ const app_entry_t g_app_animation_entry = {
     .on_exit = app_animation_on_exit,
     .on_event = app_animation_on_event,
     .on_tick = app_animation_on_tick,
+    .enter_block_reason = app_animation_enter_block_reason,
 
     /* 状态持久化：休眠唤醒后仍能记住播放模式 / 速度 / 循环间隔 / 当前文件 */
     .state = &m_anim,
@@ -260,12 +262,29 @@ static void app_animation_on_downloaded(void)
     anim_start(0, 1);
 }
 
+/**
+ * @brief 进入前预检：动图目录里没有 .film 就拦下来（见 app_entry_t.enter_block_reason）
+ *
+ * 拦在菜单里，而不是切过去再发现目录是空的：切过去画面不会有任何变化，用户会
+ * 以为已经进到动图 app 了；而且切换过程会先把面板停一次，白闪一帧。
+ * 调用时 app_manager 已切好 ANIM_DIR 并等列表就绪，故这里读到的是准确数量。
+ */
+static const char *app_animation_enter_block_reason(void)
+{
+    if(service_file_get_count() == 0)
+    {
+        return "NO FILM IN /sdcard/animation";
+    }
+    return NULL;
+}
+
 static void app_animation_on_enter(void)
 {
     sys_logi(APP_ANIM_TAG, "enter animation app, dir=%s mode=%s", service_file_get_dir(),
              (m_anim.play_mode == APP_ANIM_PLAY_SEQ) ? "seq" : "single");
 
     // 数据目录已由 app_manager 同步切换到 ANIM_DIR 并等待列表就绪
+    // 正常路径已被 enter_block_reason 拦在菜单外，这里兜的是"运行中卡被拔/文件被删"
     uint32_t count = service_file_get_count();
     if(count == 0)
     {

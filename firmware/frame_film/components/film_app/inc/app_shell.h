@@ -41,7 +41,9 @@ extern "C" {
 typedef struct {
     lv_obj_t *bat_label;    // "BAT 82%"
     lv_obj_t *bat_pip;      // 电量指示块（低于 20% 留空）
+    lv_obj_t *wifi_label;   // "WIFI"（关闭时整项隐藏）
     lv_obj_t *wifi_pip;
+    lv_obj_t *bt_label;     // "BT"
     lv_obj_t *bt_pip;
 } app_shell_t;
 
