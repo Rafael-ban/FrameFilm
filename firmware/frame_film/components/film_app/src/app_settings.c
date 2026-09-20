@@ -20,7 +20,7 @@
  *
  * FileName : /film_app/src/app_settings.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/17
- * Description: 系统设置（UI 层）：设备信息 + 系统参数，UP/DOWN 选择、ENTER 切换、长按退出
+ * Description: 系统设置（UI 层）：设备信息 + 系统参数，UP/DOWN 选择、ENTER 切换、双击退出
  * ChangeLog: Change Notes
  *
  *********************************************************************/
@@ -520,7 +520,7 @@ static void set_ui_create(lv_obj_t *root)
     sys_logi(APP_SET_TAG, "create settings page");
 
     /* 外壳：顶部状态栏 + 底部提示行（与主菜单同一套版式） */
-    app_shell_build(root, "UP/DOWN SELECT   ENTER TOGGLE   HOLD ENTER EXIT",
+    app_shell_build(root, "UP/DOWN  ENTER TOGGLE  DBL EXIT  HOLD SLEEP",
                     "SETTINGS", &m_shell);
 
     /* 正文：夹在状态栏与提示行之间，左右留安全边距 */
@@ -700,7 +700,7 @@ static void set_ui_on_key(input_press_type_t key)
     case INPUT_PRESS_UP:    set_move(+1);   break;
     case INPUT_PRESS_DOWN:  set_move(-1);   break;
     case INPUT_PRESS_SHORT: set_toggle();   break;
-    default:                                break;   // 长按由 app_manager 处理（退回主菜单）
+    default:                                break;   // 长按/双击由 app_manager 处理（长按=休眠、双击=退回主菜单）
     }
 }
 

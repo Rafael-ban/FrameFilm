@@ -122,6 +122,7 @@ static void app_timer_callback(TimerHandle_t xTimer);
 static void app_handle_event(const app_event_t *e);
 static void app_do_switch(app_id_t id);
 static void app_menu_notice(const char *why);
+static void app_manager_sleep_from_app(void);
 static int app_param_ch_route(uint8_t ch, const uint8_t *data, uint8_t len);
 static app_input_result_t app_manager_process_input(input_press_type_t key);
 static void app_input_dispatch(input_press_type_t key);
@@ -422,7 +423,7 @@ static void app_handle_event(const app_event_t *e)
         return;
     }
 
-    /* 输入事件：主菜单/长按退出先由 app_manager 裁决 */
+    /* 输入事件：主菜单 / 双击退出 / 长按休眠先由 app_manager 裁决 */
     if(e->type == APP_EVT_INPUT)
     {
         if(app_manager_process_input(e->input) == APP_INPUT_CONSUMED)
@@ -577,6 +578,26 @@ static void app_do_switch(app_id_t id)
     service_param_app_current_set((uint8_t)id);   // ④ 记录当前 app，供下次启动恢复
 }
 
+/**
+ * @brief 从 app 内进入休眠（长按确认键）：**不出示休眠卡**，屏上保持当前 app 的画面
+ *
+ * 先停当前 app 有两层原因：
+ *   ① 让它停止绘制 —— 动图在按帧率不停推帧、图片可能正在翻页；
+ *   ② app_stop_current() 对 UI 层是**同步**等 page_exit 完成的，停完之后不可能有
+ *      半帧在途。所以这条路径不必像"画休眠卡"那样按时间兜一帧的时长（见 app_sleep.h），
+ *      长按松手就能立刻断电。
+ * 停 app 不会清屏：UI 层只是关掉输出闸门（屏上留最后一帧），DIRECT 层 on_exit 也不绘制。
+ */
+static void app_manager_sleep_from_app(void)
+{
+    app_stop_current();
+    if(m_app_running)
+    {
+        app_state_save();   // 睡前的兜底落盘（幂等，与切页时同一套）
+    }
+    app_sleep_run(0);
+}
+
 static app_input_result_t app_manager_process_input(input_press_type_t key)
 {
     if(key == INPUT_PRESS_NONE || m_switch_mode == APP_SWITCH_MODE_NONE)
@@ -606,21 +627,30 @@ static app_input_result_t app_manager_process_input(input_press_type_t key)
                 sys_logw(APP_MANAGER_TAG, "menu entry %u not registered", (unsigned)m_menu_sel);
             }
         }
-        /* 长按 = 手动休眠。菜单是调度器的"根"，它的长按此刻是空的
-           （其余 app 的长按是"退回主菜单"）。本调用不返回：画完休眠卡就进 deep sleep。
-           注意**不看休眠模式开关** —— 那个开关管的是自动休眠，用户明确按下的动作就该执行。 */
+        /* 长按 = 手动休眠：菜单里**画休眠卡**（这张卡会一直留在屏上，直到按下确认键唤醒）。
+           本调用不返回：画完卡就进 deep sleep。
+           注意**不看休眠模式开关** —— 那个开关管的是自动休眠，用户明确按下的动作就该执行。
+           双击在菜单里没有语义：菜单就是调度器的"根"，没有上一层可退。 */
         else if(key == INPUT_PRESS_LONG)
         {
-            app_sleep_run();
+            app_sleep_run(1);
         }
         return APP_INPUT_CONSUMED;
     }
 
-    /* 其余 app：长按确认键退回主菜单（设计稿的"长按退出"）。
+    /* 其余 app：**双击**确认键退回主菜单（原长按语义挪到这里）。
        主菜单不可用（无 UI 层的机型）时按键交回 app，避免"按了没反应" */
-    if(key == INPUT_PRESS_LONG && app_menu_available())
+    if(key == INPUT_PRESS_DOUBLE && app_menu_available())
     {
         app_menu_open();
+        return APP_INPUT_CONSUMED;
+    }
+
+    /* 长按确认键 = 手动休眠，且**不出示休眠卡**：屏上保持当前 app 的画面。
+       本调用正常不返回（设备随即断电） */
+    if(key == INPUT_PRESS_LONG)
+    {
+        app_manager_sleep_from_app();
         return APP_INPUT_CONSUMED;
     }
 

@@ -514,7 +514,7 @@ static void clock_ui_create(lv_obj_t *root)
     clock_dsc_init(&m_cut_dsc, m_cut_px, CK_CUT, CK_CUT);
 
     /* ============ 外壳：顶部状态栏 + 底部提示行 ============ */
-    app_shell_build(root, "HOLD ENTER   RETURN TO MENU", "CLOCK", &m_shell);
+    app_shell_build(root, "DBL ENTER EXIT   HOLD SLEEP", "CLOCK", &m_shell);
 
     /* ============ 正文：夹在状态栏与提示行之间 ============ */
     body = lv_obj_create(root);

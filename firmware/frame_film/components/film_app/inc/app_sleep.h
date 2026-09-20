@@ -38,15 +38,19 @@ const app_ui_ops_t *app_sleep_ops(void);
 void app_sleep_set_info(uint8_t auto_on, uint16_t minutes);
 
 /**
- * @brief 执行一次"手动休眠"：出示休眠卡 → 等卡片画完 + 唤醒条件解除 → 请求进低功耗
+ * @brief 执行一次"手动休眠"：出示休眠卡（可选）→ 等卡片画完 + 唤醒条件解除 → 请求进低功耗
  *
- * 必须从 app 任务调用（内部会阻塞等待，且要读唤醒脚电平）。由主菜单长按触发。
+ * 必须从 app 任务调用（内部会阻塞等待，且要读唤醒脚电平）。
+ * 触发点有两处：主菜单长按（show_card=1，出示休眠卡）、app 内长按（show_card=0，
+ * 屏上保持当前 app 的画面 —— 此时调用方须先停掉 app，见 app_manager_sleep_from_app）。
  * **不理会休眠模式开关** —— 用户明确按下的动作就该执行。
  *
+ * @param show_card 是否出示休眠卡；0 表示"就着当前画面睡"
+ *
  * 正常路径下本函数不返回：设备随即进入 deep sleep（唤醒 = 复位重启 → BOOT）。
- * 只有 UI 层不可用 / monitor 任务没起来时才会返回。
+ * 只有 UI 层不可用（仅 show_card=1 时）/ monitor 任务没起来时才会退化或返回。
  */
-void app_sleep_run(void);
+void app_sleep_run(uint8_t show_card);
 
 #ifdef __cplusplus
 }

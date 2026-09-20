@@ -57,8 +57,12 @@
 
 #define BUTTON_MAX_CALLBACKS              (5)
 
-#define BUTTON_SHORT_PRESS_TIME_MS        (50)   // 50ms 短按
+#define BUTTON_SHORT_PRESS_TIME_MS        (50)   // 50ms 短按（上/下键的单击结算窗口）
 #define BUTTON_LONG_PRESS_TIME_MS         (1000) // 2s 长按
+/* 确认键的双击配对窗口。按钮库把 short_press_time 当窗口用（见 confirm_cfg 的注释），
+   必须明显大于人手的双击间隔，否则双击会被判成两次单击。
+   STD 那边是 hal_encoder.c 里等价的 ENCODER_DOUBLE_CLICK_MS，两者取同一量级。 */
+#define BUTTON_DOUBLE_CLICK_WINDOW_MS     (350)
 
 /*********************************************************************
 * TYPEDEFS
@@ -166,7 +170,14 @@ void hal_input_init(void)
     {
         .type = BUTTON_TYPE_GPIO,
         .long_press_time = BUTTON_LONG_PRESS_TIME_MS,
-        .short_press_time = BUTTON_SHORT_PRESS_TIME_MS,
+        /* 确认键要认双击，所以它的"单击结算窗口"必须放开到人手的双击间隔里。
+           这个值在按钮库里有双重身份（见 iot_button.c 的 state 2/3）：
+             ① 松手后要等这么久才结算 SINGLE_CLICK；
+             ② 窗口内第二次按下才算 DOUBLE_CLICK —— 超窗就各自算一次单击。
+           取 50ms 时窗口比手速还短，双击必然被判成两次单击（上机实测：两次单击相隔
+           230ms 就没配上）。代价是单击下发晚一个窗口，但确认键本来就承担双击，
+           这个延迟躲不掉。上/下键不认双击，保持 BUTTON_SHORT_PRESS_TIME_MS 不受影响。 */
+        .short_press_time = BUTTON_DOUBLE_CLICK_WINDOW_MS,
         .gpio_button_config = {
             .gpio_num = BUTTON_PIN_CONFIRM,
             .active_level = BUTTON_ACTIVE_LEVEL,
@@ -177,6 +188,10 @@ void hal_input_init(void)
     {
         iot_button_register_cb(m_button_mgr.buttons[2].handle, BUTTON_SINGLE_CLICK, button_confirm_cb, NULL);
         iot_button_register_cb(m_button_mgr.buttons[2].handle, BUTTON_LONG_PRESS_START, button_confirm_cb, NULL);
+        /* 双击只挂在确认键上（上/下双击没有语义）。
+           按钮库内部已经处理了消歧：双击只发 BUTTON_DOUBLE_CLICK、不发 SINGLE_CLICK，
+           而单击本身也是等双击窗口过期后才发的 —— 所以注册它不会让单击"多两次" */
+        iot_button_register_cb(m_button_mgr.buttons[2].handle, BUTTON_DOUBLE_CLICK, button_confirm_cb, NULL);
         m_button_mgr.buttons[2].initialized = true;
         sys_logi(BUTTON_TAG, "CONFIRM button initialized");
     }
@@ -263,6 +278,11 @@ static void button_confirm_cb(void *button_handle, void *usr_data)
     {
         sys_logi(BUTTON_TAG, "CONFIRM LONG PRESS");
         trigger_callbacks(INPUT_PRESS_LONG);
+    }
+    else if (event == BUTTON_DOUBLE_CLICK)
+    {
+        sys_logi(BUTTON_TAG, "CONFIRM DOUBLE PRESS");
+        trigger_callbacks(INPUT_PRESS_DOUBLE);
     }
 }
 

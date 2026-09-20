@@ -396,7 +396,7 @@ static void menu_ui_create(lv_obj_t *root)
     sys_logi(APP_MENU_TAG, "create menu page (%u entries)", (unsigned)APP_MENU_ENTRY_NUM);
 
     /* ============ 外壳：顶部状态栏 + 底部提示行 ============ */
-    app_shell_build(root, "UP/DOWN SELECT   ENTER OPEN", "MENU", &m_shell);
+    app_shell_build(root, "UP/DOWN SELECT   ENTER OPEN   HOLD SLEEP", "MENU", &m_shell);
 
     /* ============ 正文：夹在状态栏与提示行之间 ============ */
     body = lv_obj_create(root);

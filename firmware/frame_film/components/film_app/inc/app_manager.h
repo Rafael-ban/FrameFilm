@@ -22,7 +22,7 @@ extern "C" {
 typedef enum {
     APP_SWITCH_MODE_NONE = 0,   // 关闭按键切换（BLE 远程切换仍有效）
     APP_SWITCH_MODE_SIMPLE,     // 简易：图片 <-> 最近推送的 app
-    APP_SWITCH_MODE_FULL,       // 全功能：主菜单（上电落在它上面；其余 app 长按退出回它）
+    APP_SWITCH_MODE_FULL,       // 全功能：主菜单（上电落在它上面；其余 app 双击退出回它）
 } app_switch_mode_t;
 
 /**

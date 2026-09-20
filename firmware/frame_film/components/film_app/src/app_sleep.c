@@ -103,7 +103,7 @@ static void sleep_ui_create(lv_obj_t *root);
 static void sleep_ui_destroy(void);
 static void sleep_rule(lv_obj_t *root, int32_t y);
 static void sleep_foot_text(char *buf);
-static void sleep_wait_ready(void);
+static void sleep_wait_ready(uint8_t wait_frame);
 
 /*********************************************************************
  * GLOBAL VARIABLES
@@ -223,15 +223,19 @@ static void sleep_ui_destroy(void)
 }
 
 /**
- * @brief 等"休眠卡已画完 + 唤醒条件已解除"（见 SP_DRAW_WAIT_MS 的说明）
+ * @brief 等"卡片已画完 + 唤醒条件已解除"（见 SP_DRAW_WAIT_MS 的说明）
+ *
+ * @param wait_frame 是否要等地板时间。**不画卡时传 0**：调用方已经同步停掉了 app
+ *                   （见 app_manager_sleep_from_app），不可能有半帧在途，只等唤醒
+ *                   条件解除即可 —— 长按松手就立刻断电，不必白等 4s。
  *
  * app_task 上下文。休眠前这段等待不影响别处：事件队列满了也只是让输入任务
  * 停在发送上，而我们马上就断电了。
  */
-static void sleep_wait_ready(void)
+static void sleep_wait_ready(uint8_t wait_frame)
 {
     TickType_t t0 = xTaskGetTickCount();
-    TickType_t wait = pdMS_TO_TICKS(SP_DRAW_WAIT_MS);
+    TickType_t wait = wait_frame ? pdMS_TO_TICKS(SP_DRAW_WAIT_MS) : 0;
     TickType_t limit = pdMS_TO_TICKS(SP_RELEASE_MAX_MS);
 
     for(;;)
@@ -267,26 +271,31 @@ void app_sleep_set_info(uint8_t auto_on, uint16_t minutes)
     m_minutes = minutes;
 }
 
-void app_sleep_run(void)
+void app_sleep_run(uint8_t show_card)
 {
-    if(!ui_core_is_ready())
+    if(show_card)
     {
-        sys_logw(APP_SLEEP_TAG, "sleep ignored: ui layer not ready");
-        return;
+        if(!ui_core_is_ready())
+        {
+            sys_logw(APP_SLEEP_TAG, "ui layer not ready, sleep without card");
+            show_card = 0;
+        }
+        else
+        {
+            /* 1. 参数在 app 任务侧读好（页面在 ui_task，读不到 g_service_param）。
+                  判据与 monitor 任务侧设置定时唤醒的条件必须一致，否则页脚会说谎。 */
+            app_sleep_set_info((g_service_param.sleep.sleep_auto && g_service_param.sleep.sleep_time > 0) ? 1 : 0,
+                               g_service_param.sleep.sleep_time);
+
+            /* 2. 出示休眠卡：ui_task 建页并做全帧刷新（异步，故第 3 步按时间兜） */
+            app_manager_sleep_show(app_sleep_ops());
+        }
     }
 
-    /* 1. 参数在 app 任务侧读好（页面在 ui_task，读不到 g_service_param）。
-          判据与 monitor 任务侧设置定时唤醒的条件必须一致，否则页脚会说谎。 */
-    app_sleep_set_info((g_service_param.sleep.sleep_auto && g_service_param.sleep.sleep_time > 0) ? 1 : 0,
-                       g_service_param.sleep.sleep_time);
-
-    /* 2. 出示休眠卡：ui_task 建页并做全帧刷新（异步，故第 3 步按时间兜） */
-    app_manager_sleep_show(app_sleep_ops());
-
-    /* 3. 等卡片画完 + 唤醒条件解除（SP_DRAW_WAIT_MS） */
-    sleep_wait_ready();
+    /* 3. 等卡片画完（只画了卡才等）+ 唤醒条件解除 */
+    sleep_wait_ready(show_card);
 
     /* 4. 交给 monitor 任务走上既有的低功耗路径（停心跳 → 逐个 deinit → deep sleep） */
-    sys_logi(APP_SLEEP_TAG, "entering low power");
+    sys_logi(APP_SLEEP_TAG, "entering low power (card=%u)", (unsigned)show_card);
     service_monitor_request_sleep();
 }

@@ -34,7 +34,7 @@ extern "C" {
 // App 切换交互模式三选一
 #define SYS_APP_SWITCH_NONE            0   // 关闭按键切换（BLE 远程切换仍有效，纯相框）
 #define SYS_APP_SWITCH_SIMPLE          1   // 简易：图片 <-> 最近推送的 app，上/下回图片，确认键互切
-#define SYS_APP_SWITCH_FULL            2   // 全功能：主菜单（上电落在主菜单，其余 app 长按退出回它；需 UI 层支持，否则自动降级为简易模式）
+#define SYS_APP_SWITCH_FULL            2   // 全功能：主菜单（上电落在主菜单，其余 app 双击退出回它；需 UI 层支持，否则自动降级为简易模式）
 #define SYS_APP_SWITCH_MODE            SYS_APP_SWITCH_FULL
 #if (SYS_APP_SWITCH_MODE != SYS_APP_SWITCH_NONE) && \
     (SYS_APP_SWITCH_MODE != SYS_APP_SWITCH_SIMPLE) && \

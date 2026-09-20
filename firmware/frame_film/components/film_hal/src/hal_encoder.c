@@ -33,6 +33,7 @@
 #include <string.h>
 #include "encoder.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 
 #include "hal_api.h"
 
@@ -50,6 +51,7 @@
 #define ENCODER_BTN_DEAD_TIME_US          (50000)     // 50ms 消抖
 #define ENCODER_BTN_LONG_PRESS_TIME_US    (2000000)   // 2s 长按
 #define ENCODER_POLLING_INTERVAL_US       (2000)      // 2ms 轮询
+#define ENCODER_DOUBLE_CLICK_MS           (350)       // 双击配对窗口（与 PRO/MAX 的 BUTTON_DOUBLE_CLICK_WINDOW_MS 取同一量级）
 
 /*********************************************************************
 * TYPEDEFS
@@ -73,6 +75,12 @@ typedef struct
  */
 static encoder_t m_encoder;
 
+/* 双击配对：esp-idf-lib 只给"单击"事件，双击得自己配。
+   窗口内又来一次单击 → 报双击并撤掉待发的单击；窗口到期 → 补发单击。
+   （PRO/MAX 那边由 iot_button 内置同样的延迟，两者手感一致。） */
+static esp_timer_handle_t m_click_timer = NULL;
+static uint8_t m_click_pending = 0;
+
 /*********************************************************************
  * GLOBAL VARIABLES
  */
@@ -83,6 +91,8 @@ static encoder_t m_encoder;
  */
 static void encoder_event_cb(const rotary_encoder_event_t *event, void *ctx);
 static input_press_type_t map_event_to_press(rotary_encoder_event_type_t type);
+static void encoder_dispatch(encoder_t *enc, input_press_type_t type);
+static void encoder_click_timeout(void *arg);
 
 /*********************************************************************
  * GLOBAL FUNCTIONS
@@ -116,6 +126,26 @@ void hal_input_init(void)
         return;
     }
 
+    /* 双击配对用的 one-shot。库自己也是用 esp_timer 派发事件，
+       所以这个回调与单击/长按跑在同一类上下文里，不引入新的并发关系 */
+    if (m_click_timer == NULL)
+    {
+        const esp_timer_create_args_t targs =
+        {
+            .callback = encoder_click_timeout,
+            .arg = NULL,
+            .name = "enc_click",
+        };
+
+        ret = esp_timer_create(&targs, &m_click_timer);
+        if (ret != ESP_OK)
+        {
+            sys_loge(ENCODER_TAG, "Failed to create click timer: %s", esp_err_to_name(ret));
+            m_click_timer = NULL;
+        }
+    }
+    m_click_pending = 0;
+
     m_encoder.initialized = true;
     sys_logi(ENCODER_TAG, "encoder initialized (esp-idf-lib)");
 }
@@ -125,6 +155,12 @@ void hal_input_deinit(void)
     if (!m_encoder.initialized)
     {
         return;
+    }
+
+    if (m_click_timer != NULL)
+    {
+        (void)esp_timer_stop(m_click_timer);
+        m_click_pending = 0;
     }
 
     rotary_encoder_delete(m_encoder.handle);
@@ -188,12 +224,34 @@ static void encoder_event_cb(const rotary_encoder_event_t *event, void *ctx)
     if (type == INPUT_PRESS_SHORT)
     {
         sys_logi(ENCODER_TAG, "ENCODER SHORT PUSH");
+
+        if (m_click_pending)
+        {
+            /* 窗口内的第二次单击 → 双击，撤掉那一次还没发出去的单击 */
+            (void)esp_timer_stop(m_click_timer);
+            m_click_pending = 0;
+            sys_logi(ENCODER_TAG, "ENCODER DOUBLE PUSH");
+            encoder_dispatch(enc, INPUT_PRESS_DOUBLE);
+        }
+        else
+        {
+            /* 先不发单击：给它留出配对窗口，窗口到期由 m_click_timer 补发 */
+            m_click_pending = 1;
+            (void)esp_timer_start_once(m_click_timer, (uint64_t)ENCODER_DOUBLE_CLICK_MS * 1000u);
+        }
+        return;   // 单击/双击都在上面那两条路上发，不再往下走
     }
-    else if (type == INPUT_PRESS_LONG)
+
+    if (type == INPUT_PRESS_LONG)
     {
         sys_logi(ENCODER_TAG, "ENCODER LONG PUSH");
     }
 
+    encoder_dispatch(enc, type);
+}
+
+static void encoder_dispatch(encoder_t *enc, input_press_type_t type)
+{
     for (int i = 0; i < enc->cb_counts[type]; i++)
     {
         if (enc->cbs[type][i])
@@ -201,6 +259,14 @@ static void encoder_event_cb(const rotary_encoder_event_t *event, void *ctx)
             enc->cbs[type][i]();
         }
     }
+}
+
+static void encoder_click_timeout(void *arg)
+{
+    (void)arg;
+
+    m_click_pending = 0;
+    encoder_dispatch(&m_encoder, INPUT_PRESS_SHORT);   // 窗口内没有第二次 → 补发单击
 }
 
 static input_press_type_t map_event_to_press(rotary_encoder_event_type_t type)

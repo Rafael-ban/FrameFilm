@@ -261,6 +261,11 @@ static void app_init_input_down(void)
     app_manager_on_input(INPUT_PRESS_DOWN);
 }
 
+static void app_init_input_double(void)
+{
+    app_manager_on_input(INPUT_PRESS_DOUBLE);
+}
+
 static void app_init_register_inputs(void)
 {
     /* hal_input 支持同一类型多回调注册；这里回调无参，按类型固定转发 key */
@@ -268,6 +273,7 @@ static void app_init_register_inputs(void)
     hal_input_register_cb(INPUT_PRESS_LONG,  app_init_input_long);
     hal_input_register_cb(INPUT_PRESS_UP,    app_init_input_up);
     hal_input_register_cb(INPUT_PRESS_DOWN,  app_init_input_down);
+    hal_input_register_cb(INPUT_PRESS_DOUBLE, app_init_input_double);   // 确认键双击：退出 app
 }
 
 /**
