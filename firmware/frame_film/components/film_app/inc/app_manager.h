@@ -138,6 +138,21 @@ void app_manager_sleep_show(const app_ui_ops_t *ops);
 int app_manager_post_ui_msg(uint32_t cmd, const void *data, uint8_t len);
 
 /**
+ * @brief 读 / 写某个 app 的参数（TLV），给设置页这类内部页面用（不经 BLE）
+ *
+ * 与 BLE 参数通道（0x45~0x4A）共用同一套 on_param_get / on_param_set 与落盘路径，
+ * 语义只在 app 侧定义一次（TAG 常量在各自的 app_xxx.h 里）。SET 会由框架按归属
+ * app 落盘，页面侧负责在用完后回刷自己的快照。
+ *
+ * 调用上下文：app 任务（与 BLE 通道路由同侧）。
+ *
+ * @param app_id 目标 app（APP_ID_IMAGE / APP_ID_ANIMATION …）
+ * @return param_get：TLV 字节数，0 = 该 app 不支持参数 / 缓冲不足
+ */
+uint8_t app_manager_param_get(uint8_t app_id, uint8_t *out, uint8_t max);
+void app_manager_param_set(uint8_t app_id, const uint8_t *tlv, uint8_t len);
+
+/**
  * @brief 保存当前 app 的状态到 NVS
  *
  * app 未声明状态（state/state_size 为空）时是 no-op。

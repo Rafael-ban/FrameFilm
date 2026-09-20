@@ -49,21 +49,10 @@
 #define APP_ANIM_TICK_MS        (100)
 
 // 每帧间隔范围（毫秒）：下限受 APP_ANIM_TICK_MS 约束
-#define APP_ANIM_FRAME_MS_MIN   (100)
-#define APP_ANIM_FRAME_MS_MAX   (2000)
+// （帧间隔范围 / 播放模式 / 参数通道 TAG 都定义在 app_animation.h，与设置页共用）
 
 // 循环间隔范围（秒）
 #define APP_ANIM_LOOP_SEC_MAX   (600)
-
-/* 播放模式 */
-#define APP_ANIM_PLAY_SINGLE    (0)     // 单 film 循环：只播当前文件，播完等待后重播
-#define APP_ANIM_PLAY_SEQ       (1)     // film 列表循环：依次播每个文件，到末尾回绕
-
-/* 参数通道 TAG（payload = TLV 列表，多字节大端） */
-#define APP_ANIM_TAG_PLAY_MODE  (0x01)  // 1B：0=单 film 循环 1=列表循环
-#define APP_ANIM_TAG_FRAME_MS   (0x02)  // 2B：100~2000 毫秒
-#define APP_ANIM_TAG_LOOP_SEC   (0x03)  // 2B：0~600 秒
-#define APP_ANIM_TAG_FILE_ID    (0x04)  // 4B：当前文件下标
 
 /*********************************************************************
 * TYPEDEFS

@@ -64,7 +64,7 @@ static uint8_t m_tele_num = 0;
 /* 进度：每次回调**只点亮一格**，保证一格一格走（见 app_boot.h 的节拍说明） */
 static lv_timer_t *m_prog_timer = NULL;
 static uint8_t m_seg_on = 0;      // 已点亮格数
-static uint8_t m_done_ticks = 0;  // 走满后的停留节拍数
+static uint8_t m_done_left = 0;   // 走满后还要停留的节拍数（建页时装载 APP_BOOT_DONE_HOLD_TICKS）
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -296,14 +296,19 @@ static void boot_prog_cb(lv_timer_t *timer)
         return;
     }
 
-    m_done_ticks++;
-    if(m_done_ticks >= APP_BOOT_DONE_HOLD_TICKS)
+    /* 走满后按配置停留几个节拍再上报（配 0 = 立刻上报）。
+       用"剩余节拍"倒数而不是"已停留 >= N"：后者在 N 为 0 时对 uint8_t 恒真，
+       会被 -Wtype-limits 判成无意义比较。 */
+    if(m_done_left > 0)
     {
-        /* 先删定时器再上报：避免上报后到切页之间又触发一轮 */
-        lv_timer_delete(m_prog_timer);
-        m_prog_timer = NULL;
-        (void)app_manager_post_ui_msg(APP_UI_REQ_BOOT_DONE, NULL, 0);
+        m_done_left--;
+        return;
     }
+
+    /* 先删定时器再上报：避免上报后到切页之间又触发一轮 */
+    lv_timer_delete(m_prog_timer);
+    m_prog_timer = NULL;
+    (void)app_manager_post_ui_msg(APP_UI_REQ_BOOT_DONE, NULL, 0);
 }
 
 static void boot_ui_create(lv_obj_t *root)
@@ -446,7 +451,7 @@ static void boot_ui_create(lv_obj_t *root)
 
     /* 进度：从 0 起，之后每 APP_BOOT_STEP_MS 点亮一格（见 boot_prog_cb） */
     m_seg_on = 0;
-    m_done_ticks = 0;
+    m_done_left = APP_BOOT_DONE_HOLD_TICKS;
     boot_apply_progress(0);
     m_prog_timer = lv_timer_create(boot_prog_cb, APP_BOOT_STEP_MS, NULL);
 }

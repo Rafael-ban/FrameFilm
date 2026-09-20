@@ -44,18 +44,8 @@
  */
 #define APP_IMAGE_TAG           "app_image"
 
-/* 播放模式 */
-#define APP_IMAGE_PLAY_MANUAL   (0)     // 手动：仅按键/蓝牙切换
-#define APP_IMAGE_PLAY_AUTO     (1)     // 自动：定时切换 / 开机自动切换（由休眠开关决定形态）
-
-/* 自动切换间隔（分钟） */
-#define APP_IMAGE_INTERVAL_MIN  (1)
-#define APP_IMAGE_INTERVAL_MAX  (120)
-
-/* 参数通道 TAG（payload = TLV 列表，多字节大端） */
-#define APP_IMAGE_TAG_PLAY_MODE     (0x01)  // 1B：0=手动 1=自动
-#define APP_IMAGE_TAG_INTERVAL      (0x02)  // 2B：1~120 分钟
-#define APP_IMAGE_TAG_FILE_ID       (0x03)  // 4B：当前文件下标
+/* 播放模式 / 间隔范围 / 参数通道 TAG 都定义在 app_image.h：设置页按同一套
+   TAG 读写参数（见 app_manager_param_get/set），语义只在头文件里放一份 */
 
 /* on_tick 周期（毫秒）：定时间隔以秒计时即可，1s 一拍 */
 #define APP_IMAGE_TICK_MS           (1000)

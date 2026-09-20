@@ -45,6 +45,8 @@
 #include "ui_conf.h"    /* UI_CMD_DATA_MAX（快照尺寸断言） */
 #include "ui_ops.h"
 #include "app_shell.h"
+#include "app_image.h"      /* 图片 app 参数 TAG / 取值范围（app 参数行用） */
+#include "app_animation.h"  /* 动图 app 参数 TAG / 取值范围 */
 #include "app_settings.h"
 #include "app_manager.h"
 
@@ -80,14 +82,45 @@ static const uint16_t HB_OPTS_SEC[HB_OPT_NUM] = {
     5, 10, 30, 60, 120, 180                      // 与 HB_OPTS 一一对应的秒值
 };
 
+/* ---- app 参数行的候选值 ----
+ * 值本身由归属 app 的 TLV 通道定义（TAG / 范围见 app_image.h、app_animation.h），
+ * 这里只规定"界面上给几个档位"以及下标 ↔ 物理值的对照。 */
+#define IMG_PLAY_OPT_NUM    (2)
+static const char *const IMG_PLAY_OPTS[IMG_PLAY_OPT_NUM] = {
+    "MANUAL", "AUTO"                            // 下标 0/1 == APP_IMAGE_PLAY_MANUAL/AUTO
+};
+#define IMG_INT_OPT_NUM     (5)
+static const char *const IMG_INT_OPTS[IMG_INT_OPT_NUM] = {
+    "1 MIN", "5 MIN", "10 MIN", "30 MIN", "60 MIN"
+};
+static const uint16_t IMG_INT_OPTS_MIN[IMG_INT_OPT_NUM] = {
+    1, 5, 10, 30, 60                            // 分钟（参数范围 1~120）
+};
+#define ANIM_LOOP_OPT_NUM   (2)
+static const char *const ANIM_LOOP_OPTS[ANIM_LOOP_OPT_NUM] = {
+    "SINGLE", "LIST"                            // 下标 0/1 == APP_ANIM_PLAY_SINGLE/SEQ
+};
+#define ANIM_SPEED_OPT_NUM  (5)
+static const char *const ANIM_SPEED_OPTS[ANIM_SPEED_OPT_NUM] = {
+    "100 MS", "200 MS", "500 MS", "1 S", "2 S"
+};
+static const uint16_t ANIM_SPEED_OPTS_MS[ANIM_SPEED_OPT_NUM] = {
+    100, 200, 500, 1000, 2000                   // 每帧毫秒（参数范围 100~2000）
+};
+
+/* 分节标题（行表里的 sec 即下标） */
+static const char *const SEC_TITLES[] = {
+    "DEVICE", "PARAMETERS", "APP PARAMS"
+};
+
 /* 快照要经 ui_core_post 一次性下发，长度受命令负载上限约束 */
 _Static_assert(sizeof(settings_snapshot_t) <= UI_CMD_DATA_MAX,
                "settings_snapshot_t exceeds ui cmd payload");
 
-/* 列表总高：2 个分节标题（22 + 4 间距） + 10 行。
+/* 列表总高：3 个分节标题（22 + 4 间距） + 14 行。
    正文可用高度 = 720 - 状态栏 30 - 提示行 28 - 上下留白 36 = 626，
-   扣掉表头 16 + 间距 24 后余 586 —— 列表 352 有富余，不会溢出到提示行。 */
-#define SET_LIST_H          (2 * (22 + 4) + SETTINGS_ROW_NUM * ROW_H)
+   扣掉表头 16 + 间距 24 后余 586 —— 列表 498 有富余，不会溢出到提示行。 */
+#define SET_LIST_H          (3 * (22 + 4) + SETTINGS_ROW_NUM * ROW_H)
 
 /*********************************************************************
 * TYPEDEFS
@@ -103,6 +136,7 @@ typedef struct {
 enum {
     F_BAT = 0, F_WIFI, F_BT, F_PANEL, F_STORAGE, F_FW,
     F_SLEEP, F_AUTOWAKE, F_WIFI_ON, F_BT_ON, F_WAKE_SEL, F_HB_SEL,
+    F_IMG_PLAY, F_IMG_INT, F_ANIM_LOOP, F_ANIM_SPEED,
 };
 
 /* 行表。**顺序即显示顺序，下标即上报的行号。** */
@@ -117,6 +151,10 @@ static const settings_row_t ROWS[SETTINGS_ROW_NUM] = {
     { 1, "AUTO WAKE",    SET_KIND_TOGGLE, F_AUTOWAKE   },
     { 1, "WAKE INTERVAL",SET_KIND_CYCLE,  F_WAKE_SEL   },
     { 1, "HEARTBEAT",    SET_KIND_CYCLE,  F_HB_SEL     },
+    { 2, "IMG PLAY",     SET_KIND_CYCLE,  F_IMG_PLAY   },
+    { 2, "IMG INTERVAL", SET_KIND_CYCLE,  F_IMG_INT    },
+    { 2, "ANIM LOOP",    SET_KIND_CYCLE,  F_ANIM_LOOP  },
+    { 2, "ANIM SPEED",   SET_KIND_CYCLE,  F_ANIM_SPEED },
 };
 
 /*********************************************************************
@@ -176,6 +214,10 @@ static const char *row_text(uint8_t idx)
     case F_FW:         return m_snap.fw;
     case F_WAKE_SEL:   return WAKE_OPTS[m_snap.wake_sel % WAKE_OPT_NUM];
     case F_HB_SEL:     return HB_OPTS[m_snap.hb_sel % HB_OPT_NUM];
+    case F_IMG_PLAY:   return IMG_PLAY_OPTS[m_snap.img_play_sel % IMG_PLAY_OPT_NUM];
+    case F_IMG_INT:    return IMG_INT_OPTS[m_snap.img_interval_sel % IMG_INT_OPT_NUM];
+    case F_ANIM_LOOP:  return ANIM_LOOP_OPTS[m_snap.anim_loop_sel % ANIM_LOOP_OPT_NUM];
+    case F_ANIM_SPEED: return ANIM_SPEED_OPTS[m_snap.anim_speed_sel % ANIM_SPEED_OPT_NUM];
     default:           return "";
     }
 }
@@ -207,6 +249,61 @@ static uint8_t idx_of_u16(const uint16_t *tab, uint8_t num, uint16_t v)
         }
     }
     return 0;   // 不在候选表内（如手机侧下发过任意值）：显示为第一项
+}
+
+/**
+ * @brief 从 TLV 列表里取一个 1B / 2B 字段（没有或长度不符时给回落值）
+ */
+static uint8_t tlv_get_u8(const uint8_t *tlv, uint8_t len, uint8_t tag, uint8_t fallback)
+{
+    uint8_t off = 0;
+    app_tlv_t item;
+
+    while(app_tlv_next(tlv, len, &off, &item))
+    {
+        if((item.tag == tag) && (item.len == 1))
+        {
+            return item.val[0];
+        }
+    }
+    return fallback;
+}
+
+static uint16_t tlv_get_u16(const uint8_t *tlv, uint8_t len, uint8_t tag, uint16_t fallback)
+{
+    uint8_t off = 0;
+    app_tlv_t item;
+
+    while(app_tlv_next(tlv, len, &off, &item))
+    {
+        if((item.tag == tag) && (item.len == 2))
+        {
+            return app_tlv_be16(item.val);
+        }
+    }
+    return fallback;
+}
+
+/**
+ * @brief 读回归属 app 的参数，换算成候选下标（app_task 上下文）
+ *
+ * 走 app_manager_param_get —— 与 BLE 参数查询（0x46 / 0x4A）同一套 TLV，
+ * 不直接碰 app 内部状态；目标 app 从未进入过时，该接口内部会先载入/套默认值。
+ */
+static void settings_app_params_pull(void)
+{
+    uint8_t tlv[32];
+    uint8_t n;
+
+    n = app_manager_param_get((uint8_t)APP_ID_IMAGE, tlv, (uint8_t)sizeof(tlv));
+    m_snap.img_play_sel = (tlv_get_u8(tlv, n, APP_IMAGE_TAG_PLAY_MODE, APP_IMAGE_PLAY_MANUAL) != 0) ? 1 : 0;
+    m_snap.img_interval_sel = idx_of_u16(IMG_INT_OPTS_MIN, IMG_INT_OPT_NUM,
+                                         tlv_get_u16(tlv, n, APP_IMAGE_TAG_INTERVAL, IMG_INT_OPTS_MIN[0]));
+
+    n = app_manager_param_get((uint8_t)APP_ID_ANIMATION, tlv, (uint8_t)sizeof(tlv));
+    m_snap.anim_loop_sel = (tlv_get_u8(tlv, n, APP_ANIM_TAG_PLAY_MODE, APP_ANIM_PLAY_SINGLE) != 0) ? 1 : 0;
+    m_snap.anim_speed_sel = idx_of_u16(ANIM_SPEED_OPTS_MS, ANIM_SPEED_OPT_NUM,
+                                       tlv_get_u16(tlv, n, APP_ANIM_TAG_FRAME_MS, ANIM_SPEED_OPTS_MS[1]));
 }
 
 /**
@@ -263,13 +360,39 @@ static void settings_snapshot_pull(void)
     m_snap.sleep_auto = g_service_param.sleep.sleep_auto ? 1 : 0;
     m_snap.wake_sel   = idx_of_u16(WAKE_OPTS_MIN, WAKE_OPT_NUM, g_service_param.sleep.sleep_time);
     m_snap.hb_sel     = idx_of_u16(HB_OPTS_SEC, HB_OPT_NUM, g_service_param.network.film_heartbeat_interval);
+
+    /* app 参数不在 service_param 里，走归属 app 的参数通道读回 */
+    settings_app_params_pull();
+}
+
+/**
+ * @brief 写一条 app 参数（TLV）到归属 app
+ *
+ * 只负责组帧 + 转交；落盘与"是否立刻刷屏"都由 app_manager / 归属 app 决定
+ * （见 app_manager_param_set）。
+ */
+static void app_param_put_u8(uint8_t app_id, uint8_t tag, uint8_t v)
+{
+    uint8_t tlv[4];
+    uint8_t n = app_tlv_put_u8(tlv, tag, v);
+
+    app_manager_param_set(app_id, tlv, n);
+}
+
+static void app_param_put_u16(uint8_t app_id, uint8_t tag, uint16_t v)
+{
+    uint8_t tlv[4];
+    uint8_t n = app_tlv_put_u16(tlv, tag, v);
+
+    app_manager_param_set(app_id, tlv, n);
 }
 
 /**
  * @brief 落地一条页面改动（app_task 上下文）
  *
  * 值先校验再写：页面只上报"行号 + 候选下标"，行号/值都可能因版本不匹配而越界。
- * WiFi 开关与 BLE 通道设置走同一条路径（置参数 + 落盘 + 起停协议栈）。
+ * WiFi 开关与 BLE 通道设置走同一条路径（置参数 + 落盘 + 起停协议栈）；
+ * app 参数则转交给归属 app 自己的参数通道。
  */
 static void settings_apply(uint8_t row, uint8_t value)
 {
@@ -324,6 +447,27 @@ static void settings_apply(uint8_t row, uint8_t value)
         if(value >= HB_OPT_NUM) { return; }
         g_service_param.network.film_heartbeat_interval = (uint8_t)HB_OPTS_SEC[value];
         service_param_save();
+        break;
+
+    /* ---- app 参数：转交归属 app 的参数通道（TAG/范围由 app 自己的头文件定） ---- */
+    case F_IMG_PLAY:
+        if(value >= IMG_PLAY_OPT_NUM) { return; }
+        app_param_put_u8((uint8_t)APP_ID_IMAGE, APP_IMAGE_TAG_PLAY_MODE, value);
+        break;
+
+    case F_IMG_INT:
+        if(value >= IMG_INT_OPT_NUM) { return; }
+        app_param_put_u16((uint8_t)APP_ID_IMAGE, APP_IMAGE_TAG_INTERVAL, IMG_INT_OPTS_MIN[value]);
+        break;
+
+    case F_ANIM_LOOP:
+        if(value >= ANIM_LOOP_OPT_NUM) { return; }
+        app_param_put_u8((uint8_t)APP_ID_ANIMATION, APP_ANIM_TAG_PLAY_MODE, value);
+        break;
+
+    case F_ANIM_SPEED:
+        if(value >= ANIM_SPEED_OPT_NUM) { return; }
+        app_param_put_u16((uint8_t)APP_ID_ANIMATION, APP_ANIM_TAG_FRAME_MS, ANIM_SPEED_OPTS_MS[value]);
         break;
 
     default:
@@ -520,6 +664,14 @@ static void set_toggle(void)
                         req[1] = m_snap.wake_sel;   break;
     case F_HB_SEL:      m_snap.hb_sel     = (uint8_t)((m_snap.hb_sel + 1) % HB_OPT_NUM);
                         req[1] = m_snap.hb_sel;     break;
+    case F_IMG_PLAY:    m_snap.img_play_sel     = (uint8_t)((m_snap.img_play_sel + 1) % IMG_PLAY_OPT_NUM);
+                        req[1] = m_snap.img_play_sel;      break;
+    case F_IMG_INT:     m_snap.img_interval_sel = (uint8_t)((m_snap.img_interval_sel + 1) % IMG_INT_OPT_NUM);
+                        req[1] = m_snap.img_interval_sel;  break;
+    case F_ANIM_LOOP:   m_snap.anim_loop_sel    = (uint8_t)((m_snap.anim_loop_sel + 1) % ANIM_LOOP_OPT_NUM);
+                        req[1] = m_snap.anim_loop_sel;     break;
+    case F_ANIM_SPEED:  m_snap.anim_speed_sel   = (uint8_t)((m_snap.anim_speed_sel + 1) % ANIM_SPEED_OPT_NUM);
+                        req[1] = m_snap.anim_speed_sel;    break;
     default:            return;
     }
 
@@ -594,7 +746,7 @@ static void set_ui_create(lv_obj_t *root)
             lv_obj_set_style_bg_opa(tab, LV_OPA_COVER, LV_PART_MAIN);
             {
                 lv_obj_t *t = set_label(tab, &lv_font_unscii_8, lv_color_white(),
-                                        (cur_sec == 0) ? "DEVICE" : "PARAMETERS");
+                                        SEC_TITLES[cur_sec % (sizeof(SEC_TITLES) / sizeof(SEC_TITLES[0]))]);
                 lv_obj_center(t);
             }
             line = lv_obj_create(sh);
@@ -632,9 +784,13 @@ static void set_ui_create(lv_obj_t *root)
         }
 
         {
+            /* 键名用 14px 比例字（montserrat_14）—— 尺寸优先的选择。
+               注意：1bit 的 I1 面板会把抗锯齿字按覆盖率阈值切一刀，选中反白
+               （白字黑底）时白色笔画偏细；点阵字只有 8/16 两档（8 太小、16 太大），
+               所以这里接受"反白略细"换尺寸。 */
             lv_obj_t *k = set_label(row, &lv_font_montserrat_14, lv_color_black(), r->key);
 
-            lv_obj_set_pos(k, 14, 7);
+            lv_obj_align(k, LV_ALIGN_LEFT_MID, 14, 0);
             m_row_key[i] = k;   // 选中行整行反白时，键名要跟着变白
         }
 

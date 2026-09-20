@@ -362,6 +362,61 @@ static int app_param_ch_route(uint8_t ch, const uint8_t *data, uint8_t len)
     return 1;
 }
 
+/**
+ * @brief 读某个 app 的参数（TLV），供设置页等内部页面使用（不经 BLE）
+ *
+ * 与 BLE 参数通道共用同一套回调与状态载入规则：该 app 从未进入过时先把状态
+ * 载入（无数据则套默认值），否则会读到 BSS 零值。
+ *
+ * @return TLV 字节数；0 = 该 app 不支持参数 / 缓冲不足
+ */
+uint8_t app_manager_param_get(uint8_t app_id, uint8_t *out, uint8_t max)
+{
+    const app_entry_t *app;
+
+    if((app_id >= (uint8_t)APP_ID_MAX) || (out == NULL))
+    {
+        return 0;
+    }
+    app = m_app_registry[app_id];
+    if((app == NULL) || (app->on_param_get == NULL))
+    {
+        return 0;
+    }
+    if(!m_state_loaded[app_id])
+    {
+        app_state_load_of(app);
+    }
+    return app->on_param_get(out, max);
+}
+
+/**
+ * @brief 写某个 app 的参数（TLV），供设置页等内部页面使用（不经 BLE）
+ *
+ * 与 BLE 通道同款：先确保状态已载入 → on_param_set → 由框架按归属 app 落盘
+ * （app 侧因此不碰 NVS）。刷屏与否由 app 自己按"是否当前 app"判断。
+ */
+void app_manager_param_set(uint8_t app_id, const uint8_t *tlv, uint8_t len)
+{
+    const app_entry_t *app;
+
+    if((app_id >= (uint8_t)APP_ID_MAX) || (tlv == NULL) || (len == 0))
+    {
+        return;
+    }
+    app = m_app_registry[app_id];
+    if((app == NULL) || (app->on_param_set == NULL))
+    {
+        return;
+    }
+    if(!m_state_loaded[app_id])
+    {
+        app_state_load_of(app);
+    }
+    app->on_param_set(tlv, len);
+    app_state_save_of(app);
+}
+
 static void app_handle_event(const app_event_t *e)
 {
     /* BLE app 参数通道：先于菜单态闸门处理，保证目标 app 即便不是当前 app 也能收到 */

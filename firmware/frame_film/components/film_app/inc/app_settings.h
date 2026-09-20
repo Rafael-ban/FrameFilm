@@ -22,8 +22,8 @@ extern "C" {
 #define SET_KIND_TOGGLE     (2)   // 开关：ENTER 切换
 #define SET_KIND_CYCLE      (3)   // 枚举：ENTER 在候选值间循环
 
-/* 行数：设备信息 6 行 + 参数 4 行 */
-#define SETTINGS_ROW_NUM    (10)
+/* 行数：设备信息 6 行 + 参数 4 行 + app 参数 4 行 */
+#define SETTINGS_ROW_NUM    (14)
 
 /*********************************************************************
 * TYPEDEFS
@@ -54,6 +54,13 @@ typedef struct {
     uint8_t bt_on;          // 0/1
     uint8_t wake_sel;       // WAKE INTERVAL 候选下标
     uint8_t hb_sel;         // HEARTBEAT 候选下标
+
+    /* app 参数（IMG PLAY / IMG INTERVAL / ANIM LOOP / ANIM SPEED）
+       —— 归属 app 的参数，由 app_manager_param_get 读回、param_set 写回 */
+    uint8_t img_play_sel;       // 图片播放模式候选下标
+    uint8_t img_interval_sel;   // 图片自动切换间隔候选下标
+    uint8_t anim_loop_sel;      // 动图播放模式候选下标
+    uint8_t anim_speed_sel;     // 动图帧间隔（播放速度）候选下标
 } settings_snapshot_t;
 
 /*********************************************************************
