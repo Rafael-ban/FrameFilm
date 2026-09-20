@@ -125,6 +125,7 @@ film_service → film_hal → film_sys → ESP-IDF
 | 机型配置 | `firmware/frame_film/components/film_sys/inc/sys_cfg.h` + `firmware/frame_film/sdkconfig_{std,pro,max}` |
 | 屏幕选择 | `firmware/frame_film/components/film_hal/inc/hal_epd.h`（`EPD_SELECT_E6_*` 宏） |
 | BLE 协议 | `firmware/frame_film/components/film_service/inc/service_ble.h` |
+| 时间同步（0x4D） | `firmware/frame_film/components/film_service/src/service_time.c` + `service_param.h`（`tz_min`） |
 | 全局事件总线 | `firmware/frame_film/components/film_sys/inc/sys_event.h` |
 | EPD 驱动 | `firmware/frame_film/components/film_hal/src/hal_epd_{360,368,370,709}.c` |
 | film 播放 | `firmware/frame_film/components/film_service/src/service_film.c` |
@@ -138,6 +139,7 @@ film_service → film_hal → film_sys → ESP-IDF
 | UI 层框架（LVGL 宿主/页面生命周期） | `firmware/frame_film/components/film_ui/src/ui_core.c` |
 | UI 层开关与显示链路 | `firmware/frame_film/components/film_ui/inc/{ui_conf.h,ui_ops.h}` + `src/ui_display.c` |
 | 开机画面 / 主菜单 / 系统设置 | `firmware/frame_film/components/film_app/src/app_{boot,menu,settings}.c` |
+| 时钟页主读数数字字库（60px，自备） | `firmware/frame_film/components/film_app/src/font_clock_hero.c` + `tools/clock-font/gen_clock_font.py` |
 | 休眠卡 + 入睡流程（主菜单长按） | `firmware/frame_film/components/film_app/src/app_sleep.c` |
 | 手动休眠入口 / 占屏门闸 | `firmware/frame_film/components/film_app/src/app_manager.c`（`app_manager_sleep_show` + `m_sleep_page`） |
 | 进低功耗（deinit + deep sleep） | `firmware/frame_film/components/film_service/src/service_monitor.c`（`service_monitor_request_sleep`） |
@@ -159,7 +161,7 @@ film_service → film_hal → film_sys → ESP-IDF
 10. **不要在 app_task 里碰 `lv_*`** — LVGL 非线程安全，只在 `ui_task` 上下文调用；要向页面推数据走 `ui_core_post()`（下行）、要回写服务层走 `app_manager_post_ui_msg()`（上行），两者都在 `film_app`/`film_ui` 里
 11. **不要在 ui_task 里读写 `g_service_param` / 电池 / WiFi / SD** — 那些没有跨任务保证。设置页只上报 `[行号, 候选下标]`，由 `settings_on_event()` 在 app 任务侧校验、写参数、落盘，再把整页快照回投给页面
 12. **不要在唤醒条件还成立的时候进 deep sleep** — ext0 是**电平**触发（`hal_pwr.c`，STD/PRO = GPIO5 低有效、MAX = GPIO13 高有效）。长按是**按住期间**上报的，那一刻唤醒脚必然还满足条件 → 按着断电会当场醒回来（表现为"长按后闪一下就恢复"）。`app_sleep_run()` 入睡前要同时满足两件事，**缺一不可**：① `hal_pwr_wake_condition_met()` 为 false（等手指抬起）——它只会让入睡更晚、不会更早，是叠加项；② 距切页已过 **4s**（`SP_DRAW_WAIT_MS`）——`ui_core_page_enter()` 是异步的，**没有回调能告诉你"第一帧已上屏"**，只能按时间兜。这个值**不要**按"单帧 940ms"去推：上机实测 2s 不够（卡还没刷出来就断电，屏幕停在旧画面/半张卡），换页后第一次上屏的耗时明显大于稳态单帧。**EPD 挂在外设供电轨上，断电即停在半途**。别用按键库自己的状态顶替 ①：PRO/MAX 现在根本没发 press/release 事件，STD 的库虽有 `RE_ET_BTN_RELEASED` 但 HAL 的映射表把它丢了，而 HAL 里那份 `button_pressed` 在长按上报时就被置 false（手指还在键上）
-13. **不要假设"长按"在菜单里有别的含义** — 各 app 的长按是"回主菜单"，菜单是调度器的根、它的长按专门留给手动休眠；改这块时别把两条语义搅在一起
+13. **不要把菜单的"长按"与 app 内的"长按"搅在一起** — **长按确认键 = 手动休眠**（全局语义，三机型一致，且不看休眠模式开关）；**双击确认键 = 从 app 退回主菜单**（原长按语义）。两处只差"要不要画休眠卡"：主菜单长按画（`app_sleep_run(1)`，这帧要留在屏上直到唤醒），app 内长按不画（`app_manager_sleep_from_app()` → `app_sleep_run(0)`，屏上保持当前 app 画面）。菜单里双击没有语义（它就是"根"）。双击事件来自 `INPUT_PRESS_DOUBLE`：PRO/MAX 用 iot_button 的 `BUTTON_DOUBLE_CLICK`（库自己会消歧：双击只发 DOUBLE、不发 SINGLE），STD 用 hal_encoder 里的 one-shot 配对窗口补。**窗口值必须明显大于人手的双击间隔（现取 350ms），否则双击会被判成两次单击** —— 这一点在 PRO/MAX 上尤其反直觉：按钮库把 `short_press_time` 同时当作"单击结算窗口"和"双击配对窗口"（`iot_button.c` 的 state 2/3），而项目原来给它的是 50ms（只是个消抖阈值），比手速还短，所以必须先把这个值放开（见 `confirm_cfg`）。代价：确认键的单击下发晚一个窗口（上/下键不认双击，不受影响）
 14. **不要让 app 在"进不去"的状态下被切过去** — 图片/动图目录为空时它们的 `on_enter` 只打日志、不绘制，切过去屏幕会停在上一帧，用户会以为已经进到那个 app 了（切换还会先把面板停一次、白闪一帧）。改用 `app_entry_t.enter_block_reason` 预检：返回 NULL 才切，否则放弃切换并把原因经 `APP_UI_MSG_MENU_NOTICE` 显示在主菜单面板下方那块留白里。预检的调用点必须在 `app_do_switch()` 里 `service_file_set_dir_sync()` **之后**（文件列表是异步刷新的，早于它就问不准），也必须在 `app_stop_current()` 之前（那之前的退回是无副作用的，只需把目录还原）
 15. **不要在关闭状态下初始化蓝牙** — `service_ble_init()` 与 WiFi 同款：`ble_enable == 0` 直接跳过，不拉协议栈。运行期开关走 `service_ble_apply_enable()`（关 = disconnect + `gatt_server_uninit`；开 = 栈若活着就 `gatt_server_reinit`，只有从未拉起过才整栈 init）。设置页与心跳下发两条路径都用它，别只改参数
 

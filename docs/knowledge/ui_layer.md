@@ -747,6 +747,12 @@ static void clock_timer_cb(lv_timer_t *t)
     - **蓝牙开关对齐 WiFi**：`service_ble_init()` 在 `ble_enable == 0` 时跳过（原来无条件初始化）；新增 `service_ble_apply_enable()` 供设置页与心跳下发做运行期起停（关 = disconnect + `gatt_server_uninit`，开 = `gatt_server_reinit`；只有从未拉起过才整栈 init，因为 `uninit` 不关 bluedroid）
     - **进入前预检**：`app_entry_t.enter_block_reason`（返回 NULL 才可进入）。图片/动图目录为空时原本 `on_enter` 只打日志不绘制 → 切过去屏幕停在上一帧，像"已经进去了"。现在 `app_do_switch()` 里在 `service_file_set_dir_sync()` 之后、`app_stop_current()` 之前判；不通过则还原目录并原路退回，原因经 `APP_UI_MSG_MENU_NOTICE` 显示在菜单面板下方的留白里（换选中项 / 离开菜单即作废）
     - **选中卡片左下角切角**：设计稿是 9×9 的 45° 拉削（`.chamfer-bl`）。`lv_obj_set_style_clip_corner()` 对 radius=0 的方角没有任何效果（原来那行等于没写），而 LVGL 边框宽度是全边统一的、也没有 `clip-path`；改为程序生成一张 9×9 白三角 L8 位图（`0xFF` 白 / `0x00` 黑，与 ui_assets 的 L8 约定一致），挂在**轮播容器**下用 `LV_OBJ_FLAG_IGNORE_LAYOUT` 自己定位 —— 卡片的子对象会被裁到内容区（3px 描边之内），盖不住外角
+15. **按键语义重排：长按=休眠、双击=退出 app（2026-09-19）**：✅ 已完成
+    - **长按确认键 = 手动休眠**（全局，三机型一致，不看休眠模式开关）；**双击确认键 = 从 app 退回主菜单**（原长按语义）。触发点：`app_manager_process_input()`
+    - 两处只差"要不要画休眠卡"：主菜单长按 → `app_sleep_run(1)`（画卡，这帧要留到唤醒）；app 内长按 → `app_manager_sleep_from_app()` → `app_sleep_run(0)`（不画卡，屏上保持 app 画面）。**不画卡这条不需要等地板时间**：调用方先 `app_stop_current()`，它让 app 停止绘制、且对 UI 层是同步等 page_exit 完成的 → 之后不可能有半帧在途，故只等唤醒条件解除，松手即断电
+    - 新增 `INPUT_PRESS_DOUBLE`（`hal_input.h`）：PRO/MAX 用 iot_button 的 `BUTTON_DOUBLE_CLICK`；STD 的 esp-idf-lib 只有"单击"事件，故在 `hal_encoder.c` 里用 `esp_timer` one-shot 做配对窗口（窗口内第二次 → 双击，到期 → 补发单击）
+    - **⚠️ 窗口值是个坑（上机踩过）**：`BUTTON_DOUBLE_CLICK_WINDOW_MS = 350`（STD 对应的 `ENCODER_DOUBLE_CLICK_MS` 同值）。按钮库把 `short_press_time` 同时当"单击结算窗口"和"双击配对窗口"（`iot_button.c` state 2/3），而项目原来给它的是 `BUTTON_SHORT_PRESS_TIME_MS = 50`（消抖阈值），比人手的双击间隔还短 → 实测两次单击相隔 230ms 就没配上，表现为"双击按不出来"。所以确认键单独用 350，上/下键仍是 50（它们不认双击，单击保持灵敏）。代价：确认键单击下发晚一个窗口
+    - 各页底部提示行同步：菜单 `... HOLD SLEEP`、时钟 `DBL ENTER EXIT   HOLD SLEEP`、设置 `UP/DOWN  ENTER TOGGLE  DBL EXIT  HOLD SLEEP`
 
 > 时间源（§10.4）本次**未实现**：`app_clock.c` 仍直接使用 `time()`，设备重启后时间需依赖后续的
 > SNTP / 蓝牙校时 + RTC 兜底补齐。这是本次改造遗留的已知缺口。
