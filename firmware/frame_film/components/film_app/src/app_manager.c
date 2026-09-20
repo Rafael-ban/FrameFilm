@@ -95,7 +95,7 @@ static app_id_t m_last_guest_app = APP_ID_MAX;  // 最近一次切入的非图�
 /* 主菜单轮播表：下标即选择索引（UI 页据此显示"第 N 项"）。
    顺序必须与 app_menu.c 的 MENU_ITEMS 一致——那边是视觉表，这里是行为表。 */
 static const app_id_t m_menu_entries[APP_MENU_ENTRY_NUM] = {
-    APP_ID_IMAGE, APP_ID_TEMPLATE, APP_ID_CLOCK, APP_ID_ANIMATION, APP_ID_SETTINGS,
+    APP_ID_IMAGE, APP_ID_PASS, APP_ID_TEMPLATE, APP_ID_CLOCK, APP_ID_ANIMATION, APP_ID_SETTINGS,
 };
 static uint8_t m_menu_sel = 0;   // 主菜单当前选中索引
 static uint8_t m_boot_page = 0;  // 开机画面占屏中（此期间不进入任何 app，按键丢弃）

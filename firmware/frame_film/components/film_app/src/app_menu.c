@@ -92,11 +92,12 @@
 /* 轮播内容表。**顺序必须与 app_manager 的 m_menu_entries 一致**（选择索引即此表下标）。
  * 文案全部为 ASCII：固件字体只有 Montserrat 与 UNSCII，无 CJK 字形。 */
 static const menu_item_t MENU_ITEMS[APP_MENU_ENTRY_NUM] = {
-    { "IMAGE",     "IMG", "SD PHOTO WALL / UP-DOWN PAGING",        "DIRECT", "MONO SESSION REBUILD", UI_ICON_IMAGE     },
-    { "TEMPLATE",  "TPL", "LIVE PUSH CONTENT / WEATHER, CALENDAR", "DIRECT", "MONO SESSION REBUILD", UI_ICON_TEMPLATE  },
-    { "CLOCK",     "CLK", "DEVICE TIME / DATE AND WEEKDAY",        "UI",     "UI PAGE (LOW COST)",   UI_ICON_CLOCK     },
-    { "ANIMATION", "ANI", "FRAME ANIMATION / ADJUSTABLE RATE",     "DIRECT", "MONO SESSION REBUILD", UI_ICON_ANIMATION },
-    { "SETTINGS",  "SET", "DEVICE INFO AND SYSTEM PARAMETERS",     "UI",     "UI PAGE (LOW COST)",   UI_ICON_SETTINGS  },
+    { "IMAGE",     "IMG", "SD PHOTO WALL / UP-DOWN PAGING",        "DIRECT", "MONO SESSION REBUILD",   UI_ICON_IMAGE     },
+    { "PASS",      "PAS", "ARKNIGHTS PASS / COMING SOON",          "UI",     "UI PAGE (PLACEHOLDER)",  UI_ICON_PASS      },
+    { "TEMPLATE",  "TPL", "LIVE PUSH CONTENT / WEATHER, CALENDAR", "DIRECT", "MONO SESSION REBUILD",   UI_ICON_TEMPLATE  },
+    { "CLOCK",     "CLK", "DEVICE TIME / DATE AND WEEKDAY",        "UI",     "UI PAGE (LOW COST)",     UI_ICON_CLOCK     },
+    { "ANIMATION", "ANI", "FRAME ANIMATION / ADJUSTABLE RATE",     "DIRECT", "MONO SESSION REBUILD",   UI_ICON_ANIMATION },
+    { "SETTINGS",  "SET", "DEVICE INFO AND SYSTEM PARAMETERS",     "UI",     "UI PAGE (LOW COST)",     UI_ICON_SETTINGS  },
 };
 
 /*********************************************************************
@@ -261,7 +262,7 @@ static void menu_plate_chamfer(void)
 /**
  * @brief 重建轮播：当前项 ±PLATE_SPAN，循环取模
  *
- * 5 个条目取 ±2 正好覆盖全部（不重复），故不需要"两端空位"——
+ * 条目数 6 > ±2 覆盖的 5 张，故不会出现重复卡片，也不需要"两端空位"——
  * 超出的部分由屏幕边界自然裁掉，形成设计稿的"继续延伸"观感。
  */
 static void menu_rebuild_carousel(void)

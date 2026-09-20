@@ -38,6 +38,7 @@ extern "C" {
  */
 typedef enum {
     UI_ICON_IMAGE = 0,
+    UI_ICON_PASS,          // 通行证（占位 app 的卡片图标，源图 tools/ui-assets/png/pass.png）
     UI_ICON_TEMPLATE,
     UI_ICON_CLOCK,
     UI_ICON_ANIMATION,

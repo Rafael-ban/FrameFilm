@@ -53,6 +53,7 @@
 #include "app_animation.h"
 #include "app_menu.h"
 #include "app_settings.h"
+#include "app_pass.h"
 #include "app_boot.h"
 
 /*********************************************************************
@@ -122,6 +123,7 @@ void film_app_init(void)
     app_manager_register(&g_app_clock_entry);
     app_manager_register(&g_app_menu_entry);
     app_manager_register(&g_app_settings_entry);
+    app_manager_register(&g_app_pass_entry);    // 通行证占位页（菜单第 2 项，功能待开发）
 #endif
 #endif
 

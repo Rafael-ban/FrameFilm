@@ -51,16 +51,21 @@ typedef enum {
     APP_ID_ANIMATION,      // 动图
     APP_ID_SETTINGS,       // 系统设置（UI 层：设备信息 + 系统参数）
     APP_ID_MENU,           // 主菜单（UI 层：调度器的"根"状态，本身不在轮播列表里）
+    APP_ID_PASS,           // 通行证（UI 层占位页：菜单里有卡，功能待开发）
+                           // ⚠ 追加在末尾而不是插进中间：这些 id 会落盘
+                           // （service_param_app_current_set / app 参数 blob），
+                           // 中间插入会让老设备上的 id 含义整体错位
     APP_ID_MAX,
 } app_id_t;
 
 /**
  * @brief 主菜单轮播的条目数
  *
- * 轮播 = 4 个内容 app + 系统设置；APP_ID_MENU 自身不是可选项（它就是菜单）。
+ * 轮播 = 5 个 app 卡片（图片 / 通行证 / 模板 / 时钟 / 动图）+ 系统设置；
+ * APP_ID_MENU 自身不是可选项（它就是菜单）。
  * 显示顺序由 app_manager 的 m_menu_entries 定义，UI 页面侧的视觉表需与其一致。
  */
-#define APP_MENU_ENTRY_NUM      (5)
+#define APP_MENU_ENTRY_NUM      (6)
 
 /**
  * @brief 显示层归属
