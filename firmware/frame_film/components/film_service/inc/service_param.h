@@ -19,8 +19,9 @@ extern "C" {
  * MACROS
  */
 /* ServiceParam_Def_t 布局版本：1 = 含 film 成员的旧布局；2 = 移除 film + app 参数外置；
-   3 = 加入 tz_min（时区，随 BLE 0x4D 时间同步下发） */
-#define SERVICE_PARAM_VER                                          (3)
+   3 = 加入 tz_min（时区，随 BLE 0x4D 时间同步下发）；
+   4 = 移除 ble_mode（"手动打开"策略从未实现，蓝牙现在只有 ble_enable 一个开关） */
+#define SERVICE_PARAM_VER                                          (4)
 
 /* app 状态持久化：app_id 数值必须与 film_app/inc/app_interface.h 的 app_id_t 对齐
  * （service 层看不到 app_id_t，这里用裸数值常量） */
@@ -62,7 +63,6 @@ typedef struct
 typedef struct
 {
     uint8_t ble_enable;       // BLE开关 0：关闭 1：开启
-    uint8_t ble_mode;         // BLE模式 0：常开 1：手动打开（休眠按键双击）
 } ServiceBle_Def_t;
 
 #pragma pack(4)

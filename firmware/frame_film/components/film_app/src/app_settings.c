@@ -56,6 +56,14 @@
 #define ROW_H               (30)
 #define Y_LIST              (66)     // 列表起点（表头 + 分节标题之下）
 
+/* BATTERY 行的电量条几何：外框 62 宽（含 1px 描边），填充按内宽 60 按比例给 */
+#define SET_BAR_TRACK_W     (62)
+#define SET_BAR_TRACK_H     (9)
+#define SET_BAR_FILL_W      (SET_BAR_TRACK_W - 2)
+
+/* 未选中：进页面时不预选任何行，第一次 UP/DOWN 才落条（也用于 ENTER 的越界判断） */
+#define SET_SEL_NONE        (0xFF)
+
 /* 循环取值的候选项（也是校验表，上报值必须落在其中） */
 #define WAKE_OPT_NUM        (8)
 static const char *const WAKE_OPTS[WAKE_OPT_NUM] = {
@@ -63,10 +71,6 @@ static const char *const WAKE_OPTS[WAKE_OPT_NUM] = {
 };
 static const uint16_t WAKE_OPTS_MIN[WAKE_OPT_NUM] = {
     10, 30, 60, 120, 360, 720, 1440, 2880       // 与 WAKE_OPTS 一一对应的分钟值
-};
-#define BTMODE_OPT_NUM      (2)
-static const char *const BTMODE_OPTS[BTMODE_OPT_NUM] = {
-    "ALWAYS ON", "MANUAL (2X KEY)"
 };
 #define HB_OPT_NUM          (6)
 static const char *const HB_OPTS[HB_OPT_NUM] = {
@@ -80,9 +84,9 @@ static const uint16_t HB_OPTS_SEC[HB_OPT_NUM] = {
 _Static_assert(sizeof(settings_snapshot_t) <= UI_CMD_DATA_MAX,
                "settings_snapshot_t exceeds ui cmd payload");
 
-/* 列表总高：2 个分节标题（22 + 4 间距） + 11 行。
+/* 列表总高：2 个分节标题（22 + 4 间距） + 10 行。
    正文可用高度 = 720 - 状态栏 30 - 提示行 28 - 上下留白 36 = 626，
-   扣掉表头 16 + 间距 24 后余 586 —— 列表 382 有富余，不会溢出到提示行。 */
+   扣掉表头 16 + 间距 24 后余 586 —— 列表 352 有富余，不会溢出到提示行。 */
 #define SET_LIST_H          (2 * (22 + 4) + SETTINGS_ROW_NUM * ROW_H)
 
 /*********************************************************************
@@ -98,7 +102,7 @@ typedef struct {
 /* 字段编号（避免依赖结构体偏移，页面对快照只读） */
 enum {
     F_BAT = 0, F_WIFI, F_BT, F_PANEL, F_STORAGE, F_FW,
-    F_SLEEP, F_AUTOWAKE, F_WIFI_ON, F_BT_ON, F_WAKE_SEL, F_BTMODE_SEL, F_HB_SEL,
+    F_SLEEP, F_AUTOWAKE, F_WIFI_ON, F_BT_ON, F_WAKE_SEL, F_HB_SEL,
 };
 
 /* 行表。**顺序即显示顺序，下标即上报的行号。** */
@@ -112,7 +116,6 @@ static const settings_row_t ROWS[SETTINGS_ROW_NUM] = {
     { 1, "SLEEP MODE",   SET_KIND_TOGGLE, F_SLEEP      },
     { 1, "AUTO WAKE",    SET_KIND_TOGGLE, F_AUTOWAKE   },
     { 1, "WAKE INTERVAL",SET_KIND_CYCLE,  F_WAKE_SEL   },
-    { 1, "BT MODE",      SET_KIND_CYCLE,  F_BTMODE_SEL },
     { 1, "HEARTBEAT",    SET_KIND_CYCLE,  F_HB_SEL     },
 };
 
@@ -120,6 +123,7 @@ static const settings_row_t ROWS[SETTINGS_ROW_NUM] = {
  * LOCAL VARIABLES
  */
 static lv_obj_t *m_rows[SETTINGS_ROW_NUM];
+static lv_obj_t *m_row_key[SETTINGS_ROW_NUM];    // 键名标签（选中行要反白，否则黑底黑字看不见）
 static lv_obj_t *m_row_fill[SETTINGS_ROW_NUM];   // 电量条填充块（仅 BATTERY 行非空）
 static lv_obj_t *m_row_val[SETTINGS_ROW_NUM];    // 右侧取值标签
 static lv_obj_t *m_row_tog[SETTINGS_ROW_NUM];    // 开关块
@@ -129,7 +133,8 @@ static lv_obj_t *m_row_idx_label = NULL;
 
 static app_shell_t m_shell;      // 顶部状态栏（数据复用设置快照，不额外往返）
 static settings_snapshot_t m_snap;
-static uint8_t m_sel = 6;      // 默认落在第一个可操作行（SLEEP MODE）
+/* 进页面时**不预选**：没有高亮条，第一次 UP/DOWN 才落到第一条可操作行 */
+static uint8_t m_sel = SET_SEL_NONE;
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -170,7 +175,6 @@ static const char *row_text(uint8_t idx)
     case F_STORAGE:    return m_snap.storage;
     case F_FW:         return m_snap.fw;
     case F_WAKE_SEL:   return WAKE_OPTS[m_snap.wake_sel % WAKE_OPT_NUM];
-    case F_BTMODE_SEL: return BTMODE_OPTS[m_snap.bt_mode_sel % BTMODE_OPT_NUM];
     case F_HB_SEL:     return HB_OPTS[m_snap.hb_sel % HB_OPT_NUM];
     default:           return "";
     }
@@ -258,7 +262,6 @@ static void settings_snapshot_pull(void)
     m_snap.sleep_mode = g_service_param.sleep.sleep_mode ? 1 : 0;
     m_snap.sleep_auto = g_service_param.sleep.sleep_auto ? 1 : 0;
     m_snap.wake_sel   = idx_of_u16(WAKE_OPTS_MIN, WAKE_OPT_NUM, g_service_param.sleep.sleep_time);
-    m_snap.bt_mode_sel = (g_service_param.ble.ble_mode < BTMODE_OPT_NUM) ? g_service_param.ble.ble_mode : 0;
     m_snap.hb_sel     = idx_of_u16(HB_OPTS_SEC, HB_OPT_NUM, g_service_param.network.film_heartbeat_interval);
 }
 
@@ -314,12 +317,6 @@ static void settings_apply(uint8_t row, uint8_t value)
     case F_WAKE_SEL:
         if(value >= WAKE_OPT_NUM) { return; }
         g_service_param.sleep.sleep_time = WAKE_OPTS_MIN[value];
-        service_param_save();
-        break;
-
-    case F_BTMODE_SEL:
-        if(value >= BTMODE_OPT_NUM) { return; }
-        g_service_param.ble.ble_mode = value;
         service_param_save();
         break;
 
@@ -396,6 +393,11 @@ static void set_apply(void)
         lv_obj_set_style_bg_opa(m_rows[i], sel ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_bg_color(m_rows[i], lv_color_black(), LV_PART_MAIN);
 
+        /* 键名也要跟着反白：整行是黑底，键名不变色就成了黑底黑字 */
+        if(m_row_key[i] != NULL)
+        {
+            lv_obj_set_style_text_color(m_row_key[i], fg, LV_PART_MAIN);
+        }
         if(m_row_ptr[i] != NULL)
         {
             /* 只读行不给指针 */
@@ -405,11 +407,8 @@ static void set_apply(void)
         if(m_row_val[i] != NULL)
         {
             lv_obj_set_style_text_color(m_row_val[i], fg, LV_PART_MAIN);
-            if(r->kind == SET_KIND_TOGGLE)
-            {
-                lv_label_set_text(m_row_val[i], row_text(i));
-            }
-            else if(r->kind != SET_KIND_BAR)
+            /* 开关行的 ON/OFF 由下面的开关块分支接管，其余（含电量条的 "82%"）都取快照文本 */
+            if(r->kind != SET_KIND_TOGGLE)
             {
                 lv_label_set_text(m_row_val[i], row_text(i));
             }
@@ -439,25 +438,45 @@ static void set_apply(void)
         }
         if(m_row_fill[i] != NULL)
         {
+            /* 填充块按内宽等比：满电正好铺满外框内侧 */
             lv_obj_set_style_bg_color(m_row_fill[i], fg, LV_PART_MAIN);
-            lv_obj_set_width(m_row_fill[i], (int32_t)(62 * m_snap.bat_pct / 100));
+            lv_obj_set_width(m_row_fill[i], (int32_t)(SET_BAR_FILL_W * m_snap.bat_pct / 100));
         }
     }
 
     if(m_row_idx_label != NULL)
     {
-        lv_label_set_text_fmt(m_row_idx_label, "ROW %02u / %02u",
-                              (unsigned)(m_sel + 1), (unsigned)SETTINGS_ROW_NUM);
+        if(m_sel < SETTINGS_ROW_NUM)
+        {
+            lv_label_set_text_fmt(m_row_idx_label, "ROW %02u / %02u",
+                                  (unsigned)(m_sel + 1), (unsigned)SETTINGS_ROW_NUM);
+        }
+        else
+        {
+            /* 还没选中任何行（刚进页面） */
+            lv_label_set_text_fmt(m_row_idx_label, "ROW -- / %02u", (unsigned)SETTINGS_ROW_NUM);
+        }
     }
 }
 
 /**
  * @brief 跳到下一个可操作行（跳过只读行）
+ *
+ * 未选中时（刚进页面）从列表两端起算：UP 落第一条、DOWN 落最后一条。
  */
 static void set_move(int delta)
 {
-    uint8_t i = m_sel;
+    uint8_t i;
     uint8_t step;
+
+    if(m_sel < SETTINGS_ROW_NUM)
+    {
+        i = m_sel;
+    }
+    else
+    {
+        i = (delta > 0) ? (uint8_t)(SETTINGS_ROW_NUM - 1) : 0;
+    }
 
     for(step = 0; step < SETTINGS_ROW_NUM; step++)
     {
@@ -480,13 +499,15 @@ static void set_move(int delta)
 static void set_toggle(void)
 {
     uint8_t req[2];
-    const settings_row_t *r = &ROWS[m_sel];
+    const settings_row_t *r;
 
-    if(row_is_ro(m_sel))
+    /* 未选中（刚进页面）不接受 ENTER：m_sel 越界时连 ROWS[m_sel] 都不能碰 */
+    if(m_sel >= SETTINGS_ROW_NUM || row_is_ro(m_sel))
     {
         return;
     }
 
+    r = &ROWS[m_sel];
     req[0] = m_sel;
 
     switch(r->field)
@@ -497,8 +518,6 @@ static void set_toggle(void)
     case F_AUTOWAKE:    m_snap.sleep_auto = (uint8_t)!m_snap.sleep_auto; req[1] = m_snap.sleep_auto; break;
     case F_WAKE_SEL:    m_snap.wake_sel   = (uint8_t)((m_snap.wake_sel + 1) % WAKE_OPT_NUM);
                         req[1] = m_snap.wake_sel;   break;
-    case F_BTMODE_SEL:  m_snap.bt_mode_sel = (uint8_t)((m_snap.bt_mode_sel + 1) % BTMODE_OPT_NUM);
-                        req[1] = m_snap.bt_mode_sel; break;
     case F_HB_SEL:      m_snap.hb_sel     = (uint8_t)((m_snap.hb_sel + 1) % HB_OPT_NUM);
                         req[1] = m_snap.hb_sel;     break;
     default:            return;
@@ -614,9 +633,9 @@ static void set_ui_create(lv_obj_t *root)
 
         {
             lv_obj_t *k = set_label(row, &lv_font_montserrat_14, lv_color_black(), r->key);
+
             lv_obj_set_pos(k, 14, 7);
-            m_row_val[i] = k;   /* 键名标签先占位，取值标签下面重建 */
-            m_row_val[i] = NULL;
+            m_row_key[i] = k;   // 选中行整行反白时，键名要跟着变白
         }
 
         if(r->kind == SET_KIND_BAR)
@@ -626,7 +645,7 @@ static void set_ui_create(lv_obj_t *root)
 
             lv_obj_remove_style_all(track);
             lv_obj_set_scrollable(track, false);
-            lv_obj_set_size(track, 62, 9);
+            lv_obj_set_size(track, SET_BAR_TRACK_W, SET_BAR_TRACK_H);
             lv_obj_set_style_border_width(track, 1, LV_PART_MAIN);
             lv_obj_set_style_border_color(track, lv_color_black(), LV_PART_MAIN);
             lv_obj_align(track, LV_ALIGN_RIGHT_MID, -54, 0);
@@ -634,7 +653,10 @@ static void set_ui_create(lv_obj_t *root)
             fill = lv_obj_create(track);
             lv_obj_remove_style_all(fill);
             lv_obj_set_scrollable(fill, false);
-            lv_obj_set_size(fill, 30, 7);
+            /* remove_style_all 把 bg_opa 也清成透明了，这里必须显式打开，
+               否则电量条是个只有外框的空槽（宽度由 set_apply 按电量给） */
+            lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_size(fill, 0, SET_BAR_TRACK_H - 2);
             lv_obj_align(fill, LV_ALIGN_LEFT_MID, 0, 0);
             m_row_fill[i] = fill;
 
@@ -683,6 +705,7 @@ static void set_ui_create(lv_obj_t *root)
 static void set_ui_destroy(void)
 {
     memset(m_rows, 0, sizeof(m_rows));
+    memset(m_row_key, 0, sizeof(m_row_key));
     memset(m_row_fill, 0, sizeof(m_row_fill));
     memset(m_row_val, 0, sizeof(m_row_val));
     memset(m_row_tog, 0, sizeof(m_row_tog));

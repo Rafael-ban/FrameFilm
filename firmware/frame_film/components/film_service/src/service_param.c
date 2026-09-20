@@ -175,7 +175,6 @@ static void service_param_set_default(void)
 
     // BLE参数重置
     g_service_param.ble.ble_enable = 1; // BLE默认开启
-    g_service_param.ble.ble_mode = 0; // BLE默认常开
 }
 
 /**
