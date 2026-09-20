@@ -10,6 +10,7 @@ set(srcs "src/app_init.c"
          "src/app_menu.c"
          "src/app_settings.c"
          "src/app_shell.c"
+         "src/font_clock_hero.c"
          )
 
 set(public_include "inc")

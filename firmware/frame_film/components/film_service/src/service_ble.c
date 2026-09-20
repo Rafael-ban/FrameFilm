@@ -47,6 +47,7 @@
 #include "service_film.h"
 #include "service_ota.h"
 #include "service_param.h"
+#include "service_time.h"
 #include "service_wifi.h"
 
 #include "hal_api.h"
@@ -1005,6 +1006,34 @@ static void ble_cmd_process(ble_cmd_t *cmd)
             resp_buf[8] = ble_checksum(resp_buf, 8);
             service_ble_msg_gatts_data_send(resp_buf, sizeof(resp_buf), MSG_BLE_CH1_OUT_DATA);
             sys_logi(BEL_SERVICE_TAG, "Screen info: panel_id=0x%02x, %d x %d", EPD_PANEL_ID, EPD_WIDTH, EPD_HEIGHT);
+            break;
+        }
+        case BLE_FILM_TRANS_CH_CTRL_TIME_SYNC : // 时间 + 时区同步
+        {
+            /* payload: 4B 大端 Unix 秒（UTC）+ 2B 大端时区（距 UTC 分钟数，东为正） */
+            if(cmd->len == 6)
+            {
+                uint32_t sec = ((uint32_t)cmd->pdata[0] << 24) | ((uint32_t)cmd->pdata[1] << 16)
+                             | ((uint32_t)cmd->pdata[2] << 8)  |  (uint32_t)cmd->pdata[3];
+                int16_t tz = (int16_t)(((uint16_t)cmd->pdata[4] << 8) | (uint16_t)cmd->pdata[5]);
+
+                if(service_time_sync((int64_t)sec, tz) == 0)
+                {
+                    /* 回显原样 6 字节：连接端据此确认设备确实应用了，不必再等下一帧 */
+                    uint8_t resp_buf[10];
+
+                    resp_buf[0] = BLE_CMD_HEAD;
+                    resp_buf[1] = BLE_FILM_TRANS_CH_CTRL_TIME_SYNC;
+                    resp_buf[2] = 6;
+                    memcpy(&resp_buf[3], cmd->pdata, 6);
+                    resp_buf[9] = ble_checksum(resp_buf, 9);
+                    service_ble_msg_gatts_data_send(resp_buf, sizeof(resp_buf), MSG_BLE_CH1_OUT_DATA);
+                }
+            }
+            else
+            {
+                sys_logw(BEL_SERVICE_TAG, "time sync: bad len %u (expect 6)", (unsigned)cmd->len);
+            }
             break;
         }
         // app 相关通道（0x4B 切 app / 0x45~0x4A 参数通道）：BLE 层不解析语义，整包上浮给 app 层，

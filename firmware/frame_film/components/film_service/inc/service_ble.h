@@ -81,6 +81,11 @@ extern "C"{
 #define BLE_FILM_TRANS_CH_CTRL_APP_SWITCH                  (0x4B) // 切换 app（1字节 app_id，app 层消费）
 #define BLE_FILM_TRANS_CH_CTRL_APP_CURRENT_GET             (0x4C) // 查询当前 app（返回 1字节 app_id）
 
+// 时间同步：4字节大端 Unix 秒（UTC）+ 2字节大端时区（距 UTC 分钟数，东为正，东八区=+480）。
+// 设备应用后**回显同样的 6 字节**，连接端据此确认。
+// 注：dock 固件的命令表是独立一份（service_cmd.c），未实现此号。
+#define BLE_FILM_TRANS_CH_CTRL_TIME_SYNC                   (0x4D) // 时间 + 时区同步
+
 // app 参数通道（0x45~0x4A）：payload 为 TLV 列表，BLE 层不解析语义，只整包上浮给 app 层
 // 约定：设置通道 = param_ch，查询通道 = param_ch + 1
 #define BLE_FILM_TRANS_CH_APP_IMAGE_PARAM                  (0x45) // 图片 app 参数设置

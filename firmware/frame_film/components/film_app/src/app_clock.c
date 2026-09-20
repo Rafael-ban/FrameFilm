@@ -40,6 +40,7 @@
 #include "ui_ops.h"     /* app_ui_ops_t（含 lvgl.h） */
 #include "ui_conf.h"    /* UI_LOGICAL_W：正文宽度按屏宽算，不写死 */
 #include "app_shell.h"  /* 顶部状态栏 + 底部提示行 */
+#include "font_clock_hero.h"    /* 主读数数字字库（60px，见 tools/clock-font） */
 #include "app_clock.h"
 
 /*********************************************************************
@@ -508,7 +509,7 @@ static void clock_ui_create(lv_obj_t *root)
     /* 三角与切角位图：▶ / ◀ 与星期黑标的左下角 */
     clock_tri_px(m_tri_r_px, CK_TRI_W, CK_TRI_H, 0, 0, 0, 2 * CK_TRI_H, 2 * CK_TRI_W, CK_TRI_H);
     clock_tri_px(m_tri_l_px, CK_TRI_W, CK_TRI_H, 2 * CK_TRI_W, 0, 2 * CK_TRI_W, 2 * CK_TRI_H, 0, CK_TRI_H);
-    clock_tri_px(m_cut_px, CK_CUT, CK_CUT, 0, 0, 0, 2 * CK_CUT, 2 * CK_CUT, 2 * CK_CUT);
+    clock_tri_px(m_cut_px, CK_CUT, CK_CUT, 0, 0, 2 * CK_CUT, 0, 2 * CK_CUT, 2 * CK_CUT);
     clock_dsc_init(&m_tri_r_dsc, m_tri_r_px, CK_TRI_W, CK_TRI_H);
     clock_dsc_init(&m_tri_l_dsc, m_tri_l_px, CK_TRI_W, CK_TRI_H);
     clock_dsc_init(&m_cut_dsc, m_cut_px, CK_CUT, CK_CUT);
@@ -540,7 +541,8 @@ static void clock_ui_create(lv_obj_t *root)
     lv_obj_set_style_pad_column(row, 20, LV_PART_MAIN);
     img = lv_image_create(row);
     lv_image_set_src(img, &m_tri_r_dsc);
-    m_hm_label = clock_label(row, &lv_font_montserrat_48, lv_color_black(), "--:--");
+    /* 主读数用自备的 60px 数字字库：LVGL 内置 Montserrat 最大只到 48px（见 tools/clock-font） */
+    m_hm_label = clock_label(row, &lv_font_clock_hero, lv_color_black(), "--:--");
     lv_obj_set_style_text_letter_space(m_hm_label, 3, LV_PART_MAIN);
     img = lv_image_create(row);
     lv_image_set_src(img, &m_tri_l_dsc);
@@ -588,7 +590,8 @@ static void clock_ui_create(lv_obj_t *root)
         lv_obj_set_style_text_letter_space(m_wday_label, 4, LV_PART_MAIN);
         lv_obj_center(m_wday_label);
 
-        /* 左下切角：压一个与底色同色的三角上去。
+        /* 左下切角：压一个 9×9 位图上去 —— 该位图里"右上三角"填黑（与被切的
+           黑标同色，接得上），"左下三角"填白（底色，就是被切掉的那块）。
            LVGL 没有 clip-path 式的切角图元，这是唯一能用基础图元做出"切削"的办法。 */
         img = lv_image_create(tab);
         lv_image_set_src(img, &m_cut_dsc);

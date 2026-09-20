@@ -251,7 +251,7 @@ static void menu_plate_chamfer(void)
     }
 
     img = lv_image_create(m_carousel);
-    lv_obj_add_flag(img, LV_OBJ_FLAG_IGNORE_LAYOUT);   // 不参与 flex 排布，自己定位
+    lv_obj_set_ignore_layout(img, true);   // 不参与 flex 排布，自己定位
     lv_image_set_src(img, &m_chamfer_dsc);
     lv_obj_set_pos(img, PLATE_CUR_LEFT, PLATE_CUR_BOTTOM - PLATE_CHAMFER);
 }
@@ -290,7 +290,7 @@ static void menu_notice_clear(void)
 {
     if(m_notice_row != NULL)
     {
-        lv_obj_add_flag(m_notice_row, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(m_notice_row, true);
     }
 }
 
@@ -322,7 +322,7 @@ static void menu_notice_set(const void *data, uint8_t len)
         sys_logw(APP_MENU_TAG, "notice truncated (%u chars)", (unsigned)n);
     }
     lv_label_set_text(m_notice_label, buf);
-    lv_obj_remove_flag(m_notice_row, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(m_notice_row, false);
 }
 
 /**

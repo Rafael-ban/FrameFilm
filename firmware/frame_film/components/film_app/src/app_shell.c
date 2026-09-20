@@ -101,14 +101,7 @@ static void shell_ind_set(lv_obj_t *label, lv_obj_t *pip, uint8_t on, uint8_t co
     if(label != NULL)
     {
         /* 用 HIDDEN 而不是透明：隐藏的 flex 子项不占位，关闭时右侧直接收成 "BAT 82%" */
-        if(on)
-        {
-            lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
-        }
-        else
-        {
-            lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
-        }
+        lv_obj_set_hidden(label, on ? false : true);
     }
     if(pip == NULL)
     {
@@ -117,11 +110,11 @@ static void shell_ind_set(lv_obj_t *label, lv_obj_t *pip, uint8_t on, uint8_t co
 
     if(!on)
     {
-        lv_obj_add_flag(pip, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(pip, true);
         return;
     }
 
-    lv_obj_remove_flag(pip, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(pip, false);
     lv_obj_set_style_bg_opa(pip, conn ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
 }
 

@@ -18,8 +18,9 @@ extern "C" {
 /*********************************************************************
  * MACROS
  */
-/* ServiceParam_Def_t 布局版本：1 = 含 film 成员的旧布局；2 = 移除 film + app 参数外置 */
-#define SERVICE_PARAM_VER                                          (2)
+/* ServiceParam_Def_t 布局版本：1 = 含 film 成员的旧布局；2 = 移除 film + app 参数外置；
+   3 = 加入 tz_min（时区，随 BLE 0x4D 时间同步下发） */
+#define SERVICE_PARAM_VER                                          (3)
 
 /* app 状态持久化：app_id 数值必须与 film_app/inc/app_interface.h 的 app_id_t 对齐
  * （service 层看不到 app_id_t，这里用裸数值常量） */
@@ -69,6 +70,8 @@ typedef struct
 {
     uint8_t param_ver;         // 结构体版本，与 nvs 内不一致则重建默认值
     uint8_t factory_flag;
+    int16_t tz_min;            // 本地时区（距 UTC 的分钟数，东为正：东八区 = +480，0 = UTC）
+                                // 由连接端随"时间同步"下发（BLE 0x4D），落盘以免重启后丢
     ServiceSleep_Def_t sleep;
     ServiceNetwork_Def_t network;
     ServiceBle_Def_t ble;

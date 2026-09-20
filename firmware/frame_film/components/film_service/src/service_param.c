@@ -155,6 +155,9 @@ static void service_param_set_default(void)
     // 设置服务参数默认值
     g_service_param.param_ver = SERVICE_PARAM_VER;
     g_service_param.factory_flag = SERVICE_FACTORY_DEFAULT_FLAG;
+    /* 时区默认 UTC（= 改动前的行为）。想默认东八区就把它改成 +480。
+       注意 localtime_r 依赖 TZ 环境变量，光设这个字段不生效 —— 由 service_time 应用。 */
+    g_service_param.tz_min = 0;
 
     g_service_param.sleep.sleep_mode = 1;  // 休眠模式默认开启
     g_service_param.sleep.sleep_auto = 0;  // 自动唤醒默认关闭
