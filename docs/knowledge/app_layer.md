@@ -123,6 +123,7 @@ typedef enum {
     APP_ID_ANIMATION,
     APP_ID_SETTINGS,       // 系统设置（UI 层）
     APP_ID_MENU,           // 主菜单（UI 层，调度器的"根"状态，不在轮播列表里）
+    APP_ID_PASS,           // 通行证（UI 层占位页；id 追加在末尾，避免动到已落盘的 id）
     APP_ID_MAX,
 } app_id_t;
 
@@ -249,7 +250,7 @@ static app_input_result_t app_manager_process_input(input_press_type_t key) {
 > 但长按留给"回主菜单"）。因此简易模式下只有「图片 + 模板」在场，模板不占用任何键，上/下与确认键都能安全接管。
 
 **主菜单 UI（已实现）：**
-- 菜单是 **LVGL 页面**（横向轮播 3 张卡片 + 指示点 + ACTIVE 大字 + 层级面板），不是直绘封面。
+- 菜单是 **LVGL 页面**（横向轮播 ±2 共 5 张卡片 + 指示点 + ACTIVE 大字 + 层级面板），不是直绘封面。
 - 图标来自 **SD 卡可替换资源**（`/sdcard/app/<app>/icon.bin`，FFUI 容器，80×80 1bpp）；
   缺失/尺寸不符/头非法 → 回退固件内置默认图（`ui_defaults.c`）。
 - 选中项 = 实心黑板 + 反白图标 + 加粗描边；反色由固件对展开后的亮度缓冲取反（`~L8`）得到，**只需一份资源**。
