@@ -182,9 +182,9 @@ static lv_obj_t *menu_make_plate(lv_obj_t *parent, uint8_t idx, int cur)
            故切角是另画的一张位图 —— 见 menu_plate_chamfer() */
     }
 
-    /* 左上角编号 */
+    /* 左上角编号：与卡片名字同字号（16px），2 字符 = 32px 宽，占左上角不挡图标 */
     {
-        lv_obj_t *n = menu_label(plate, &lv_font_unscii_8, fg, "");
+        lv_obj_t *n = menu_label(plate, &lv_font_unscii_16, fg, "");
 
         lv_label_set_text_fmt(n, "%02u", (unsigned)(idx + 1));
         lv_obj_align(n, LV_ALIGN_TOP_LEFT, 8, 6);
@@ -205,6 +205,8 @@ static lv_obj_t *menu_make_plate(lv_obj_t *parent, uint8_t idx, int cur)
     {
         lv_image_set_src(img, src);
     }
+    /* 卡片名字用 16px 像素字：短码只有 3 个字符（48px 宽）比图标还窄，卡片装得下，
+       与上面同字号的编号一起构成"卡片自己的标签"；卡片外的正文仍是 8px */
     menu_label(grp, &lv_font_unscii_8, fg, it->code);
     lv_obj_center(grp);
 
