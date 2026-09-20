@@ -87,9 +87,9 @@ function onDeviceTypeChanged() {
     if (typeof syncKeyboardAvailability === 'function') {
         syncKeyboardAvailability();
     }
-    // App 封面推送仅冰箱贴（非 Dock）可用
-    if (typeof syncAppCoverAvailability === 'function') {
-        syncAppCoverAvailability();
+    // 时间同步（0x4D）仅冰箱贴固件支持
+    if (typeof syncTimeSyncAvailability === 'function') {
+        syncTimeSyncAvailability();
     }
 }
 

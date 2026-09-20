@@ -78,6 +78,7 @@ const BLE_FILM_TRANS_CH_CTRL_FILM_HEARTBEAT_INTERVAL_GET = 0x41;
 const BLE_FILM_TRANS_CH_CTRL_SCREEN_RESOLUTION_GET = 0x42;
 const BLE_FILM_TRANS_CH_CTRL_KEYBOARD_KEY_SET = 0x43;
 const BLE_FILM_TRANS_CH_CTRL_KEYBOARD_KEY_GET = 0x44;
+const BLE_FILM_TRANS_CH_CTRL_TIME_SYNC = 0x4D;
 
 const BLE_CMD_LEN_MIN = 4;
 
@@ -810,6 +811,101 @@ async function sendBleKeyboardKeyGet() {
     await delay(BLE_CTRL_DELAY);
 }
 
+// 时间同步（0x4D）：把浏览器当前时间 + 本机时区发给设备
+// 载荷：4B 大端 Unix 秒（UTC） + 2B 大端 int16 时区（距 UTC 分钟数，东为正）
+// 设备应用后原样回显这 6 字节用于确认；不合法（时间戳不在 2020~2100 / 时区超 ±14 小时）则不回包，只能靠超时判定
+const TIME_SYNC_TIMEOUT_MS = 2000;
+let timeSyncPending = null; // { resolve, timer }：等待设备回显期间的回调
+
+// 时区分钟数 → “+08:00” / “-05:00”
+function formatTimeZoneText(tzMin) {
+    var sign = tzMin < 0 ? '-' : '+';
+    var abs = Math.abs(tzMin);
+    var p2 = function(n) { return (n < 10 ? '0' : '') + n; };
+    return sign + p2(Math.floor(abs / 60)) + ':' + p2(abs % 60);
+}
+
+// 设备回显的秒 + 时区 → “2026-09-20 14:32 (+08:00)”
+function formatTimeSyncResult(sec, tzMin) {
+    var d = new Date(sec * 1000);
+    var p2 = function(n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' +
+        p2(d.getHours()) + ':' + p2(d.getMinutes()) + ' (' + formatTimeZoneText(tzMin) + ')';
+}
+
+// 发送时间同步并等待设备回显，超时或未回显时 reject
+async function sendBleTimeSync() {
+    if (!device || !server || !characteristic) {
+        throw new Error('请先连接设备');
+    }
+    if (timeSyncPending) {
+        throw new Error('上一次同步还在等待设备回显');
+    }
+
+    var sec = Math.floor(Date.now() / 1000);
+    // getTimezoneOffset() 返回的是“本地比 UTC 早多少分钟”，与设备要求的符号相反，需取负
+    var tzMin = -new Date().getTimezoneOffset();
+
+    const packet = new Uint8Array(10);
+    packet[0] = BLE_CMD_HEAD;
+    packet[1] = BLE_FILM_TRANS_CH_CTRL_TIME_SYNC;
+    packet[2] = 6;
+    packet[3] = (sec >>> 24) & 0xFF;
+    packet[4] = (sec >>> 16) & 0xFF;
+    packet[5] = (sec >>> 8) & 0xFF;
+    packet[6] = sec & 0xFF;
+    packet[7] = (tzMin >> 8) & 0xFF;
+    packet[8] = tzMin & 0xFF;
+    packet[9] = calculateChecksum(packet, 9);
+
+    // 先挂上回显等待再发包，避免设备回包早于等待建立
+    const echoed = new Promise((resolve, reject) => {
+        timeSyncPending = {
+            resolve: resolve,
+            timer: setTimeout(function() {
+                timeSyncPending = null;
+                reject(new Error('2 秒内未收到设备回显，时间可能未生效'));
+            }, TIME_SYNC_TIMEOUT_MS)
+        };
+    });
+
+    try {
+        await characteristic.writeValue(packet);
+    } catch (err) {
+        clearTimeout(timeSyncPending.timer);
+        timeSyncPending = null;
+        debugLog('时间同步发送失败: ' + err.message, 'error');
+        throw err;
+    }
+    debugLog('发送时间同步: ' + sec + 's, tz=' + tzMin + 'min (' + formatTimeZoneText(tzMin) + ')');
+
+    return await echoed;
+}
+
+async function onTimeSync() {
+    if (!device || !server || !characteristic) {
+        showMessage('请先连接设备', 'error');
+        return;
+    }
+    try {
+        const echo = await sendBleTimeSync();
+        const text = formatTimeSyncResult(echo.sec, echo.tzMin);
+        showMessage('设备时间已同步：' + text, 'success');
+        debugLog('时间同步已确认: ' + text, 'success');
+    } catch (error) {
+        showMessage('设备时间未确认，可能未生效: ' + error.message, 'warning');
+        debugLog('时间同步未确认: ' + error.message, 'error');
+    }
+}
+
+// 时间同步（0x4D）只在冰箱贴固件里实现，Dock 底座的命令表是另一份，没有该命令
+function syncTimeSyncAvailability() {
+    const section = document.getElementById('time-sync-section');
+    if (section) {
+        section.style.display = (currentDeviceType === 'FRAMEFILMDOCK') ? 'none' : '';
+    }
+}
+
 async function sendBleSleepSet(onoff) {
     if (!device || !server || !characteristic) {
         showMessage('请先连接设备', 'error');
@@ -1032,6 +1128,17 @@ function setupBluetoothListener() {
             debugLog('键值: ' + keyGroups.length + ' 组');
             if (typeof onKeyboardKeyReceived === 'function') {
                 onKeyboardKeyReceived(keyGroups);
+            }
+        }
+        else if (data[0] === BLE_CMD_HEAD && cmdType === BLE_FILM_TRANS_CH_CTRL_TIME_SYNC && cmdLen === 6) {
+            // 设备应用时间同步后原样回显 6 字节：4B 秒 + 2B 时区
+            const echoSec = (((data[3] << 24) | (data[4] << 16) | (data[5] << 8) | data[6]) >>> 0);
+            const echoTzMin = (((data[7] << 8) | data[8]) << 16) >> 16;
+            if (timeSyncPending) {
+                clearTimeout(timeSyncPending.timer);
+                const onEcho = timeSyncPending.resolve;
+                timeSyncPending = null;
+                onEcho({ sec: echoSec, tzMin: echoTzMin });
             }
         }
         // WiFi 通知处理
