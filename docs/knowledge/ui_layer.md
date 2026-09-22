@@ -10,7 +10,7 @@
 ## 1. 背景与目标
 
 现有 app 层只有一条显示路径：app 自己把整帧数据交给 `hal_epd_display_film()` / `hal_epd_display_mono()`。
-时钟 app 就是手写 5×7 点阵逐像素绘制（[app_clock.c](../../firmware/frame_film/components/film_app/src/app_clock.c)），能跑但难以扩展。
+时钟 app 就是手写 5×7 点阵逐像素绘制（[app_clock.c](../../firmware/frame_film/components/film_app/apps/clock/app_clock.c)），能跑但难以扩展。
 
 本次引入 **LVGL** 作为"UI 框架层"，让这类需要排版/文本/控件的 app 用声明式方式构建页面：
 
@@ -668,7 +668,7 @@ static void clock_timer_cb(lv_timer_t *t)
 
 ### 10.4 时间源缺口（需一并处理）
 
-当前 [app_clock.c](../../firmware/frame_film/components/film_app/src/app_clock.c) 直接用 `time()/localtime_r()`，
+当前 [app_clock.c](../../firmware/frame_film/components/film_app/apps/clock/app_clock.c) 直接用 `time()/localtime_r()`，
 而 [app_layer.md](./app_layer.md) §13.3 计划的"**WiFi(SNTP) + 蓝牙 + 本地 RTC 兜底**时间抽象"
 **至今未实现**。改造时应补上，否则设备重启后时间是随机的：
 

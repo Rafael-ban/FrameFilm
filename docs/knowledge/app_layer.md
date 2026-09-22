@@ -66,26 +66,36 @@
 
 ## 4. 组件文件布局（film_app）
 
+顶层就四个目录：`inc/`（对外公共头）、`core/`（框架核心）、`pages/`（框架页面）、`apps/`（内容 app）；
+头文件与源文件同目录。
+
 ```
 components/film_app/
-  inc/
-    app_init.h         ── 统一 app 层入口 film_app_init()
-    app_manager.h      ── AppManager 调度器、页面注册、切换状态机、事件路由
-    app_interface.h    ── 统一 app 接口（app_entry_t / app_event_t）
-    app_render.h       ── 渲染/显示抽象（能力位）
-    app_image.h
-    app_template.h
-    app_clock.h
-    app_animation.h
-  src/
-    app_init.c
-    app_manager.c
-    app_image.c
-    app_template.c
-    app_clock.c
-    app_animation.c
+  inc/                      ── 对外公共头（其他组件只应包含这里）
+    app_init.h              ── 统一 app 层入口 film_app_init()
+    app_interface.h         ── 统一 app 接口（app_id_t / app_entry_t / app_event_t）
+  core/                     ── 框架核心
+    app_init.c              ── 注册各 app + 上电决策（BOOT PAGE / START APP）
+    app_manager.{h,c}       ── 调度器：页面注册、切换状态机、事件路由、输入转发
+    app_render.{h,c}        ── 渲染/显示抽象（能力位）
+    app_shell.{h,c}         ── UI 页公共外壳（状态栏 + 居中时间 + 提示行 + 周期 tick）
+    app_boot_cfg.{h,c}      ── 开机行为参数（持久化在 service_param 的 app7 槽位）
+  pages/                    ── 框架自带页面（不是内容 app）
+    app_boot.{h,c}          ── 开机画面（自检遥测 + 进度条）
+    app_menu.{h,c}          ── 主菜单轮播
+    app_settings.{h,c}      ── 系统设置（设备信息 / 参数 / app 参数）
+    app_sleep.{h,c}         ── 休眠卡 + 入睡流程
+  apps/                     ── 内容 app：一个 app 一个文件夹
+    image/app_image.{h,c}
+    template/app_template.{h,c}
+    clock/app_clock.{h,c} + font_clock_hero.{h,c}   ── 时钟 + 60px 主读数数字字库
+    animation/app_animation.{h,c}
+    pass/app_pass.{h,c}     ── 通行证（UI 层占位页）
   CMakeLists.txt
 ```
+
+> `CMakeLists.txt` 用**显式文件列表**（非 GLOB）：新增 `.c` 要登记进 `srcs`，新增目录要加进 `INCLUDE_DIRS`（组件内部一律按文件名包含，如 `#include "app_image.h"`）。
+> 有意为之：**系统设置属于框架**（它是 UI 层页面、由调度器直接注册），不跟内容 app 放一起。
 
 ---
 
@@ -109,7 +119,7 @@ void film_sys_init(void) {
 
 ### 5.2 film_app_init() 职责
 
-创建 `app_task` + 队列 → 注册 app（图片/模板恒注册；`FULL` 模式下追加 时钟/动图/主菜单/系统设置）→ 上电流程（`FULL`：开机画面 → 主菜单；其余：恢复上次 app）→ 注册输入回调转发到 app_manager。
+创建 `app_task` + 队列 → 注册 app（图片/模板恒注册；`FULL` 模式下追加 时钟/动图/主菜单/系统设置/通行证）→ 读取开机行为参数（`app_boot_cfg_init`）→ 按配置走开机流程（见 §8.3）→ 注册输入回调转发到 app_manager。
 
 ---
 
@@ -196,7 +206,7 @@ app_id_t app_manager_get_current(void);
 |---|---|---|---|
 | `SYS_APP_SWITCH_NONE`(0) | 恒生效 | 按键不参与切换，全部放行给当前 app（纯相框，BLE 远程切换仍有效） | 图片 + 模板 |
 | `SYS_APP_SWITCH_SIMPLE`(1) | 恒生效 | 上/下回图片；确认键在图片 <-> 最近推送的 app 互切 | 图片 + 模板 |
-| `SYS_APP_SWITCH_FULL`(2) | 需 UI 层可用（`SYS_UI_ENABLE` + MonoFast 面板 + 上/下导航与确认键），否则**自动降级为 SIMPLE** | 上电出开机画面 → 主菜单；菜单内 上/下 选择、确认键进入；其余 app 内长按确认键回主菜单 | 全部 6 个（4 内容 + 设置 + 主菜单） |
+| `SYS_APP_SWITCH_FULL`(2) | 需 UI 层可用（`SYS_UI_ENABLE` + MonoFast 面板 + 上/下导航与确认键），否则**自动降级为 SIMPLE** | 上电按 BOOT PAGE / START APP 配置走（默认 开机画面 → 主菜单）；菜单内 上/下 选择、确认键进入；其余 app 内长按确认键 = 手动休眠、双击确认键 = 回主菜单 | 全部 7 个（4 内容 + 通行证 + 设置 + 主菜单） |
 
 > 注册集合按**配置模式**判定（非生效模式）：`FULL` 在跑不动主菜单的屏上只降级按键交互，
 > 仍注册全部 app，保证连接端远程切换（BLE `0x4B`）行为不变。
@@ -207,15 +217,20 @@ app_id_t app_manager_get_current(void);
 它不像图片 app 那样是"被切进去的内容"，而是所有内容 app 的入口：
 
 ```
-BOOT 页 ──8s（进度条在页面内自走）──→ [MENU] ──上/下──→ 换高亮项（下标下发 UI 页重绘）
-                              │  确认键 → app_do_switch(m_menu_entries[m_menu_sel])
-                              │
-  [IMAGE/TEMPLATE/CLOCK/ANIMATION/SETTINGS] ──长按确认键──→ [MENU]
+BOOT PAGE=SHOW ──8s（进度条在页面内自走）──→ START APP（默认 [MENU]）
+                                              │  上/下 → 换高亮项（下标下发 UI 页重绘）
+                                              │  确认 → app_do_switch(m_menu_entries[m_menu_sel])
+                                              │
+  [IMAGE/TEMPLATE/CLOCK/ANIMATION/PASS/SETTINGS] ──长按确认键──→ 手动休眠（画休眠卡）
+                                                 ──双击确认键──→ [MENU]
 ```
+
+> `BOOT PAGE=SKIP` 时跳过开机画面，上电直接落到 `START APP`；两者均由设置页配置，见 §8.3。
 
 **关键：任务/事件划分**
 - 在 `[MENU]` 态：由 app_manager 接管**全部**按键（上/下换选中索引、确认键进入），页面只显示（`on_key = NULL`）。
-- 在其余 app：长按确认键由 app_manager 截获并 `app_menu_open()`；短按/上/下 照旧放行给 app 自己。
+- 在其余 app：**长按确认键 = 手动休眠**（全局语义，不看休眠开关）、**双击确认键 = 退回主菜单**；
+  短按/上/下 照旧放行给 app 自己。
 
 ```c
 // app_manager_process_input()：返回 app_input_result_t（APP_INPUT_CONSUMED / APP_INPUT_PASS）
@@ -226,7 +241,11 @@ static app_input_result_t app_manager_process_input(input_press_type_t key) {
         ENTER  : app_do_switch(m_menu_entries[m_menu_sel]);
         return APP_INPUT_CONSUMED;
     }
-    if (key == INPUT_PRESS_LONG && app_menu_available()) {   // 长按 = 回主菜单
+    if (key == INPUT_PRESS_LONG) {                  // 长按 = 手动休眠
+        app_manager_sleep_from_app();
+        return APP_INPUT_CONSUMED;
+    }
+    if (key == INPUT_PRESS_DOUBLE && app_menu_available()) {   // 双击 = 回主菜单
         app_menu_open();
         return APP_INPUT_CONSUMED;
     }
@@ -247,7 +266,8 @@ static app_input_result_t app_manager_process_input(input_press_type_t key) {
   当前不是图片 app → 回图片。未推送过任何内容时放行，不盲切。
 
 > 按键占用现状：图片 = UP\|DOWN；动图 = SHORT\|UP\|DOWN；模板/时钟/设置 = 无（设置页用 UP\|DOWN\|SHORT，
-> 但长按留给"回主菜单"）。因此简易模式下只有「图片 + 模板」在场，模板不占用任何键，上/下与确认键都能安全接管。
+> 长按 / 双击留给全局语义：手工休眠 / 回主菜单）。因此简易模式下只有「图片 + 模板」在场，模板不占用任何键，
+> 上/下与确认键都能安全接管。
 
 **主菜单 UI（已实现）：**
 - 菜单是 **LVGL 页面**（横向轮播 ±2 共 5 张卡片 + 指示点 + ACTIVE 大字 + 层级面板），不是直绘封面。
@@ -255,6 +275,50 @@ static app_input_result_t app_manager_process_input(input_press_type_t key) {
   缺失/尺寸不符/头非法 → 回退固件内置默认图（`ui_defaults.c`）。
 - 选中项 = 实心黑板 + 反白图标 + 加粗描边；反色由固件对展开后的亮度缓冲取反（`~L8`）得到，**只需一份资源**。
 - 进入菜单时会把选中索引对齐到"刚离开的 app"，避免菜单高亮与当前画面脱节。
+
+### 8.3 开机行为参数（BOOT PAGE / START APP）
+
+上电怎么走由两个 **app 层参数**决定（`app_boot_cfg.{h,c}`），与 `SYS_APP_SWITCH_MODE` 正交：
+模式决定"有没有菜单/按键能不能切"，这两个参数决定"上电先画什么、落在哪个 app"。
+
+| 参数 | 取值 | 说明 |
+|---|---|---|
+| `boot_page` | `APP_BOOT_PAGE_SHOW`(0) / `SKIP`(1) | 上电是否先画开机画面。开机页首帧顺带完成整屏清场，**SKIP 时不做清场**，直接进 START APP |
+| `start_app` | `app_start_t` | 落点：`MENU`(0, 默认) / `LAST` / 图片 / 模板 / 时钟 / 动图 / 设置 / 通行证（**下标即存盘值**） |
+
+**持久化**：借用 `service_param_app_load/save()` 的 app 状态 blob 通道，存在**保留槽位 `app7`**
+（`SERVICE_PARAM_APP_ID_BOOT_CFG`，NVS namespace `FRAMEFILM_APP`，key `app7`），
+6 字节头（magic `0xA55A` + size + version + rsvd）自带校验，app 层不写 NVS 代码。
+
+> 为什么不加进 `ServiceParam_Def_t`：这两个参数只描述"上电时 app 层怎么走"，与 service 层
+> （WiFi/BLE/休眠）无关；而且改 `ServiceParam_Def_t` 布局会触发**整体重置**，连带清掉 WiFi 配网与时区。
+> 也正因此，`SERVICE_PARAM_APP_NUM` 从 6 提到 8，把 `app6 通行证` 与 `app7 开机行为` 一起纳入槽位范围。
+
+**落点解析**（`app_boot_cfg_resolve_target()`，逐个排除不可用目标，**永远返回一个已注册的 app**）：
+
+1. 模式裁剪：非 `FULL`（或 UI 层不可用）没有主菜单 → 回落 **图片**；
+2. 指定 app 未注册 → 回落 **图片**；
+3. `LAST` → 取 `service_param_app_current_get()`，越界/未注册 → 回落 **图片**。
+
+**上电流程**（`app_init.c` 第 7 步）：
+
+- `boot_page=SHOW` 且 `FULL` 且 UI 就绪 → `app_manager_boot_show(ops, target)`，开关机页占屏 8s 后 `app_manager_boot_end()` 切到 `target`；
+- 否则（`SKIP`，或本来就没有开机页）→ 直接 `app_manager_switch(target)`。
+
+**设置页**：`BOOT PAGE` / `START APP` 两行（`SET_KIND_CYCLE`），候选表顺序必须与 `app_start_t` 一致；
+写入走 app 侧 `settings_on_event()` 校验后落盘，再把整页快照回投给页面。
+
+### 8.4 状态栏（时间 / 电量）刷新
+
+UI 页公共外壳 `app_shell`（`app_shell.{h,c}`）在状态栏**正中间**显示 `HH:MM`，与电量/WiFi/蓝牙图标同一行。
+
+- **随页重绘**：`app_shell_apply()` 每次被调用时刷新时间与状态，页面自己画完就顺带带上；
+- **空闲兜底**：页面 create 时 `app_shell_start_tick(&m_shell, cb)` 挂一个 **10s** 周期 tick，
+  它刷时间 + 调页面自己的回调（默认 `app_shell_request_status()` 重新拉电量/连接态）；
+  页面 destroy 时 `app_shell_release()` 删 timer 并清结构体。
+- **去重**：写控件前先做变更检测（状态用 `memcmp`、时间用字符串比对）——电子纸每次写控件都是全帧
+  （约 940ms 且会闪），去重后实际刷新 ≤1 次/分钟。
+- 未校时（年份 < 2020）显示 `--:--`，不会画出一个荒唐的时间。
 
 ---
 

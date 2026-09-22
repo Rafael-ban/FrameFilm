@@ -49,7 +49,7 @@ FrameFilm 项目 AI 开发指南。
 
 - VID/PID：`0x303A` / `0x8000`（Windows 上会枚举出一个 COM 口）
 - **USB 与 BLE 共用同一套命令解析**：`components/film_service/src/service_cmd.c`（帧格式、通道号与冰箱贴完全一致），两条链路只是收发适配层（`service_ble.c` / `service_usb.c`），新增命令只需改 `service_cmd.c`
-- 新增命令：`0x43` 按键键值设置、`0x44` 按键键值查询（**仅 dock 有**；冰箱贴固件不使用这两个号，其 app 通道为 `0x45~0x4C`，dock 新增命令从 `0x45` 之后顺延）
+- 新增命令：`0x43` 按键键值设置、`0x44` 按键键值查询（**仅 dock 有**；冰箱贴固件不使用这两个号，其 app 通道为 `0x45~0x4C`、另有 `0x4D` 时间同步与 `0x4E` 远程按键注入，dock 新增命令从 `0x45` 之后顺延且勿占用冰箱贴已用号）
 - dock 的按键不操作本机，而是作为 **PC 键盘**：单击/双击/长按 → 按 `g_service_param.key` 发送 HID 键值（见 `service_monitor.c`）
 
 > 给 dock 的 BLE 命令要同时考虑 USB 链路：回包按来源链路原路返回，传输状态机带链路归属校验。
@@ -125,6 +125,7 @@ film_service → film_hal → film_sys → ESP-IDF
 | 机型配置 | `firmware/frame_film/components/film_sys/inc/sys_cfg.h` + `firmware/frame_film/sdkconfig_{std,pro,max}` |
 | 屏幕选择 | `firmware/frame_film/components/film_hal/inc/hal_epd.h`（`EPD_SELECT_E6_*` 宏） |
 | BLE 协议 | `firmware/frame_film/components/film_service/inc/service_ble.h` |
+| 蓝牙遥控（0x4E 按键注入） | `firmware/frame_film/components/film_service/src/service_ble.c`（发布）+ `film_app/core/app_manager.c`（`ble_key_to_press` 映射投递） |
 | 时间同步（0x4D） | `firmware/frame_film/components/film_service/src/service_time.c` + `service_param.h`（`tz_min`） |
 | 全局事件总线 | `firmware/frame_film/components/film_sys/inc/sys_event.h` |
 | EPD 驱动 | `firmware/frame_film/components/film_hal/src/hal_epd_{360,368,370,709}.c` |
@@ -138,12 +139,14 @@ film_service → film_hal → film_sys → ESP-IDF
 | Dock USB 传图工具 | `tools/framefilm-dock-upload/scripts/dock_upload.py` |
 | UI 层框架（LVGL 宿主/页面生命周期） | `firmware/frame_film/components/film_ui/src/ui_core.c` |
 | UI 层开关与显示链路 | `firmware/frame_film/components/film_ui/inc/{ui_conf.h,ui_ops.h}` + `src/ui_display.c` |
-| 开机画面 / 主菜单 / 系统设置 | `firmware/frame_film/components/film_app/src/app_{boot,menu,settings}.c` |
-| 时钟页主读数数字字库（60px，自备） | `firmware/frame_film/components/film_app/src/font_clock_hero.c` + `tools/clock-font/gen_clock_font.py` |
-| 休眠卡 + 入睡流程（主菜单长按） | `firmware/frame_film/components/film_app/src/app_sleep.c` |
-| 手动休眠入口 / 占屏门闸 | `firmware/frame_film/components/film_app/src/app_manager.c`（`app_manager_sleep_show` + `m_sleep_page`） |
+| 开机画面 / 主菜单 / 系统设置（框架页面） | `firmware/frame_film/components/film_app/pages/app_{boot,menu,settings}.c` |
+| 时钟页主读数数字字库（60px，自备） | `firmware/frame_film/components/film_app/apps/clock/font_clock_hero.c` + `tools/clock-font/gen_clock_font.py` |
+| 休眠卡 + 入睡流程（主菜单长按） | `firmware/frame_film/components/film_app/pages/app_sleep.c` |
+| 手动休眠入口 / 占屏门闸 | `firmware/frame_film/components/film_app/core/app_manager.c`（`app_manager_sleep_show` + `m_sleep_page`） |
 | 进低功耗（deinit + deep sleep） | `firmware/frame_film/components/film_service/src/service_monitor.c`（`service_monitor_request_sleep`） |
-| UI 页公共外壳（状态栏 + 提示行） | `firmware/frame_film/components/film_app/{inc/app_shell.h,src/app_shell.c}` |
+| UI 页公共外壳（状态栏 + 居中时间 + 提示行 + 周期 tick） | `firmware/frame_film/components/film_app/core/app_shell.{h,c}` |
+| 开机行为参数（BOOT PAGE / START APP） | `firmware/frame_film/components/film_app/core/app_boot_cfg.{h,c}`（持久化在 `service_param` 的 `app7` 槽位） |
+| 内容 app（图片/模板/时钟/动图/通行证） | `firmware/frame_film/components/film_app/apps/<name>/app_<name>.{h,c}`（一个 app 一个文件夹） |
 | SD 可替换图标（FFUI 容器） | `firmware/frame_film/components/film_ui/src/ui_assets.c` + `tools/ui-assets/gen_ui_assets.py` |
 | 协议文档 | `docs/blecmd/blecmd_protocol.md` |
 
@@ -164,6 +167,9 @@ film_service → film_hal → film_sys → ESP-IDF
 13. **不要把菜单的"长按"与 app 内的"长按"搅在一起** — **长按确认键 = 手动休眠**（全局语义，三机型一致，且不看休眠模式开关）；**双击确认键 = 从 app 退回主菜单**（原长按语义）。两处只差"要不要画休眠卡"：主菜单长按画（`app_sleep_run(1)`，这帧要留在屏上直到唤醒），app 内长按不画（`app_manager_sleep_from_app()` → `app_sleep_run(0)`，屏上保持当前 app 画面）。菜单里双击没有语义（它就是"根"）。双击事件来自 `INPUT_PRESS_DOUBLE`：PRO/MAX 用 iot_button 的 `BUTTON_DOUBLE_CLICK`（库自己会消歧：双击只发 DOUBLE、不发 SINGLE），STD 用 hal_encoder 里的 one-shot 配对窗口补。**窗口值必须明显大于人手的双击间隔（现取 350ms），否则双击会被判成两次单击** —— 这一点在 PRO/MAX 上尤其反直觉：按钮库把 `short_press_time` 同时当作"单击结算窗口"和"双击配对窗口"（`iot_button.c` 的 state 2/3），而项目原来给它的是 50ms（只是个消抖阈值），比手速还短，所以必须先把这个值放开（见 `confirm_cfg`）。代价：确认键的单击下发晚一个窗口（上/下键不认双击，不受影响）
 14. **不要让 app 在"进不去"的状态下被切过去** — 图片/动图目录为空时它们的 `on_enter` 只打日志、不绘制，切过去屏幕会停在上一帧，用户会以为已经进到那个 app 了（切换还会先把面板停一次、白闪一帧）。改用 `app_entry_t.enter_block_reason` 预检：返回 NULL 才切，否则放弃切换并把原因经 `APP_UI_MSG_MENU_NOTICE` 显示在主菜单面板下方那块留白里。预检的调用点必须在 `app_do_switch()` 里 `service_file_set_dir_sync()` **之后**（文件列表是异步刷新的，早于它就问不准），也必须在 `app_stop_current()` 之前（那之前的退回是无副作用的，只需把目录还原）
 15. **不要在关闭状态下初始化蓝牙** — `service_ble_init()` 与 WiFi 同款：`ble_enable == 0` 直接跳过，不拉协议栈。运行期开关走 `service_ble_apply_enable()`（关 = disconnect + `gatt_server_uninit`；开 = 栈若活着就 `gatt_server_reinit`，只有从未拉起过才整栈 init）。设置页与心跳下发两条路径都用它，别只改参数
+16. **不要把"开机行为"塞进 `ServiceParam_Def_t`** — BOOT PAGE / START APP 只描述"上电时 app 层怎么走"，与 service 层无关；改 `ServiceParam_Def_t` 布局会触发**整体重置**，连带清掉 WiFi 配网与时区。已放 app 层保留槽位 `app7`（`SERVICE_PARAM_APP_ID_BOOT_CFG`，见 `app_boot_cfg`），用现成的 app blob 持久化。同理，往 `app_start_t` **尾部追加**时别忘了同步设置页候选表（下标即存盘值）
+17. **不要在遥控（0x4E）链路上另写一份按键语义** — 固件把键值经 `ble_key_to_press()` 映射成与 HAL 同构的 `INPUT_PRESS_*` 入队，因此菜单导航/单击确认/双击退回/长按休眠全部自动一致；新增按键功能只改 `app_manager` 那一处，不要在 BLE 层复刻交互。回显只表示"已收到"，开机卡/休眠卡占屏期间按键照本机语义被丢弃；dock 不支持该通道（其按键是 PC 键盘 HID）
+18. **不要往 `film_app/` 根目录塞源码** — 分层已定：`inc/`（对外公共头，只有 `app_init.h` + `app_interface.h`）、`core/`（框架核心：调度/初始化/渲染/外壳/开机参数）、`pages/`（框架页面：开机画面/主菜单/系统设置/休眠卡，**系统设置属于框架而不是内容 app**）、`apps/<name>/`（内容 app，一个 app 一个文件夹，头文件与源文件同目录）。组件用的是**显式文件列表**（不是 GLOB），新增 `.c` 必须在 `CMakeLists.txt` 的 `srcs` 里登记，新增目录要加进 `INCLUDE_DIRS`，否则静默不编译/找不到头
 
 ## BLE 协议速览
 
@@ -175,6 +181,8 @@ film_service → film_hal → film_sys → ESP-IDF
 | OTA | 0x10-0x13 | 0x10 LEN → 0x11 DATA×N → 0x13 STOP |
 | 设备控制 | 0x20-0x2B | 电量0x23, 休眠0x25-0x2A, SD格式化0x2B |
 | WiFi | 0x30-0x3D | 配网0x30-0x38, 下载0x3C-0x3D |
+| 心跳/屏幕 | 0x3E-0x42 | 心跳0x3E-0x41, 屏幕参数0x42 |
+| App | 0x45-0x4E | 参数0x45-0x4A, 切换0x4B/查询0x4C, 时间同步0x4D, 遥控按键0x4E（0x43/0x44 仅 dock 键盘键值） |
 
 完整命令表: `docs/blecmd/blecmd_protocol.md` 或 `docs/knowledge/ble_commands.md`
 
@@ -191,6 +199,14 @@ film_service → film_hal → film_sys → ESP-IDF
 2. `service_init.c` 调用 init
 3. 如需 BLE 控制 → `service_ble.c` 添加命令
 4. 确认机型差异分支（EPD/输入等用 `FRAMEFILM_*` 宏）
+
+### 新增内容 app（film_app/apps/）
+1. 建目录 `apps/<name>/`，放 `app_<name>.{h,c}`（头文件与源文件同目录）
+2. `CMakeLists.txt` 的 `srcs` 登记 `.c`、`INCLUDE_DIRS` 登记新目录
+3. `app_interface.h` 的 `app_id_t` **尾部追加** id（中间插入会让老设备落盘的 id 错位）
+4. `core/app_init.c` 注册 `g_app_<name>_entry`（按 `SYS_APP_SWITCH_MODE` 决定是否注册）
+5. 菜单入口：`core/app_manager.c` 的 `m_menu_entries[]`（行为表）与 `pages/app_menu.c` 的 `MENU_ITEMS[]`（视觉表）**同序**追加，并同步 `APP_MENU_ENTRY_NUM`
+6. 需持久化参数 → `service_param.h` 的 `SERVICE_PARAM_APP_ID_*` 取新槽位并同步 `SERVICE_PARAM_APP_NUM`
 
 ## 构建命令
 
