@@ -1076,6 +1076,32 @@ static void ble_cmd_process(ble_cmd_t *cmd)
             sys_logi(BEL_SERVICE_TAG, "Current app id: %d", app_id);
             break;
         }
+        case BLE_FILM_TRANS_CH_CTRL_KEY_INJECT : // 远程按键注入（遥控器）
+        {
+            /* payload: 1B 键值（BLE_KEY_*）。
+               BLE 层只做"值域校验 + 上浮"，不解析按键语义（与 app 参数通道同款：
+               上下隔离，BLE 层不认识"上/下/确认"）。app 层收到后按真实按键事件投递，
+               因此菜单导航、双击退回、长按休眠等全部语义自动一致。 */
+            if(cmd->len == 1 && cmd->pdata[0] <= BLE_KEY_MAX)
+            {
+                uint8_t evt[2];
+
+                evt[0] = cmd->ch;
+                evt[1] = cmd->pdata[0];
+                sys_event_publish(SYS_EVT_BLE_APP_CMD, evt, sizeof(evt));
+
+                /* 回显同 1 字节：连接端据此确认已注入（不保证一定被消费：
+                   开机卡/休眠卡占屏期间按键按本机语义一样被丢弃） */
+                (void)service_ble_send_resp(cmd->ch, cmd->pdata, 1);
+                sys_logi(BEL_SERVICE_TAG, "key inject: %u", (unsigned)cmd->pdata[0]);
+            }
+            else
+            {
+                sys_logw(BEL_SERVICE_TAG, "key inject: bad payload (len=%u key=%u)",
+                         (unsigned)cmd->len, (unsigned)((cmd->len > 0) ? cmd->pdata[0] : 0xFF));
+            }
+            break;
+        }
         default :
         {
             break;

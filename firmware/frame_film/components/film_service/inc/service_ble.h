@@ -86,6 +86,24 @@ extern "C"{
 // 注：dock 固件的命令表是独立一份（service_cmd.c），未实现此号。
 #define BLE_FILM_TRANS_CH_CTRL_TIME_SYNC                   (0x4D) // 时间 + 时区同步
 
+// 远程按键注入（模拟本机按键，让连接端当遥控器用）：1 字节键值，取值见下方
+// BLE_KEY_* 。设备把它当作一次真实按键事件投给 app 层（走与 HAL 输入完全相同的
+// 通路，因此菜单导航 / 双击退回 / 长按休眠等语义一并生效），**回显同样 1 字节**。
+// 注意：不带"按下/抬起"概念 —— 这里发的每个值都是一个已结算的按键事件，
+// 与 HAL 上报的粒度一致（长按/双击都由输入层判定完毕后上报一次）。
+// 注：dock 固件没有 app 层（按键是 PC 键盘），未实现此号。
+#define BLE_FILM_TRANS_CH_CTRL_KEY_INJECT                  (0x4E) // 远程按键注入
+
+/* KEY_INJECT 的键值。与 input_press_type_t 无关：协议层不依赖 HAL 枚举，
+ * 映射在 app 层完成（见 app_manager 的按键注入分支）。
+ * 覆盖本机全部按键语义：上下选择 / 确认单击 / 确认双击（退回）/ 确认长按（休眠）。 */
+#define BLE_KEY_SHORT                                      (0x00) // 确认键单击
+#define BLE_KEY_LONG                                       (0x01) // 确认键长按（= 手动休眠）
+#define BLE_KEY_UP                                         (0x02) // 上
+#define BLE_KEY_DOWN                                       (0x03) // 下
+#define BLE_KEY_DOUBLE                                     (0x04) // 确认键双击（= 退回主菜单）
+#define BLE_KEY_MAX                                        (BLE_KEY_DOUBLE)
+
 // app 参数通道（0x45~0x4A）：payload 为 TLV 列表，BLE 层不解析语义，只整包上浮给 app 层
 // 约定：设置通道 = param_ch，查询通道 = param_ch + 1
 #define BLE_FILM_TRANS_CH_APP_IMAGE_PARAM                  (0x45) // 图片 app 参数设置

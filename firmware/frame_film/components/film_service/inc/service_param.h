@@ -24,14 +24,20 @@ extern "C" {
 #define SERVICE_PARAM_VER                                          (4)
 
 /* app 状态持久化：app_id 数值必须与 film_app/inc/app_interface.h 的 app_id_t 对齐
- * （service 层看不到 app_id_t，这里用裸数值常量） */
+ * （service 层看不到 app_id_t，这里用裸数值常量）。
+ * 追加新 app 时**只能往后加**：这些 id 是 NVS key（"app<id>"）的一部分，
+ * 中间插入会让老设备上已落盘的数据被当成别的 app 的状态读出来。 */
 #define SERVICE_PARAM_APP_ID_IMAGE                                 (0)
 #define SERVICE_PARAM_APP_ID_TEMPLATE                              (1)
 #define SERVICE_PARAM_APP_ID_CLOCK                                 (2)
 #define SERVICE_PARAM_APP_ID_ANIMATION                             (3)
 #define SERVICE_PARAM_APP_ID_SETTINGS                              (4)
 #define SERVICE_PARAM_APP_ID_MENU                                  (5)
-#define SERVICE_PARAM_APP_NUM                                      (6)
+#define SERVICE_PARAM_APP_ID_PASS                                  (6)
+/* 保留槽位：不属于任何 app，放 app 层自己的参数（当前是"开机行为"，见 app_boot_cfg）。
+ * 借用同一套 blob 持久化（magic/size/version 校验 + "app<id>" key），复用现成基础设施。 */
+#define SERVICE_PARAM_APP_ID_BOOT_CFG                              (7)
+#define SERVICE_PARAM_APP_NUM                                      (8)
 
 /* 单个 app 状态 blob 中 app 数据的最大字节数（不含 6 字节头）。
  * 各 app 的状态结构体大小不得超过该值，app 侧以 _Static_assert 自行校验。 */
