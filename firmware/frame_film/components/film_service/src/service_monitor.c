@@ -55,9 +55,16 @@
 #define SYS_OS_NAME_MONITOR_TASK                 "monitor_task"
 
 // LED管理参数
-#define MONITOR_LED_UPDATE_INTERVAL_MS           (500)    // LED状态更新间隔 500ms
-#define MONITOR_LED_BLINK_ON_TICKS               (1)      // LED闪烁点亮tick数 (1 * 500ms = 500ms亮)
-#define MONITOR_LED_BLINK_OFF_TICKS              (3)      // LED闪烁熄灭tick数 (3 * 500ms = 1500ms灭)
+#define MONITOR_LED_UPDATE_INTERVAL_MS           (500)    // LED状态更新间隔 500ms（只决定"颜色多久复核一次"，呼吸节拍在 hal_led 里）
+// 呼吸亮度区间（0~100）。两端不取 0/100：不熄灭（最暗仍有底光）也不会太刺眼。
+// 换算成 WS2812 通道值 = 255 × 该值 / 100，当前 3~10 即 7~25。
+// MIN 别取 1：通道差 1 级在暗端的**相对**变化很大（2→3 是 50% 亮度），
+// 提到底光 3% 后单级变化降到 ~8%，暗端才不会有台阶感。
+#define MONITOR_LED_BREATH_MIN                   (1)
+#define MONITOR_LED_BREATH_MAX                   (10)
+// 呼吸周期（毫秒）：只决定快慢，跟平滑度无关（抖动节拍固定 200Hz，在 hal_led 里）。
+// 觉得太快就调大这个值，不会变粗糙。
+#define MONITOR_LED_BREATH_PERIOD_MS             (3000)
 // 电池管理参数     
 #define MONITOR_BAT_CHECK_INTERVAL_MS            (30000)  // 电池检测间隔 30s
 #define MONITOR_BAT_LOW_THRESHOLD                (10)     // 低电量阈值 10%
@@ -89,7 +96,7 @@ typedef struct
 {
     uint8_t ble_connected;
     uint8_t bat_level;
-    uint8_t led_state;
+    uint32_t led_color;      // 当前呼吸的颜色（0 = 还没开始呼吸）
     uint32_t sleep_counter;
     uint8_t last_encoder_state;
     uint32_t tick_counter;
@@ -137,7 +144,6 @@ void service_monitor_init(void)
 {
     memset(&m_monitor_state, 0, sizeof(monitor_state_t));
     m_monitor_state.bat_level = 100;
-    m_monitor_state.led_state = 0;
     m_monitor_state.tick_counter = 0;
 
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
@@ -266,7 +272,6 @@ static void monitor_timer_callback(TimerHandle_t xTimer)
 static void monitor_led_manage_event(void)
 {
     uint32_t led_color;
-    uint32_t blink_cycle = MONITOR_LED_BLINK_ON_TICKS + MONITOR_LED_BLINK_OFF_TICKS;
 
     m_monitor_state.ble_connected = service_ble_gatts_get_connect();
 
@@ -283,16 +288,13 @@ static void monitor_led_manage_event(void)
         led_color = LED_COLOR_WHITE;
     }
 
-    // 闪烁控制: led_state作为周期计数器
-    m_monitor_state.led_state = (m_monitor_state.led_state + 1) % blink_cycle;
-    if(m_monitor_state.led_state < MONITOR_LED_BLINK_ON_TICKS)
+    /* 这里只决定"亮什么色"，呼吸的明暗节拍由 hal_led 自己跑。
+       颜色没变就不重启：重启会把相位拉回 0，看着像闪了一下。 */
+    if(led_color != m_monitor_state.led_color)
     {
-        hal_led_set_color(led_color);
-        hal_led_set_brightness(5);
-    }
-    else
-    {
-        hal_led_set_color(LED_COLOR_BLACK);
+        m_monitor_state.led_color = led_color;
+        hal_led_breath_start(led_color, MONITOR_LED_BREATH_MIN, MONITOR_LED_BREATH_MAX,
+                             MONITOR_LED_BREATH_PERIOD_MS);
     }
 }
 
