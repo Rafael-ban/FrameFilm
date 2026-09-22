@@ -618,6 +618,39 @@
                 <div id="keyboard-key-summary" class="keyboard-key-summary"></div>
             </div>
 
+            <!-- 蓝牙遥控（仅冰箱贴机型） -->
+            <div id="remote-section" class="card">
+                <div class="card__title">
+                    <span class="ic-wrap ic-wrap--coral"><svg class="ic" viewBox="0 0 24 24"><use href="#i-board"/></svg></span>
+                    蓝牙遥控
+                </div>
+                <div class="switch-row__hint">用蓝牙模拟设备本机按键：上/下切换，确认进入，返回退回主菜单，休眠长按进入低功耗</div>
+                <div class="modes">
+                    <button class="mode-button" onclick="onRemoteKeyPress(BLE_KEY_UP)">
+                        <svg class="ic" viewBox="0 0 24 24"><use href="#i-upload"/></svg>
+                        上
+                    </button>
+                    <button class="mode-button" onclick="onRemoteKeyPress(BLE_KEY_DOWN)">
+                        <svg class="ic" viewBox="0 0 24 24"><use href="#i-download"/></svg>
+                        下
+                    </button>
+                    <button class="mode-button" onclick="onRemoteKeyPress(BLE_KEY_SHORT)">
+                        <svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg>
+                        确认
+                    </button>
+                </div>
+                <div class="modes" style="margin-top:var(--sp-2);">
+                    <button class="mode-button" onclick="onRemoteKeyPress(BLE_KEY_DOUBLE)">
+                        <svg class="ic" viewBox="0 0 24 24"><use href="#i-chevron"/></svg>
+                        返回
+                    </button>
+                    <button class="mode-button" onclick="onRemoteKeyPress(BLE_KEY_LONG)">
+                        <svg class="ic" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+                        休眠
+                    </button>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card__title">
                     <span class="ic-wrap ic-wrap--sun"><svg class="ic" viewBox="0 0 24 24"><use href="#i-board"/></svg></span>

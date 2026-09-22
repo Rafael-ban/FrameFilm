@@ -79,6 +79,14 @@ const BLE_FILM_TRANS_CH_CTRL_SCREEN_RESOLUTION_GET = 0x42;
 const BLE_FILM_TRANS_CH_CTRL_KEYBOARD_KEY_SET = 0x43;
 const BLE_FILM_TRANS_CH_CTRL_KEYBOARD_KEY_GET = 0x44;
 const BLE_FILM_TRANS_CH_CTRL_TIME_SYNC = 0x4D;
+const BLE_FILM_TRANS_CH_CTRL_KEY_INJECT = 0x4E;
+
+// 遥控键值（与固件 service_ble.h 的 BLE_KEY_* 对应）
+const BLE_KEY_SHORT = 0x00;   // 确认键单击
+const BLE_KEY_LONG = 0x01;    // 确认键长按（= 手动休眠）
+const BLE_KEY_UP = 0x02;      // 上
+const BLE_KEY_DOWN = 0x03;    // 下
+const BLE_KEY_DOUBLE = 0x04;  // 确认键双击（= 退回主菜单）
 
 const BLE_CMD_LEN_MIN = 4;
 
@@ -906,6 +914,80 @@ function syncTimeSyncAvailability() {
     }
 }
 
+// ==================== 蓝牙遥控（0x4E 远程按键注入） ====================
+// 与设备本机按键同构：上/下 = 菜单导航，确认 = 进入，返回 = 双击退回主菜单，
+// 休眠 = 长按（画休眠卡后进低功耗）。设备应用后按来源链路回显 1 字节键值。
+const KEY_INJECT_TIMEOUT_MS = 2000;
+let keyInjectPending = null; // { resolve, timer }：等待设备回显期间的回调
+
+var KEY_INJECT_NAMES = { 0: '确认', 1: '休眠', 2: '上', 3: '下', 4: '返回' };
+
+function keyInjectName(key) {
+    return KEY_INJECT_NAMES[key] || ('未知(' + key + ')');
+}
+
+// 发送遥控按键并等待设备回显，超时或未回显时 reject
+async function sendBleKeyInject(key) {
+    if (!device || !server || !characteristic) {
+        throw new Error('请先连接设备');
+    }
+    if (keyInjectPending) {
+        throw new Error('上一条遥控指令还在等待设备回显');
+    }
+
+    const packet = new Uint8Array(5);
+    packet[0] = BLE_CMD_HEAD;
+    packet[1] = BLE_FILM_TRANS_CH_CTRL_KEY_INJECT;
+    packet[2] = 1;
+    packet[3] = key;
+    packet[4] = calculateChecksum(packet, 4);
+
+    // 先挂上回显等待再发包，避免设备回包早于等待建立
+    const echoed = new Promise((resolve, reject) => {
+        keyInjectPending = {
+            resolve: resolve,
+            timer: setTimeout(function() {
+                keyInjectPending = null;
+                reject(new Error('2 秒内未收到设备回显'));
+            }, KEY_INJECT_TIMEOUT_MS)
+        };
+    });
+
+    try {
+        await characteristic.writeValue(packet);
+    } catch (err) {
+        clearTimeout(keyInjectPending.timer);
+        keyInjectPending = null;
+        debugLog('遥控指令发送失败: ' + err.message, 'error');
+        throw err;
+    }
+    debugLog('发送遥控按键: ' + keyInjectName(key));
+
+    return await echoed;
+}
+
+async function onRemoteKeyPress(key) {
+    if (!device || !server || !characteristic) {
+        showMessage('请先连接设备', 'error');
+        return;
+    }
+    try {
+        await sendBleKeyInject(key);
+        debugLog('遥控已注入: ' + keyInjectName(key), 'success');
+    } catch (error) {
+        showMessage('遥控指令未确认: ' + error.message, 'warning');
+        debugLog('遥控未确认: ' + error.message, 'error');
+    }
+}
+
+// 遥控仅冰箱贴固件支持：Dock 底座的按键是 PC 键盘（USB HID），不做本机导航
+function syncRemoteAvailability() {
+    const section = document.getElementById('remote-section');
+    if (section) {
+        section.style.display = (currentDeviceType === 'FRAMEFILMDOCK') ? 'none' : '';
+    }
+}
+
 async function sendBleSleepSet(onoff) {
     if (!device || !server || !characteristic) {
         showMessage('请先连接设备', 'error');
@@ -1139,6 +1221,15 @@ function setupBluetoothListener() {
                 const onEcho = timeSyncPending.resolve;
                 timeSyncPending = null;
                 onEcho({ sec: echoSec, tzMin: echoTzMin });
+            }
+        }
+        else if (data[0] === BLE_CMD_HEAD && cmdType === BLE_FILM_TRANS_CH_CTRL_KEY_INJECT && cmdLen === 1) {
+            // 设备注入按键后回显 1 字节键值（不保证被消费：开机卡/休眠卡占屏期间会丢弃）
+            if (keyInjectPending) {
+                clearTimeout(keyInjectPending.timer);
+                const onEcho = keyInjectPending.resolve;
+                keyInjectPending = null;
+                onEcho({ key: data[3] });
             }
         }
         // WiFi 通知处理

@@ -91,6 +91,10 @@ function onDeviceTypeChanged() {
     if (typeof syncTimeSyncAvailability === 'function') {
         syncTimeSyncAvailability();
     }
+    // 蓝牙遥控（0x4E）仅冰箱贴固件支持
+    if (typeof syncRemoteAvailability === 'function') {
+        syncRemoteAvailability();
+    }
 }
 
 // 屏幕面板 ID → 机型 + 像素排布（与固件 EPD_PANEL_ID 对应）
