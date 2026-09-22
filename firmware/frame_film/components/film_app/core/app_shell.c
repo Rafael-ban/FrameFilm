@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_shell.c
+ * FileName : /film_app/core/app_shell.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/19
  * Description: UI 页公共外壳：顶部状态栏（品牌 + 电量/WiFi/蓝牙）+ 底部提示行
  * ChangeLog: Change Notes
@@ -29,6 +29,8 @@
  * INCLUDES
  */
 #include <stdio.h>
+#include <string.h>
+#include <time.h>
 
 #include "sys_log.h"
 #include "hal_bat.h"
@@ -48,6 +50,79 @@
 /*********************************************************************
  * LOCAL FUNCTIONS
  */
+/**
+ * @brief 刷新居中的时间标签（HH:MM）
+ *
+ * 只在**字符串真的变了**时才写控件 —— 1-bit 电子纸任何一次写控件都是一整帧
+ * （约 940ms），所以哪怕 tick 每 10s 来一次，实际也只会在分钟跳变时刷一次。
+ *
+ * 时间直接问 libc（与时钟页同一套：`service_time` 已在启动时把 TZ 灌进环境变量，
+ * `localtime_r` 走的就是本地时区）。ui_task 读它是安全的：不碰任何项目内的跨任务数据。
+ */
+static void shell_time_update(app_shell_t *s)
+{
+    time_t now = time(NULL);
+    struct tm tmv;
+    char buf[8];
+    unsigned hour;
+    unsigned minute;
+
+    if(s == NULL || s->time_label == NULL)
+    {
+        return;
+    }
+    if(localtime_r(&now, &tmv) == NULL)
+    {
+        return;
+    }
+
+    /* 还没校过时（连上端同步时间之前是 1970）→ 显示占位，别顶着假时间 */
+    if((tmv.tm_year + 1900) < 2020)
+    {
+        if(strcmp("--:--", s->last_time) == 0)
+        {
+            return;
+        }
+        memcpy(s->last_time, "--:--", sizeof(s->last_time));
+        lv_label_set_text(s->time_label, s->last_time);
+        return;
+    }
+
+    /* 收敛到窄类型再格式化：GCC 按 int 全域推演 %02u 会判为可能截断
+       （-Wformat-truncation 在本工程是错误级） */
+    hour   = (unsigned)tmv.tm_hour & 0xFFu;
+    minute = (unsigned)tmv.tm_min  & 0xFFu;
+    snprintf(buf, sizeof(buf), "%02u:%02u", hour, minute);
+
+    if(strcmp(buf, s->last_time) == 0)
+    {
+        return;   // 同一分钟内，不上屏
+    }
+    memcpy(s->last_time, buf, sizeof(s->last_time));
+    lv_label_set_text(s->time_label, buf);
+}
+
+static void shell_tick_cb(lv_timer_t *timer)
+{
+    app_shell_t *s = (app_shell_t *)lv_timer_get_user_data(timer);
+
+    if(s == NULL)
+    {
+        return;
+    }
+
+    shell_time_update(s);
+
+    if(s->tick_cb != NULL)
+    {
+        s->tick_cb();
+    }
+    else
+    {
+        app_shell_request_status();
+    }
+}
+
 static lv_obj_t *shell_label(lv_obj_t *parent, lv_color_t color, const char *txt)
 {
     lv_obj_t *l = lv_label_create(parent);
@@ -133,12 +208,7 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
     }
     if(out != NULL)
     {
-        out->bat_label = NULL;
-        out->bat_pip = NULL;
-        out->wifi_label = NULL;
-        out->wifi_pip = NULL;
-        out->bt_label = NULL;
-        out->bt_pip = NULL;
+        memset(out, 0, sizeof(*out));
     }
 
     /* ============ 顶部状态栏：品牌 + 电量 / WiFi / 蓝牙 ============ */
@@ -170,6 +240,18 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
         lv_obj_set_style_text_letter_space(brand, 1, LV_PART_MAIN);
     }
     shell_spacer(status);
+    if(out != NULL)
+    {
+        /* 居中时间：绝对定位（忽略 flex 布局，否则会被当普通子项排到左右两端去）。
+           真实值由 shell_time_update() 填，未校时（年份 < 2020）显示 "--:--"，
+           免得开机就顶着 1970 的假时间。 */
+        lv_obj_t *t = shell_label(status, lv_color_black(), "");
+
+        lv_obj_set_ignore_layout(t, true);
+        lv_obj_align(t, LV_ALIGN_CENTER, 0, 0);
+        out->time_label = t;
+        shell_time_update(out);
+    }
     {
         lv_obj_t *bat = shell_label(status, lv_color_black(), "BAT --%");
         lv_obj_t *bat_pip = shell_pip(status);
@@ -216,12 +298,53 @@ void app_shell_request_status(void)
     (void)app_manager_post_ui_msg(APP_UI_REQ_STATUS_SYNC, NULL, 0);
 }
 
+void app_shell_start_tick(app_shell_t *s, app_shell_tick_cb_t cb)
+{
+    if(s == NULL || s->tick != NULL)
+    {
+        return;
+    }
+
+    s->tick_cb = cb;
+    s->tick = lv_timer_create(shell_tick_cb, SHELL_TICK_MS, s);
+    if(s->tick == NULL)
+    {
+        sys_loge(APP_SHELL_TAG, "create tick timer failed, status bar will not auto refresh");
+    }
+}
+
+void app_shell_release(app_shell_t *s)
+{
+    if(s == NULL)
+    {
+        return;
+    }
+
+    /* 定时器不在 root 的对象树里，页面销毁不会顺带删它 —— 必须自己删，
+       否则它会在下一次触发时访问已经销毁的 time_label（野指针）。 */
+    if(s->tick != NULL)
+    {
+        lv_timer_delete(s->tick);
+        s->tick = NULL;
+    }
+    memset(s, 0, sizeof(*s));
+}
+
 void app_shell_apply(app_shell_t *s, const app_status_t *st)
 {
     if(s == NULL || st == NULL)
     {
         return;
     }
+
+    /* 变更检测：一模一样就不碰控件。电子纸一次写控件 = 一整帧（约 940ms 且会闪），
+       而周期 tick 每 10s 就会调到这里 —— 没有这层判断，停在任一页面就会每 10s 白闪一次。 */
+    if(s->status_valid && (memcmp(&s->last_status, st, sizeof(*st)) == 0))
+    {
+        return;
+    }
+    memcpy(&s->last_status, st, sizeof(s->last_status));
+    s->status_valid = 1;
 
     if(s->bat_label != NULL)
     {
@@ -234,6 +357,10 @@ void app_shell_apply(app_shell_t *s, const app_status_t *st)
     }
     shell_ind_set(s->wifi_label, s->wifi_pip, st->wifi_on, st->wifi_conn);
     shell_ind_set(s->bt_label, s->bt_pip, st->bt_on, st->bt_conn);
+
+    /* 顺带对一次时间：同步时间（BLE 0x4D）后状态栏要立刻反映出来，
+       而校时事件不一定伴随状态采集 */
+    shell_time_update(s);
 }
 
 int app_shell_handle_msg(app_shell_t *s, uint32_t cmd, const void *data, uint8_t len)

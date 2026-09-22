@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_render.c
+ * FileName : /film_app/core/app_render.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/9
  * Description: App 层渲染/显示抽象（能力位 / 完整帧 / 8bpp / MonoFast）
  * ChangeLog: Change Notes

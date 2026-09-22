@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_init.c
+ * FileName : /film_app/core/app_init.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/9
  * Description: App 层统一入口
  * ChangeLog: Change Notes
@@ -41,7 +41,6 @@
 #include "hal_epd.h"
 #include "hal_sd.h"
 #include "service_ble.h"
-#include "service_param.h"
 #include "ui_conf.h"    /* UI_CALIB_FRAME：标定帧模式下开机页暂停自动前进 */
 #include "app_init.h"
 #include "app_manager.h"
@@ -55,6 +54,7 @@
 #include "app_settings.h"
 #include "app_pass.h"
 #include "app_boot.h"
+#include "app_boot_cfg.h"
 
 /*********************************************************************
  * MACROS
@@ -75,7 +75,7 @@ static void app_init_input_up(void);
 static void app_init_input_down(void);
 static void app_init_register_inputs(void);
 static uint8_t app_init_ble_app_id_get(void);
-static void app_init_boot_start(void);
+static void app_init_boot_start(app_id_t next);
 #if (UI_CALIB_FRAME == 0)
 static void app_init_boot_fallback(TimerHandle_t xTimer);
 #endif
@@ -138,31 +138,36 @@ void film_app_init(void)
     /* 6. 注册输入回调并统一转发到 app_manager */
     app_init_register_inputs();
 
-    /* 7. 上电流程：
-          · 生效模式为 FULL 且 UI 层就绪 → 先出开机画面（首帧 mono 顺带完成全屏清场），
-            自检结束后自动落到主菜单
-          · 其余情况（跑不动 UI 层的机型 / 关闭按键切换）→ 恢复上次运行的 app：
-            被当前模式裁剪掉的 app、首次开机（无记录）或记录非法 → 回落图片（照片墙） */
-    if(app_manager_get_switch_mode() == APP_SWITCH_MODE_FULL
-       && ui_core_is_ready()
-       && app_manager_is_registered(APP_ID_MENU))
-    {
-        app_init_boot_start();
-        sys_logi(APP_INIT_TAG, "app layer init done (boot page)");
-        return;
-    }
+    /* 6.5 载入开机行为配置（app7 槽位）：必须在下面做上电决策之前。
+          放这里而不是更早：它要读 NVS（service 层已就绪）并查 app 注册表（上面刚注册完）。 */
+    app_boot_cfg_init();
 
-    int last = service_param_app_current_get();
-    if(last < 0 || last >= APP_ID_MAX || !app_manager_is_registered((app_id_t)last))
+    /* 7. 上电流程：由 BOOT PAGE / START APP 两个参数决定（见 app_boot_cfg）
+          · 显示开机画面：还需 FULL + UI 层就绪 + 菜单已注册 —— 否则连页面都建不出来，
+            此时即便配了"显示"也只能跳过
+          · 自检结束后落到 START APP 指定的 app（默认主菜单，与加参数前一致）
+          · 跳过开机画面：直接落到 START APP 指定的 app
+          START APP 里被当前模式裁剪掉的 app（简易模式没有菜单、没编 UI 就没有设置页）
+          由 app_boot_cfg_resolve_target() 统一回落图片（照片墙） */
     {
-        last = APP_ID_IMAGE;
+        app_id_t target = app_boot_cfg_resolve_target();
+
+        if(app_boot_cfg_get()->boot_page == APP_BOOT_PAGE_SHOW
+           && app_manager_get_switch_mode() == APP_SWITCH_MODE_FULL
+           && ui_core_is_ready()
+           && app_manager_is_registered(APP_ID_MENU))
+        {
+            app_init_boot_start(target);
+            sys_logi(APP_INIT_TAG, "app layer init done (boot page -> app %d)", (int)target);
+            return;
+        }
+
+        app_manager_switch(target);
+        sys_logi(APP_INIT_TAG, "app layer init done (direct -> app %d)", (int)target);
     }
-    app_manager_switch((app_id_t)last);
 
     /* 8. 投递一次 BOOT 事件：首个 app 据此执行“开机自动”行为（自动切图 / 自动拉取） */
     app_manager_notify_boot();
-
-    sys_logi(APP_INIT_TAG, "app layer init done");
 }
 
 /*********************************************************************
@@ -176,12 +181,12 @@ void film_app_init(void)
  * 不额外多付一次闪屏。遥测行取真实值，全部只读、无副作用。
  *
  * 进度条与切页时机都**不在这里驱动**：页面内的 lv_timer 一格一格推进，
- * 走满并停留后上报 APP_UI_REQ_BOOT_DONE，调度器据此切主菜单。早先按"外部投
+ * 走满并停留后上报 APP_UI_REQ_BOOT_DONE，调度器据此切到 next 指定的 app。早先按"外部投
  * 步骤消息"驱动时，首帧 flush 会阻塞 ui_task 约 3.3s，期间投递的步骤全堆在
  * 队列里被一次性消费，进度条看起来完全不动；用一个固定延时去猜切页时机，
  * 也会因为这段阻塞而落在进度条走到一半的位置。
  */
-static void app_init_boot_start(void)
+static void app_init_boot_start(app_id_t next)
 {
     static app_boot_tele_t s_tele[4];
     static char s_val[4][24];
@@ -203,8 +208,9 @@ static void app_init_boot_start(void)
     s_tele[3].name = "FIRMWARE"; s_tele[3].value = s_val[3];
     app_boot_set_telemetry(s_tele, 4);
 
-    /* 交给调度器托管（按键在此期间被丢弃），页面在 ui_task 异步建立 */
-    app_manager_boot_show(app_boot_ops());
+    /* 交给调度器托管（按键在此期间被丢弃），页面在 ui_task 异步建立；
+       next 决定自检结束后落到哪个 app */
+    app_manager_boot_show(app_boot_ops(), next);
 
 #if (UI_CALIB_FRAME == 1)
     /* 标定帧模式：停在开机页不自动前进（短按确认键继续，见 ui_conf.h） */

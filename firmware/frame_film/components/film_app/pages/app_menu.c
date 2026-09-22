@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_menu.c
+ * FileName : /film_app/pages/app_menu.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/17
  * Description: 主菜单（UI 层）：横向轮播选择 app，单击进入
  * ChangeLog: Change Notes
@@ -377,8 +377,9 @@ static void menu_apply_sel(void)
     }
 
     /* 状态栏顺手刷一次：换选中项本来就要整屏重绘，这次请求不额外付刷新代价。
-       （1-bit 面板每次更新都是全帧 + 闪一下，所以状态栏不做周期刷新，只在交互点同步；
-         页面 create 也会走到这里，故不必在别处再请求一次。） */
+       （1-bit 面板每次更新都是全帧 + 闪一下，所以交互点同步一次就够；
+         页面空闲时的电量/时间由 app_shell 的周期 tick 兜住，见 app_shell_start_tick）
+         页面 create 也会走到这里，故不必在别处再请求一次。 */
     app_shell_request_status();
 }
 
@@ -557,6 +558,10 @@ static void menu_ui_create(lv_obj_t *root)
     }
 
     menu_apply_sel();
+
+    /* 空闲时也要刷新状态栏（电量 / 居中时间）：菜单是常驻页，用户可能停在这里很久。
+       tick 只每 10s 取一次值，内容没变不碰控件，所以实际约每分钟才上屏一次（分钟跳变）。 */
+    app_shell_start_tick(&m_shell, NULL);
 }
 
 static void menu_ui_destroy(void)
@@ -572,7 +577,8 @@ static void menu_ui_destroy(void)
     m_panel_line2 = NULL;
     m_notice_row = NULL;
     m_notice_label = NULL;
-    memset(&m_shell, 0, sizeof(m_shell));
+    /* 释放外壳：顺带删周期定时器（它不在对象树里，不删会变野指针） */
+    app_shell_release(&m_shell);
 }
 
 static void menu_ui_on_msg(uint32_t cmd, const void *data, uint8_t len)

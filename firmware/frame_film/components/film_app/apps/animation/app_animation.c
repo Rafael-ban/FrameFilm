@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_animation.c
+ * FileName : /film_app/apps/animation/app_animation.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/9
  * Description: 动图 app：持续循环播放 film v2 多帧（独立目录 /sdcard/animation）
  *              支持单个文件循环 / 按顺序播放两种模式；蓝牙下传动图后刷新列表并重置到第一个。

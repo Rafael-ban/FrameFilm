@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_boot.c
+ * FileName : /film_app/pages/app_boot.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/17
  * Description: 开机画面（UI 页）：徽章 + 自检遥测 + 分段进度
  * ChangeLog: Change Notes
@@ -55,7 +55,9 @@ static lv_obj_t *m_tele_ok[8] = {0};
 
 /* 开机页不是 app（不参与切换、也没有 app 任务侧的 on_event），
    故状态栏取不到实时数据，保持初始的 "BAT --%" 与空指示块。
-   真实数值在紧接着的主菜单页即刻可见。 */
+   真实数值在紧接着的主菜单页即刻可见。
+   居中时间是唯一例外：它由 app_shell 自己问 libc 得到，不需要跨任务采集
+   （此时多半还没校时，会显示 "--:--"）。 */
 static app_shell_t m_shell;
 
 static app_boot_tele_t m_tele[8];
@@ -467,7 +469,7 @@ static void boot_ui_destroy(void)
 
     memset(m_seg, 0, sizeof(m_seg));
     memset(m_tele_ok, 0, sizeof(m_tele_ok));
-    memset(&m_shell, 0, sizeof(m_shell));
+    app_shell_release(&m_shell);   // 本页没启 tick，这里只是统一收尾
     m_pct_label = NULL;
     sys_logi(APP_BOOT_TAG, "destroy boot page");
 }

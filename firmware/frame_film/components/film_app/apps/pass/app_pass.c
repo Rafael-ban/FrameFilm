@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_pass.c
+ * FileName : /film_app/apps/pass/app_pass.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/21
  * Description: 通行证 app（UI 层占位页）：菜单有卡、进入后只提示"待开发"
  * ChangeLog: Change Notes
@@ -28,8 +28,6 @@
 /*********************************************************************
  * INCLUDES
  */
-#include <string.h>
-
 #include "sys_log.h"
 
 #include "ui_ops.h"
@@ -135,13 +133,16 @@ static void pass_ui_create(lv_obj_t *root)
     (void)pass_label(body, &lv_font_unscii_16, lv_color_black(), PASS_NOTE_BIG);
     (void)pass_label(body, &lv_font_unscii_8, lv_color_black(), PASS_NOTE_SMALL);
 
-    /* 状态栏的电量/WiFi/蓝牙由 app 任务侧采集后回投（页面不读服务层） */
+    /* 状态栏的电量/WiFi/蓝牙由 app 任务侧采集后回投（页面不读服务层）。
+       再挂周期 tick 让它们空闲时也会更新（内容没变不碰控件，不产生额外刷屏）。 */
     app_shell_request_status();
+    app_shell_start_tick(&m_shell, NULL);
 }
 
 static void pass_ui_destroy(void)
 {
-    memset(&m_shell, 0, sizeof(m_shell));
+    /* 释放外壳：顺带删周期定时器（它不在对象树里，不删会变野指针） */
+    app_shell_release(&m_shell);
     sys_logi(APP_PASS_TAG, "destroy pass page");
 }
 

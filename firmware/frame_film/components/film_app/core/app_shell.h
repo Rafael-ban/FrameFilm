@@ -32,9 +32,24 @@ extern "C" {
 #define SHELL_BODY_TOP          (SHELL_STATUS_H + SHELL_BODY_PAD_Y)
 #define SHELL_BODY_BOTTOM       (SHELL_FOOT_H + SHELL_BODY_PAD_Y)
 
+/* 状态栏周期刷新间隔（毫秒）。
+ * 为什么是 10s 而不是 60s：时间精确到分钟，靠 60s 的定时器去追会在分钟边界上
+ * 最多晚一分钟；10s 能把"显示跳分钟"的误差压到 10s 内。
+ * 代价由变更检测兜住 —— app_shell_apply() 与时间标签都只在**内容真的变了**时才写控件，
+ * 所以实际刷屏频率 ≤ 1 次/分钟（分钟跳一次），不会因为 tick 短而多刷。 */
+#define SHELL_TICK_MS           (10000)
+
 /*********************************************************************
 * TYPEDEFS
 */
+/**
+ * @brief 周期刷新钩子（页面自定义"定期要做什么"）
+ *
+ * 默认（传 NULL）走 app_shell_request_status()：重新采集电量/WiFi/蓝牙。
+ * 设置页那种"状态栏数据来自自己的快照"的页面，传自己的回调（发快照同步请求）。
+ */
+typedef void (*app_shell_tick_cb_t)(void);
+
 /**
  * @brief 状态栏里需要动态刷新的控件
  */
@@ -45,6 +60,14 @@ typedef struct {
     lv_obj_t *wifi_pip;
     lv_obj_t *bt_label;     // "BT"
     lv_obj_t *bt_pip;
+    lv_obj_t *time_label;   // 居中 "HH:MM"（由 tick 维护）
+
+    /* ---- 以下为内部状态，页面不要写 ---- */
+    app_status_t last_status;   // 上次已上屏的数据（用于变更检测，避免无谓全帧刷新）
+    uint8_t      status_valid;
+    char         last_time[6];  // 上次已上屏的 "HH:MM"
+    lv_timer_t  *tick;
+    app_shell_tick_cb_t tick_cb;
 } app_shell_t;
 
 /*********************************************************************
@@ -70,6 +93,29 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
  * 上行到 app 任务采集，再由 app_shell_on_event() 回投；页面本身不读服务层。
  */
 void app_shell_request_status(void);
+
+/**
+ * @brief 启动状态栏周期刷新（电量 / WiFi / 蓝牙 / 居中时间）
+ *
+ * 电子纸每次上屏都是全帧（约 940ms 且会闪），所以这里**不是"定期重绘"**：
+ * tick 只负责"定期取一次最新值"，真正写控件前会比对上次的值（app_shell_apply 与
+ * 时间标签都带去重），内容没变就完全不碰 LVGL，也就不会产生任何刷新。
+ *
+ * 时间由本模块自己算（`localtime_r` 与时钟页同一套，ui_task 读它没有跨任务问题），
+ * 不依赖 app 任务回投。
+ *
+ * @param s  外壳实例（app_shell_build 的输出）
+ * @param cb 周期钩子；传 NULL 表示"重新采集状态栏数据"（app_shell_request_status）
+ */
+void app_shell_start_tick(app_shell_t *s, app_shell_tick_cb_t cb);
+
+/**
+ * @brief 释放外壳（页面 destroy 里必须调）
+ *
+ * 周期定时器不在 root 的对象树里，页面销毁不会自动删；漏了会留下挂在已销毁
+ * 控件上的野指针定时器。
+ */
+void app_shell_release(app_shell_t *s);
 
 /**
  * @brief 把状态栏数据落到控件（页面 on_msg 里调用）

@@ -100,14 +100,15 @@ void app_manager_notify_boot(void);
  * 某个 app 抢面板，与 ui_task 的 flush 竞争 SPI。托管期间（到 app_manager_boot_end()
  * 为止）按键一律丢弃。
  *
- * @param ops 开机页契约（常驻实例，见 app_boot_ops()）
+ * @param ops  开机页契约（常驻实例，见 app_boot_ops()）
+ * @param next 自检结束后切到哪个 app（由 START APP 配置解析而来，见 app_boot_cfg）
  */
-void app_manager_boot_show(const app_ui_ops_t *ops);
+void app_manager_boot_show(const app_ui_ops_t *ops, app_id_t next);
 
 /**
- * @brief 结束开机画面，切到主菜单
+ * @brief 结束开机画面，切到 app_manager_boot_show() 指定的 app
  *
- * 页面销毁由 ui_core 在建立主菜单页面时完成（page_enter 内部先 teardown）。
+ * 页面销毁由 ui_core 在建立目标页面时完成（page_enter 内部先 teardown）。
  */
 void app_manager_boot_end(void);
 

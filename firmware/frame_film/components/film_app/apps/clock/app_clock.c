@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_clock.c
+ * FileName : /film_app/apps/clock/app_clock.c
  * Author: Kiritro  Version: v0.3  Date: 2026/9/19
  * Description: 时钟 app（UI 框架层）：计时仪表 —— 主读数 / 分钟尺 / 星期寄存器 / 设备面板
  * ChangeLog:
@@ -672,8 +672,10 @@ static void clock_ui_create(lv_obj_t *root)
         sys_loge(APP_CLOCK_TAG, "create timer failed, clock will not tick");
     }
 
-    /* 状态栏的电量/WiFi/蓝牙由 app 任务侧采集后回投（页面不读服务层） */
+    /* 状态栏的电量/WiFi/蓝牙由 app 任务侧采集后回投（页面不读服务层）。
+       再挂周期 tick 让它们空闲时也会更新（内容没变不碰控件，不产生额外刷屏）。 */
     app_shell_request_status();
+    app_shell_start_tick(&m_shell, NULL);
 }
 
 static void clock_ui_destroy(void)
@@ -697,7 +699,8 @@ static void clock_ui_destroy(void)
     memset(m_seg, 0, sizeof(m_seg));
     memset(m_wk_cell, 0, sizeof(m_wk_cell));
     memset(m_wk_code, 0, sizeof(m_wk_code));
-    memset(&m_shell, 0, sizeof(m_shell));
+    /* 释放外壳：顺带删周期定时器（它不在对象树里，不删会变野指针） */
+    app_shell_release(&m_shell);
     m_last_min  = -1;
     m_last_mday = -1;
 }

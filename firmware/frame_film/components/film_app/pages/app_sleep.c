@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_sleep.c
+ * FileName : /film_app/pages/app_sleep.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/19
  * Description: 休眠卡（UI 页）：徽章 + STANDBY + 唤醒说明，画完即进 deep sleep
  * ChangeLog: Change Notes

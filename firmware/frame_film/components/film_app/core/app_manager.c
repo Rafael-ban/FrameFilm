@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_manager.c
+ * FileName : /film_app/core/app_manager.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/9
  * Description: App 层调度器：注册/切换/事件路由/输入转发/切换状态机
  * ChangeLog: Change Notes
@@ -99,6 +99,7 @@ static const app_id_t m_menu_entries[APP_MENU_ENTRY_NUM] = {
 };
 static uint8_t m_menu_sel = 0;   // 主菜单当前选中索引
 static uint8_t m_boot_page = 0;  // 开机画面占屏中（此期间不进入任何 app，按键丢弃）
+static app_id_t m_boot_next_app = APP_ID_MENU;  // 开机画面结束后切到哪（START APP 决定）
 static uint8_t m_sleep_page = 0; // 休眠卡占屏中（同上；此后设备就断电了）
 
 /* 参数通道反查表：param_ch / param_ch+1 → 归属 app。注册时构建，与“当前 app”无关，
@@ -126,12 +127,33 @@ static void app_manager_sleep_from_app(void);
 static int app_param_ch_route(uint8_t ch, const uint8_t *data, uint8_t len);
 static app_input_result_t app_manager_process_input(input_press_type_t key);
 static void app_input_dispatch(input_press_type_t key);
+static input_press_type_t ble_key_to_press(uint8_t key);
 static int app_state_save_of(const app_entry_t *app);
 static int app_state_load_of(const app_entry_t *app);
 
 /*********************************************************************
  * LOCAL HELPERS
  */
+
+/**
+ * @brief BLE 遥控键值 → HAL 输入事件
+ *
+ * 与 hal_input 上报的事件同构，因此注入后能完整复用既有语义：
+ * 上/下 = 菜单导航，单击 = 确认，双击 = 退回主菜单，长按 = 手动休眠。
+ * 未知键值一律映射为 INPUT_PRESS_NONE（消费不掉任何东西）。
+ */
+static input_press_type_t ble_key_to_press(uint8_t key)
+{
+    switch(key)
+    {
+        case BLE_KEY_SHORT:  return INPUT_PRESS_SHORT;
+        case BLE_KEY_LONG:   return INPUT_PRESS_LONG;
+        case BLE_KEY_UP:     return INPUT_PRESS_UP;
+        case BLE_KEY_DOWN:   return INPUT_PRESS_DOWN;
+        case BLE_KEY_DOUBLE: return INPUT_PRESS_DOUBLE;
+        default:             return INPUT_PRESS_NONE;
+    }
+}
 
 /**
  * @brief 确保当前 app 已进入（on_enter）
@@ -504,6 +526,13 @@ static void app_handle_event(const app_event_t *e)
             if(e->len >= 2 && e->payload[0] == BLE_FILM_TRANS_CH_CTRL_APP_SWITCH)
             {
                 app_do_switch((app_id_t)e->payload[1]);
+            }
+            /* 远程按键注入（payload: [0]=命令通道，[1]=键值）：
+               映射成与 HAL 上报同款事件入队，完整复用既有语义
+               （菜单导航 / 单击确认 / 双击退回 / 长按休眠） */
+            else if(e->len >= 2 && e->payload[0] == BLE_FILM_TRANS_CH_CTRL_KEY_INJECT)
+            {
+                app_input_dispatch(ble_key_to_press(e->payload[1]));
             }
             return;
         }
@@ -926,13 +955,15 @@ void app_manager_notify_boot(void)
     xQueueSend(m_app_queue_hdl, &e, portMAX_DELAY);
 }
 
-void app_manager_boot_show(const app_ui_ops_t *ops)
+void app_manager_boot_show(const app_ui_ops_t *ops, app_id_t next)
 {
     if(ops == NULL)
     {
         return;
     }
 
+    /* 开机画面结束后去哪个 app 由调用方定（见 app_boot_cfg 的 START APP） */
+    m_boot_next_app = next;
     /* 页面 id 用 APP_ID_MAX：开机画面不是 app，不在注册表里也不参与切换 */
     ui_core_page_enter((uint8_t)APP_ID_MAX, ops);
     m_boot_page = 1;
@@ -946,7 +977,7 @@ void app_manager_boot_end(void)
     }
 
     m_boot_page = 0;
-    app_manager_switch(APP_ID_MENU);
+    app_manager_switch(m_boot_next_app);
 }
 
 void app_manager_sleep_show(const app_ui_ops_t *ops)

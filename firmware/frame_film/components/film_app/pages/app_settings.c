@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_settings.c
+ * FileName : /film_app/pages/app_settings.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/17
  * Description: 系统设置（UI 层）：设备信息 + 系统参数，UP/DOWN 选择、ENTER 切换、双击退出
  * ChangeLog: Change Notes
@@ -47,6 +47,7 @@
 #include "app_shell.h"
 #include "app_image.h"      /* 图片 app 参数 TAG / 取值范围（app 参数行用） */
 #include "app_animation.h"  /* 动图 app 参数 TAG / 取值范围 */
+#include "app_boot_cfg.h"   /* 开机行为参数（BOOT PAGE / START APP 两行） */
 #include "app_settings.h"
 #include "app_manager.h"
 
@@ -81,6 +82,18 @@ static const char *const HB_OPTS[HB_OPT_NUM] = {
 static const uint16_t HB_OPTS_SEC[HB_OPT_NUM] = {
     5, 10, 30, 60, 120, 180                      // 与 HB_OPTS 一一对应的秒值
 };
+
+/* ---- 开机行为（BOOT PAGE / START APP）----
+ * 候选下标与 app_boot_cfg.h 的 APP_BOOT_PAGE_* / app_start_t **必须同序**，
+ * 存的就是下标本身（协议/落盘值即候选下标）。 */
+#define BOOTPAGE_OPT_NUM    (2)
+static const char *const BOOTPAGE_OPTS[BOOTPAGE_OPT_NUM] = {
+    "SHOW", "SKIP"                              // 下标 0/1 == APP_BOOT_PAGE_SHOW/SKIP
+};
+#define STARTAPP_OPT_NUM    (APP_START_NUM)
+static const char *const STARTAPP_OPTS[STARTAPP_OPT_NUM] = {
+    "MENU", "LAST", "IMAGE", "TEMPLATE", "CLOCK", "ANIMATION", "SETTINGS", "PASS"
+};                                              // 顺序 == app_start_t
 
 /* ---- app 参数行的候选值 ----
  * 值本身由归属 app 的 TLV 通道定义（TAG / 范围见 app_image.h、app_animation.h），
@@ -117,9 +130,10 @@ static const char *const SEC_TITLES[] = {
 _Static_assert(sizeof(settings_snapshot_t) <= UI_CMD_DATA_MAX,
                "settings_snapshot_t exceeds ui cmd payload");
 
-/* 列表总高：3 个分节标题（22 + 4 间距） + 14 行。
+/* 列表总高：3 个分节标题（22 + 4 间距） + 16 行。
    正文可用高度 = 720 - 状态栏 30 - 提示行 28 - 上下留白 36 = 626，
-   扣掉表头 16 + 间距 24 后余 586 —— 列表 498 有富余，不会溢出到提示行。 */
+   扣掉表头 16 + 间距 24 后余 586 —— 列表 558 装得下，不会溢出到提示行。
+   ⚠ 再加行就会顶到提示行：16 → 17 行时列表 588 > 586，必须先压缩 ROW_H 或拆页。 */
 #define SET_LIST_H          (3 * (22 + 4) + SETTINGS_ROW_NUM * ROW_H)
 
 /*********************************************************************
@@ -136,6 +150,7 @@ typedef struct {
 enum {
     F_BAT = 0, F_WIFI, F_BT, F_PANEL, F_STORAGE, F_FW,
     F_SLEEP, F_AUTOWAKE, F_WIFI_ON, F_BT_ON, F_WAKE_SEL, F_HB_SEL,
+    F_BOOT_PAGE, F_START_APP,
     F_IMG_PLAY, F_IMG_INT, F_ANIM_LOOP, F_ANIM_SPEED,
 };
 
@@ -147,6 +162,8 @@ static const settings_row_t ROWS[SETTINGS_ROW_NUM] = {
     { 0, "PANEL",        SET_KIND_TEXT,   F_PANEL      },
     { 0, "STORAGE",      SET_KIND_TEXT,   F_STORAGE    },
     { 0, "FIRMWARE",     SET_KIND_TEXT,   F_FW         },
+    { 1, "BOOT PAGE",    SET_KIND_CYCLE,  F_BOOT_PAGE  },
+    { 1, "START APP",    SET_KIND_CYCLE,  F_START_APP  },
     { 1, "SLEEP MODE",   SET_KIND_TOGGLE, F_SLEEP      },
     { 1, "AUTO WAKE",    SET_KIND_TOGGLE, F_AUTOWAKE   },
     { 1, "WAKE INTERVAL",SET_KIND_CYCLE,  F_WAKE_SEL   },
@@ -177,10 +194,22 @@ static uint8_t m_sel = SET_SEL_NONE;
 /*********************************************************************
  * LOCAL FUNCTIONS
  */
+/**
+ * @brief 周期 tick 钩子（ui_task 上下文）
+ *
+ * 本页的"状态栏数据"也来自设置快照，所以不能走 app_shell 的默认钩子
+ * （那只会刷电量/WiFi/蓝牙三项，列表里的 BATTERY 行会不跟着变）。
+ */
+static void settings_tick_request(void)
+{
+    (void)app_manager_post_ui_msg(APP_UI_REQ_SETTINGS_SYNC, NULL, 0);
+}
+
 static void set_ui_create(lv_obj_t *root);
 static void set_ui_destroy(void);
 static void set_ui_on_key(input_press_type_t key);
 static void set_ui_on_msg(uint32_t cmd, const void *data, uint8_t len);
+static void settings_tick_request(void);
 static void settings_on_event(const app_event_t *e);
 
 static lv_obj_t *set_label(lv_obj_t *parent, const lv_font_t *font,
@@ -214,6 +243,8 @@ static const char *row_text(uint8_t idx)
     case F_FW:         return m_snap.fw;
     case F_WAKE_SEL:   return WAKE_OPTS[m_snap.wake_sel % WAKE_OPT_NUM];
     case F_HB_SEL:     return HB_OPTS[m_snap.hb_sel % HB_OPT_NUM];
+    case F_BOOT_PAGE:  return BOOTPAGE_OPTS[m_snap.boot_page_sel % BOOTPAGE_OPT_NUM];
+    case F_START_APP:  return STARTAPP_OPTS[m_snap.start_app_sel % STARTAPP_OPT_NUM];
     case F_IMG_PLAY:   return IMG_PLAY_OPTS[m_snap.img_play_sel % IMG_PLAY_OPT_NUM];
     case F_IMG_INT:    return IMG_INT_OPTS[m_snap.img_interval_sel % IMG_INT_OPT_NUM];
     case F_ANIM_LOOP:  return ANIM_LOOP_OPTS[m_snap.anim_loop_sel % ANIM_LOOP_OPT_NUM];
@@ -361,6 +392,10 @@ static void settings_snapshot_pull(void)
     m_snap.wake_sel   = idx_of_u16(WAKE_OPTS_MIN, WAKE_OPT_NUM, g_service_param.sleep.sleep_time);
     m_snap.hb_sel     = idx_of_u16(HB_OPTS_SEC, HB_OPT_NUM, g_service_param.network.film_heartbeat_interval);
 
+    /* 开机行为（app 层参数，存在 app7 槽位）：下标即存盘值，直接取 */
+    m_snap.boot_page_sel = app_boot_cfg_get()->boot_page % BOOTPAGE_OPT_NUM;
+    m_snap.start_app_sel = app_boot_cfg_get()->start_app % STARTAPP_OPT_NUM;
+
     /* app 参数不在 service_param 里，走归属 app 的参数通道读回 */
     settings_app_params_pull();
 }
@@ -449,6 +484,17 @@ static void settings_apply(uint8_t row, uint8_t value)
         service_param_save();
         break;
 
+    /* ---- 开机行为：两个字段一起写（本行只带一个值，另一个保持当前） ---- */
+    case F_BOOT_PAGE:
+        if(value >= BOOTPAGE_OPT_NUM) { return; }
+        app_boot_cfg_set(value, app_boot_cfg_get()->start_app);
+        break;
+
+    case F_START_APP:
+        if(value >= STARTAPP_OPT_NUM) { return; }
+        app_boot_cfg_set(app_boot_cfg_get()->boot_page, value);
+        break;
+
     /* ---- app 参数：转交归属 app 的参数通道（TAG/范围由 app 自己的头文件定） ---- */
     case F_IMG_PLAY:
         if(value >= IMG_PLAY_OPT_NUM) { return; }
@@ -480,10 +526,27 @@ static void settings_apply(uint8_t row, uint8_t value)
 
 /**
  * @brief 把当前快照下发给页面（下行动作，只投递不渲染）
+ *
+ * 带去重：页面侧每 10s 会要一次（见 app_shell_start_tick），但设置页的快照里
+ * 真正会变的只有电量/连接状态这几个字节 —— 值没变就不下发，否则 set_apply()
+ * 会无条件重写一堆控件，每 10s 白刷一整帧电子纸。
+ *
+ * @param force 1 = 忽略去重（页面刚建好、或刚 APPLY 完，必须给一帧真实值）
  */
-static void settings_snapshot_push(void)
+static void settings_snapshot_push(uint8_t force)
 {
+    static settings_snapshot_t s_last;
+    static uint8_t s_last_valid = 0;
+
     settings_snapshot_pull();
+
+    if(!force && s_last_valid && (memcmp(&s_last, &m_snap, sizeof(m_snap)) == 0))
+    {
+        return;
+    }
+    memcpy(&s_last, &m_snap, sizeof(s_last));
+    s_last_valid = 1;
+
     (void)ui_core_post(APP_UI_MSG_SETTINGS_SNAPSHOT, &m_snap, (uint8_t)sizeof(m_snap));
 }
 
@@ -501,15 +564,19 @@ static void settings_on_event(const app_event_t *e)
 
     if(e->cmd == APP_UI_REQ_SETTINGS_SYNC)
     {
-        settings_snapshot_push();   // 页面刚建好，下发首帧真实值
+        /* 页面刚建好 / 周期 tick：给首帧真实值。去重由 settings_snapshot_push 负责，
+           所以周期请求不会造成无谓刷屏。 */
+        settings_snapshot_push(0);
         return;
     }
 
     if(e->cmd == APP_UI_REQ_SETTINGS_APPLY && e->len >= 2)
     {
         settings_apply(e->payload[0], e->payload[1]);
-        /* 回刷以设备侧真实值为准：如 WiFi 打开后状态文案由 OFF 变 IDLE */
-        settings_snapshot_push();
+        /* 回刷以设备侧真实值为准：如 WiFi 打开后状态文案由 OFF 变 IDLE。
+           这里 force=1：刚改完必须回投一帧，否则"改回原值"这类操作会因为
+           去重被吞掉，页面停在乐观更新的结果上。 */
+        settings_snapshot_push(1);
     }
 }
 
@@ -664,6 +731,10 @@ static void set_toggle(void)
                         req[1] = m_snap.wake_sel;   break;
     case F_HB_SEL:      m_snap.hb_sel     = (uint8_t)((m_snap.hb_sel + 1) % HB_OPT_NUM);
                         req[1] = m_snap.hb_sel;     break;
+    case F_BOOT_PAGE:   m_snap.boot_page_sel = (uint8_t)((m_snap.boot_page_sel + 1) % BOOTPAGE_OPT_NUM);
+                        req[1] = m_snap.boot_page_sel; break;
+    case F_START_APP:   m_snap.start_app_sel = (uint8_t)((m_snap.start_app_sel + 1) % STARTAPP_OPT_NUM);
+                        req[1] = m_snap.start_app_sel; break;
     case F_IMG_PLAY:    m_snap.img_play_sel     = (uint8_t)((m_snap.img_play_sel + 1) % IMG_PLAY_OPT_NUM);
                         req[1] = m_snap.img_play_sel;      break;
     case F_IMG_INT:     m_snap.img_interval_sel = (uint8_t)((m_snap.img_interval_sel + 1) % IMG_INT_OPT_NUM);
@@ -856,6 +927,11 @@ static void set_ui_create(lv_obj_t *root)
     /* 首帧只是静态骨架（可见项为页面初始值）；真实设备状态由 app 任务侧采集后回投
        —— ui_task 不直接读 g_service_param / 电池 / WiFi，那些没有跨任务保证 */
     (void)app_manager_post_ui_msg(APP_UI_REQ_SETTINGS_SYNC, NULL, 0);
+
+    /* 空闲时也要刷新（电量 / 状态栏时间）：本页数据全部来自快照，所以 tick 的钩子是
+       "再要一份快照"而不是默认的 app_shell_request_status()。app 任务侧对快照做了
+       去重，值没变不会回投，也就不会白刷屏。 */
+    app_shell_start_tick(&m_shell, settings_tick_request);
 }
 
 static void set_ui_destroy(void)
@@ -868,7 +944,8 @@ static void set_ui_destroy(void)
     memset(m_row_ptr, 0, sizeof(m_row_ptr));
     memset(m_row_st, 0, sizeof(m_row_st));
     m_row_idx_label = NULL;
-    memset(&m_shell, 0, sizeof(m_shell));
+    /* 释放外壳：顺带删周期定时器（它不在对象树里，不删会变野指针） */
+    app_shell_release(&m_shell);
     sys_logi(APP_SET_TAG, "destroy settings page");
 }
 

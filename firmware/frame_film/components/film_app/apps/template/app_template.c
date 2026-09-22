@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_template.c
+ * FileName : /film_app/apps/template/app_template.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/9
  * Description: 模板 app：通用实时推送显示
  *              蓝牙/WiFi 推送的 film 落盘后装载到缓存并整屏渲染（天气/日历等内容共用）

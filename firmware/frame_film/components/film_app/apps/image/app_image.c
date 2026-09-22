@@ -18,7 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
  *
- * FileName : /film_app/src/app_image.c
+ * FileName : /film_app/apps/image/app_image.c
  * Author: Kiritro  Version: v0.1  Date: 2026/9/9
  * Description: 图片 app：本地 TF / BLE / WiFi 三来源，全屏 film 渲染
  * ChangeLog: Change Notes
