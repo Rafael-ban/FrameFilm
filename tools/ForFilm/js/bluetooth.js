@@ -961,7 +961,7 @@ async function sendBleKeyInject(key) {
         debugLog('遥控指令发送失败: ' + err.message, 'error');
         throw err;
     }
-    debugLog('发送遥控按键: ' + keyInjectName(key));
+    debugLog('发送遥控按键(协议值): ' + keyInjectName(key));
 
     return await echoed;
 }
@@ -971,9 +971,20 @@ async function onRemoteKeyPress(key) {
         showMessage('请先连接设备', 'error');
         return;
     }
+
+    /* 上下对调后再发：固件侧 INPUT_PRESS_UP 对应的其实是硬件"下"键
+       （HAL 的 UP/DOWN 引脚命名与实体按键相反），所以设备实体键方向是对的，
+       遥控照协议值发就会反向 —— 反着发才和实体键一致。 */
+    var name = keyInjectName(key);
+    if (key === BLE_KEY_UP) {
+        key = BLE_KEY_DOWN;
+    } else if (key === BLE_KEY_DOWN) {
+        key = BLE_KEY_UP;
+    }
+
     try {
         await sendBleKeyInject(key);
-        debugLog('遥控已注入: ' + keyInjectName(key), 'success');
+        debugLog('遥控已注入: ' + name, 'success');
     } catch (error) {
         showMessage('遥控指令未确认: ' + error.message, 'warning');
         debugLog('遥控未确认: ' + error.message, 'error');
