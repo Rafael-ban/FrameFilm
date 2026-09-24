@@ -154,10 +154,13 @@ static void service_param_set_default(void)
 {
     // 设置服务参数默认值
     g_service_param.param_ver = SERVICE_PARAM_VER;
-    g_service_param.factory_flag = SERVICE_FACTORY_DEFAULT_FLAG;
+    g_service_param.sys.factory_flag = SERVICE_FACTORY_DEFAULT_FLAG;
     /* 时区默认 UTC（= 改动前的行为）。想默认东八区就把它改成 +480。
        注意 localtime_r 依赖 TZ 环境变量，光设这个字段不生效 —— 由 service_time 应用。 */
-    g_service_param.tz_min = 0;
+    g_service_param.sys.tz_min = 0;
+    /* LED 默认"自动"：有操作时呼吸、闲置后熄灭（冰箱上长时间亮着很扰人）。
+       想默认常亮改成 SERVICE_LED_MODE_ALWAYS 即可。 */
+    g_service_param.sys.led_mode = SERVICE_LED_MODE_AUTO;
 
     g_service_param.sleep.sleep_mode = 1;  // 休眠模式默认开启
     g_service_param.sleep.sleep_auto = 0;  // 自动唤醒默认关闭
@@ -203,7 +206,7 @@ static void nvs_init(void)
         err = nvs_get_blob(my_nvs_handle, SYS_M_NVS_KEY_NAME, &g_service_param, &required_size);
 
         if(err == ESP_ERR_NVS_NOT_FOUND ||
-           g_service_param.factory_flag != SERVICE_FACTORY_DEFAULT_FLAG ||
+           g_service_param.sys.factory_flag != SERVICE_FACTORY_DEFAULT_FLAG ||
            g_service_param.param_ver != SERVICE_PARAM_VER) //FACTORY RESET / 布局版本变更
         {
             service_param_set_default();

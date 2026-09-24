@@ -56,7 +56,7 @@
  */
 #define APP_SET_TAG         "app_set"
 
-#define ROW_H               (30)
+#define ROW_H               (29)     // 行高（17 行要塞进 586px，见 SET_LIST_H 处的高度核算）
 #define Y_LIST              (66)     // 列表起点（表头 + 分节标题之下）
 
 /* BATTERY 行的电量条几何：外框 62 宽（含 1px 描边），填充按内宽 60 按比例给 */
@@ -81,6 +81,12 @@ static const char *const HB_OPTS[HB_OPT_NUM] = {
 };
 static const uint16_t HB_OPTS_SEC[HB_OPT_NUM] = {
     5, 10, 30, 60, 120, 180                      // 与 HB_OPTS 一一对应的秒值
+};
+
+/* ---- LED 模式（下标 == 落盘值，与 service_param.h 的 SERVICE_LED_MODE_* 同序）---- */
+#define LED_OPT_NUM         (SERVICE_LED_MODE_NUM)
+static const char *const LED_OPTS[LED_OPT_NUM] = {
+    "ALWAYS", "OFF", "AUTO"                      // 常亮 / 关闭 / 闲置自动熄灭
 };
 
 /* ---- 开机行为（BOOT PAGE / START APP）----
@@ -130,10 +136,11 @@ static const char *const SEC_TITLES[] = {
 _Static_assert(sizeof(settings_snapshot_t) <= UI_CMD_DATA_MAX,
                "settings_snapshot_t exceeds ui cmd payload");
 
-/* 列表总高：3 个分节标题（22 + 4 间距） + 16 行。
+/* 列表总高：3 个分节标题（3 行标题 + 3 处 4px 间距） + 17 行。
    正文可用高度 = 720 - 状态栏 30 - 提示行 28 - 上下留白 36 = 626，
-   扣掉表头 16 + 间距 24 后余 586 —— 列表 558 装得下，不会溢出到提示行。
-   ⚠ 再加行就会顶到提示行：16 → 17 行时列表 588 > 586，必须先压缩 ROW_H 或拆页。 */
+   扣掉表头 16 + 间距 24 后余 586 —— 列表 571 装得下，不会溢出到提示行。
+   ⚠ ROW_H 是从 30 压到 29 才塞下第 17 行的（30 时列表 588 > 586）。
+   再加行就必须先压缩分节标题或拆页，别再动 ROW_H（再压行内文字会挤）。 */
 #define SET_LIST_H          (3 * (22 + 4) + SETTINGS_ROW_NUM * ROW_H)
 
 /*********************************************************************
@@ -148,7 +155,7 @@ typedef struct {
 
 /* 字段编号（避免依赖结构体偏移，页面对快照只读） */
 enum {
-    F_BAT = 0, F_WIFI, F_BT, F_PANEL, F_STORAGE, F_FW,
+    F_BAT = 0, F_WIFI, F_BT, F_LED, F_PANEL, F_STORAGE, F_FW,
     F_SLEEP, F_AUTOWAKE, F_WIFI_ON, F_BT_ON, F_WAKE_SEL, F_HB_SEL,
     F_BOOT_PAGE, F_START_APP,
     F_IMG_PLAY, F_IMG_INT, F_ANIM_LOOP, F_ANIM_SPEED,
@@ -159,6 +166,7 @@ static const settings_row_t ROWS[SETTINGS_ROW_NUM] = {
     { 0, "BATTERY",      SET_KIND_BAR,    F_BAT        },
     { 0, "WIFI",         SET_KIND_TOGGLE, F_WIFI_ON    },
     { 0, "BLUETOOTH",    SET_KIND_TOGGLE, F_BT_ON      },
+    { 0, "LED",          SET_KIND_CYCLE,  F_LED        },
     { 0, "PANEL",        SET_KIND_TEXT,   F_PANEL      },
     { 0, "STORAGE",      SET_KIND_TEXT,   F_STORAGE    },
     { 0, "FIRMWARE",     SET_KIND_TEXT,   F_FW         },
@@ -245,6 +253,7 @@ static const char *row_text(uint8_t idx)
     case F_HB_SEL:     return HB_OPTS[m_snap.hb_sel % HB_OPT_NUM];
     case F_BOOT_PAGE:  return BOOTPAGE_OPTS[m_snap.boot_page_sel % BOOTPAGE_OPT_NUM];
     case F_START_APP:  return STARTAPP_OPTS[m_snap.start_app_sel % STARTAPP_OPT_NUM];
+    case F_LED:        return LED_OPTS[m_snap.led_mode_sel % LED_OPT_NUM];
     case F_IMG_PLAY:   return IMG_PLAY_OPTS[m_snap.img_play_sel % IMG_PLAY_OPT_NUM];
     case F_IMG_INT:    return IMG_INT_OPTS[m_snap.img_interval_sel % IMG_INT_OPT_NUM];
     case F_ANIM_LOOP:  return ANIM_LOOP_OPTS[m_snap.anim_loop_sel % ANIM_LOOP_OPT_NUM];
@@ -389,6 +398,7 @@ static void settings_snapshot_pull(void)
 
     m_snap.sleep_mode = g_service_param.sleep.sleep_mode ? 1 : 0;
     m_snap.sleep_auto = g_service_param.sleep.sleep_auto ? 1 : 0;
+    m_snap.led_mode_sel = g_service_param.sys.led_mode % LED_OPT_NUM;
     m_snap.wake_sel   = idx_of_u16(WAKE_OPTS_MIN, WAKE_OPT_NUM, g_service_param.sleep.sleep_time);
     m_snap.hb_sel     = idx_of_u16(HB_OPTS_SEC, HB_OPT_NUM, g_service_param.network.film_heartbeat_interval);
 
@@ -457,6 +467,13 @@ static void settings_apply(uint8_t row, uint8_t value)
         if(value > 1) { return; }
         /* 与 WiFi 同一套语义：置参数 + 立刻起停协议栈（不再等重启） */
         service_ble_apply_enable(value);
+        service_param_save();
+        break;
+
+    /* LED 模式：只落参数，运行期由 monitor 的 LED 事件按它决定亮/不亮（最迟 500ms 生效） */
+    case F_LED:
+        if(value >= LED_OPT_NUM) { return; }
+        g_service_param.sys.led_mode = value;
         service_param_save();
         break;
 
@@ -727,6 +744,8 @@ static void set_toggle(void)
     case F_BT_ON:       m_snap.bt_on      = (uint8_t)!m_snap.bt_on;      req[1] = m_snap.bt_on;      break;
     case F_SLEEP:       m_snap.sleep_mode = (uint8_t)!m_snap.sleep_mode; req[1] = m_snap.sleep_mode; break;
     case F_AUTOWAKE:    m_snap.sleep_auto = (uint8_t)!m_snap.sleep_auto; req[1] = m_snap.sleep_auto; break;
+    case F_LED:         m_snap.led_mode_sel = (uint8_t)((m_snap.led_mode_sel + 1) % LED_OPT_NUM);
+                        req[1] = m_snap.led_mode_sel;  break;
     case F_WAKE_SEL:    m_snap.wake_sel   = (uint8_t)((m_snap.wake_sel + 1) % WAKE_OPT_NUM);
                         req[1] = m_snap.wake_sel;   break;
     case F_HB_SEL:      m_snap.hb_sel     = (uint8_t)((m_snap.hb_sel + 1) % HB_OPT_NUM);

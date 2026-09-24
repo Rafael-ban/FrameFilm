@@ -94,7 +94,7 @@ static void time_apply_tz(int16_t tz_min)
 
 void service_time_init(void)
 {
-    time_apply_tz(g_service_param.tz_min);
+    time_apply_tz(g_service_param.sys.tz_min);
 }
 
 int service_time_sync(int64_t epoch_s, int16_t tz_min)
@@ -115,9 +115,9 @@ int service_time_sync(int64_t epoch_s, int16_t tz_min)
     }
 
     /* 时区变了才落盘：NVS 擦写寿命有限，而正常连接端每次发的都是同一个值 */
-    if(g_service_param.tz_min != tz_min)
+    if(g_service_param.sys.tz_min != tz_min)
     {
-        g_service_param.tz_min = tz_min;
+        g_service_param.sys.tz_min = tz_min;
         service_param_save();
     }
     time_apply_tz(tz_min);

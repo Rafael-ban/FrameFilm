@@ -22,8 +22,8 @@ extern "C" {
 #define SET_KIND_TOGGLE     (2)   // 开关：ENTER 切换
 #define SET_KIND_CYCLE      (3)   // 枚举：ENTER 在候选值间循环
 
-/* 行数：设备信息 6 行 + 参数 6 行 + app 参数 4 行 */
-#define SETTINGS_ROW_NUM    (16)
+/* 行数：设备信息 7 行 + 参数 6 行 + app 参数 4 行 */
+#define SETTINGS_ROW_NUM    (17)
 
 /*********************************************************************
 * TYPEDEFS
@@ -52,6 +52,7 @@ typedef struct {
     uint8_t sleep_auto;     // 0/1
     uint8_t wifi_on;        // 0/1
     uint8_t bt_on;          // 0/1
+    uint8_t led_mode_sel;   // LED 模式候选下标（0=ALWAYS 1=OFF 2=AUTO）
     uint8_t wake_sel;       // WAKE INTERVAL 候选下标
     uint8_t hb_sel;         // HEARTBEAT 候选下标
     uint8_t boot_page_sel;  // BOOT PAGE 候选下标（0=SHOW 1=SKIP）
