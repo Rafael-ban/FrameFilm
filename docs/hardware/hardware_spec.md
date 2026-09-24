@@ -206,7 +206,16 @@ Pro 版使用三个独立按键替代旋转编码器，基于 espressif `iot_but
 | 参数 | 作用 |
 |---|---|
 | `MONITOR_LED_BREATH_MIN` / `MAX` | 亮度区间（0~100） |
-| `MONITOR_LED_BREATH_PERIOD_MS` | 一个完整呼吸的周期（当前 2.56s），**只影响快慢** |
+| `MONITOR_LED_BREATH_PERIOD_MS` | 一个完整呼吸的周期，**只影响快慢** |
+| `MONITOR_LED_AUTO_OFF_SEC` | "自动"模式的熄灯阈值（默认 20s） |
+
+**开关**（`g_service_param.sys.led_mode`，设备设置页 DEVICE 段的 `LED` 行可改）：
+
+| 模式 | 行为 |
+|---|---|
+| `ALWAYS` | 常亮：一直呼吸 |
+| `OFF` | 关闭：不亮 |
+| `AUTO`（默认） | 自动：`MONITOR_LED_AUTO_OFF_SEC` 内没有操作就熄灭；**按键或蓝牙连接状态变化**都算一次操作，会重新计时并点亮 |
 
 暗端要丝滑，靠的是 HAL 里两件事（都不是"调曲线"）：
 1. 呼吸直接按 **8 位通道刻度** 输出（绕开整数百分比的粗量化）；
