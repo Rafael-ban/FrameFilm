@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FrameFilm UI 设计稿 · 工业终端（终末地风格）· 1-bit</title>
+<style>
+/* ============================================================
+   FrameFilm UI — 设计稿 / 可交互原型
+   目标设备：E6 3.70" 720x480 彩色电子纸，物理旋转 90° → 逻辑竖屏 480x720
+   渲染约束：**纯 1-bit**（只有黑 / 白，无灰阶、无抗锯齿、无阴影、无渐变）
+   ============================================================ */
+
+:root{
+  /* 1-bit 调色板：只有两个值 */
+  --ink:#000; --paper:#fff;
+  /* 电子纸实际"白"偏黄绿，仅用于模拟面板观感（设计稿仍按纯白评审） */
+  --panel-tint:#e9ebdd;
+  --hair:1px;
+  /* 版式 */
+  --u:8px;                 /* 基础栅格单位 */
+  --pad:20px;              /* 屏内安全边距 */
+  --font-ui:'Helvetica Neue',Helvetica,Arial,'PingFang SC',sans-serif;
+  --font-mono:ui-monospace,'SFMono-Regular',Menlo,Consolas,'Courier New',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:#16171a; color:#c9cbc6;
+  font:14px/1.65 var(--font-ui);
+  padding:48px 24px 96px;
+}
+body::before{ /* 页面底噪：极稀的斜纹，暗示"工程图纸"而非装饰 */
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.03) 0 1px,transparent 1px 6px);
+}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto}
+
+/* ---------- 页面标题 ---------- */
+.masthead{border-bottom:2px solid #3a3c40;padding-bottom:20px;margin-bottom:40px}
+.masthead .kicker{font:11px/1 var(--font-mono);letter-spacing:.22em;color:#7d8178;text-transform:uppercase}
+.masthead h1{font-size:34px;font-weight:700;letter-spacing:-.01em;color:#f2f3ee;margin:14px 0 10px}
+.masthead p{max-width:66ch;color:#9a9d94;font-size:14px}
+.masthead .meta{margin-top:16px;font:11px/1.9 var(--font-mono);color:#6d7168;letter-spacing:.06em}
+
+/* ---------- 章节 ---------- */
+section{margin-bottom:56px}
+h2{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#f2f3ee;
+   display:flex;align-items:center;gap:12px;margin-bottom:22px;font-weight:700}
+h2::before{content:'';width:0;height:0;border-left:11px solid #f2f3ee;border-top:6px solid transparent;border-bottom:6px solid transparent;flex:none}
+h2::after{content:'';height:1px;background:#3a3c40;flex:1}
+
+/* ---------- 规格表 ---------- */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #2c2e31;vertical-align:top}
+th{font:11px/1.5 var(--font-mono);letter-spacing:.12em;color:#7d8178;text-transform:uppercase;font-weight:400}
+td:first-child{color:#e6e8e2;white-space:nowrap}
+td code{font:12px/1.5 var(--font-mono);color:#b9bcb3;background:#202224;padding:1px 5px;border-radius:2px}
+.note{font-size:12.5px;color:#8b8f85;margin-top:12px;padding-left:14px;border-left:2px solid #3a3c40}
+.note b{color:#d8dad2;font-weight:600}
+
+/* ---------- 元素库 ---------- */
+.elgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:1px;background:#2c2e31}
+.el{background:#16171a;padding:20px 18px}
+.el .box{height:76px;background:var(--paper);color:var(--ink);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:12px}
+.el h4{font:11px/1 var(--font-mono);letter-spacing:.14em;color:#e6e8e2;margin-bottom:6px;text-transform:uppercase}
+.el p{font-size:12px;color:#8b8f85;line-height:1.55}
+
+/* ---- 1-bit 图形语汇（全部可用 CSS 硬边实现，无渐变无阴影） ---- */
+/* 45° 四角切角：终末地标志性的"切削"感 */
+.chamfer{clip-path:polygon(9px 0,calc(100% - 9px) 0,100% 9px,100% calc(100% - 9px),calc(100% - 9px) 100%,9px 100%,0 calc(100% - 9px),0 9px)}
+.chamfer-bl{clip-path:polygon(0 0,100% 0,100% 100%,9px 100%,0 calc(100% - 9px))}
+/* 实心三角：终末地的核心 UI 符号 */
+.tri{width:0;height:0}
+.tri-r{border-left:11px solid var(--ink);border-top:7px solid transparent;border-bottom:7px solid transparent}
+.tri-l{border-right:11px solid var(--ink);border-top:7px solid transparent;border-bottom:7px solid transparent}
+.tri-u{border-bottom:11px solid var(--ink);border-left:7px solid transparent;border-right:7px solid transparent}
+/* 黄→黑的职能替代：密度斜纹（"强调"用） */
+.hatch{background-image:repeating-linear-gradient(45deg,var(--ink) 0 3px,transparent 3px 7px)}
+.hatch-d{background-image:repeating-linear-gradient(45deg,var(--ink) 0 2px,transparent 2px 4px)}
+/* 网点：模拟 1-bit 下的"灰阶"（本稿仅示意，固件需预渲染位图） */
+.dither{background-image:conic-gradient(var(--ink) 25%,var(--paper) 0 50%,var(--ink) 0 75%,var(--paper) 0);background-size:3px 3px}
+/* 角标括号：工业面板的"取景框" */
+.bracket{position:relative}
+.bracket::before,.bracket::after{content:'';position:absolute;width:16px;height:16px;border:2px solid var(--ink)}
+.bracket::before{left:0;top:0;border-right:0;border-bottom:0}
+.bracket::after{right:0;bottom:0;border-left:0;border-top:0}
+/* 分段进度条（终末地/工程仪表常见） */
+.seg{display:flex;gap:2px}
+.seg i{flex:1;height:10px;background:transparent;border:1px solid var(--ink)}
+.seg i.on{background:var(--ink)}
+
+/* ---------- 原型机位 ---------- */
+.stage{display:grid;grid-template-columns:500px 1fr;gap:40px;align-items:start}
+@media (max-width:1000px){.stage{grid-template-columns:1fr}}
+/* 屏体 480x720 物理像素 1:1，外面套一层 10px"设备边框"。
+   注意 content-box：让 width/height 明确表示**屏幕本身**，
+   否则边框会被 border-box 从 480x720 里扣掉，屏体实际只有 460x700 ——
+   那样"1:1"就是假的，稿上的坐标也不再等于固件里的坐标。 */
+.device{
+  width:480px;height:720px;position:relative;flex:none;box-sizing:content-box;
+  background:#0c0d0e;padding:10px;
+}
+.device-inner{width:100%;height:100%;background:var(--paper);color:var(--ink);position:relative;overflow:hidden;font-family:var(--font-ui)}
+.device-tag{font:10px/1 var(--font-mono);letter-spacing:.2em;color:#7d8178;margin-top:12px;text-align:right}
+
+/* ---------- 屏内组件 ---------- */
+.status{position:relative;height:30px;display:flex;align-items:center;gap:10px;padding:0 14px;
+        border-bottom:1px solid var(--ink);font:10px/1 var(--font-mono);letter-spacing:.1em}
+.status .brand{display:flex;align-items:center;gap:6px;font-weight:700;letter-spacing:.16em}
+.status .sp{flex:1}
+.status .clock{position:absolute;left:50%;transform:translateX(-50%);font-weight:700;letter-spacing:.14em}
+.status .cell{display:flex;align-items:center;gap:5px}
+.pip{width:9px;height:9px;border:1px solid var(--ink)}
+.pip.on{background:var(--ink)}
+.foot{position:absolute;left:0;right:0;bottom:0;height:28px;display:flex;align-items:center;
+      gap:10px;padding:0 14px;border-top:1px solid var(--ink);font:9.5px/1 var(--font-mono);letter-spacing:.1em}
+.foot .sp{flex:1}
+.body{position:absolute;left:0;right:0;top:30px;bottom:28px;padding:18px var(--pad)}
+.micro{font:9.5px/1.6 var(--font-mono);letter-spacing:.14em;text-transform:uppercase}
+.dim{opacity:.62}
+.rule{height:1px;background:var(--ink)}
+.vrule{width:1px;background:var(--ink)}
+
+/* 休眠卡：全屏、不带外壳的居中构图（徽章 → 线 → 大字 → 线 → 一行说明）。
+   数值与固件 app_sleep.c 的 y 偏移一一对应，块高 448、屏高 720 → 上下各留 136。 */
+.sleepcard{position:absolute;left:0;right:0;top:136px;display:flex;flex-direction:column;align-items:center}
+.sleepcard>*{flex:none}
+.sleepcard .rule{width:400px}
+
+/* 轮播：容器比"当前卡片"高出约 52px，给下方指示点留出呼吸 */
+.carousel{display:flex;align-items:center;justify-content:center;gap:10px;height:290px}
+.plate{width:132px;height:200px;border:1px solid var(--ink);display:flex;align-items:center;justify-content:center;position:relative}
+.plate.cur{width:178px;height:238px;background:var(--ink);color:var(--paper);border-width:3px}
+.plate .idx{position:absolute;top:6px;left:8px;font:9px/1 var(--font-mono);letter-spacing:.1em}
+.glyph{width:76px;height:76px;position:relative}
+.glyph i{position:absolute;background:currentColor}
+.dots{display:flex;gap:6px;justify-content:center;margin-top:8px}
+.dots b{width:22px;height:5px;border:1px solid var(--ink)}
+.dots b.on{background:var(--ink)}
+
+/* 时钟页：分钟尺 + 星期寄存器。两者都是"分段读数"，与 .seg 同一族语汇 */
+.gauge{display:flex;gap:2px}
+.gauge i{flex:1;border:1px solid var(--ink);background:transparent}
+.gauge i.on{background:var(--ink)}
+.weekstrip{display:flex;gap:4px}
+.weekstrip .wk{flex:1;border:1px solid var(--ink);display:flex;align-items:center;justify-content:center;
+               font:9.5px/1 var(--font-mono);letter-spacing:.12em}
+.weekstrip .wk.on{background:var(--ink);color:var(--paper);border-width:3px}
+
+/* 设置行 */
+.sec-head{display:flex;align-items:center;gap:8px;margin:16px 0 8px}
+.sec-head .tab{background:var(--ink);color:var(--paper);font:9.5px/1 var(--font-mono);letter-spacing:.16em;padding:5px 8px}
+.sec-head .line{flex:1;height:1px;background:var(--ink)}
+.row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--ink);font-size:12.5px}
+.row:last-child{border-bottom:0}
+.row.sel{background:var(--ink);color:var(--paper)}
+.row .k{flex:1;letter-spacing:.05em}
+.row .v{font:11px/1 var(--font-mono);letter-spacing:.08em}
+.row.ro .k,.row.ro .v{opacity:.68}
+/* 开关：OFF 描边空心；ON 实心。文字必须相对自身底色反色，两种行态下都要可读 */
+.toggle{border:1px solid currentColor;padding:2px 7px;font:10px/1.4 var(--font-mono);letter-spacing:.1em}
+.toggle.on{background:currentColor}
+.toggle.on span{color:var(--paper)}
+.row.sel .toggle.on span{color:var(--ink)}
+.bar{width:70px;height:9px;border:1px solid currentColor;position:relative}
+.bar u{position:absolute;left:0;top:0;bottom:0;background:currentColor}
+
+/* 静态稿列表 */
+.shots{display:flex;gap:24px;flex-wrap:wrap}
+.shot{width:500px}
+.shot h4{font:11px/1 var(--font-mono);letter-spacing:.16em;color:#e6e8e2;margin-bottom:10px}
+.shot .device{transform-origin:top left}
+.shot .device-inner *{}
+
+/* 键盘提示 */
+.keys{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+kbd{font:11px/1 var(--font-mono);border:1px solid #4a4d52;background:#202224;color:#d8dad2;padding:5px 8px;border-radius:3px}
+.klist{font:11px/2 var(--font-mono);color:#8b8f85;margin-top:6px}
+.klist b{color:#e6e8e2;font-weight:400}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div class="kicker">FrameFilm / UI Layer / Design Draft 01</div>
+  <h1>工业终端 · 1-bit 界面设计稿</h1>
+  <p>视觉母题取自《明日方舟：终末地》的工业机能语言：三角形 UI 元素、几何化工业徽章、正交蓝图网格、
+     45° 切削角、粗犷区域标识、克制的黑白灰与大留白。本稿把它压到设备真实约束上 ——
+     <strong>纯黑白的 480×720 电子纸</strong>，没有灰阶、没有抗锯齿、没有色彩。</p>
+  <div class="meta">
+    TARGET &nbsp;E6 3.70" 720×480 (landscape) → 480×720 (logical portrait)<br>
+    DEPTH &nbsp;&nbsp;1 bpp &nbsp;·&nbsp; FONT &nbsp;Montserrat 24/48 + UNSCII 8 &nbsp;·&nbsp; INPUT &nbsp;UP / DOWN / ENTER(short,long)<br>
+    CHARSET &nbsp;<strong>ASCII only</strong>（固件无 CJK 字形，设备端文案不得使用中文）&nbsp;·&nbsp; ASSETS &nbsp;图标可由 SD 卡替换
+  </div>
+</header>
+
+<!-- ============ 1. 转译逻辑 ============ -->
+<section>
+  <h2>01 转译逻辑：色彩语言 → 1-bit 语言</h2>
+  <p style="max-width:74ch;color:#9a9d94">终末地的界面之所以能在单色屏上仍然"像它"，是因为它的识别度并不建立在色彩上，而建立在
+     <strong>几何、线宽、标签密度与切削感</strong>上。唯一必须重新发明的是那抹"终末地黄"——它承担的是"强调 / 当前 / 激活"的职能。</p>
+  <table style="margin-top:18px">
+    <tr><th>终末地原语</th><th>它的职能</th><th>1-bit 转译</th></tr>
+    <tr><td>终末地黄</td><td>强调、激活、当前项</td><td><b>实心黑块 + 反白文字</b>（最强的 1-bit 对比）；次强强调用 <code>密度斜纹</code></td></tr>
+    <tr><td>三角形 UI 元素</td><td>指向、层级、状态标记</td><td>直接用 —— 实心/空心三角作为选择指针与列表符号</td></tr>
+    <tr><td>工业徽章 / Logo 变体</td><td>身份认知（"你是管理员"）</td><td>同心圆 + 贯穿十字 + 实心三角 + 底部缺口；作为开机画面与状态栏品牌标</td></tr>
+    <tr><td>CMYK 测试色带</td><td>印刷工业感、加载态</td><td>改为 <b>密度递变的分段条</b>（同一职能：一列"色阶"读数）</td></tr>
+    <tr><td>CAD 蓝图网格 / 坐标系</td><td>工程感、精密感</td><td>1px 正交细网格 + 坐标角标，仅在背景以极稀密度出现</td></tr>
+    <tr><td>45° 切削角、传送带剪影</td><td>工业硬边</td><td><code>clip-path</code> 四角/单角切削；实心色块斜切</td></tr>
+    <tr><td>粗犷区域标识</td><td>场地感、真实感</td><td>大字号压缩体 + 实心底 + 编号（如 <code>A-04 / SECTOR 7</code>）</td></tr>
+    <tr><td>低饱和黑白灰 + 金属</td><td>理性、可信、专业</td><td><b>零转译成本</b> —— 本来就是这个调性</td></tr>
+    <tr><td>大留白</td><td>呼吸、克制</td><td>保留，且在电子纸上留白=白，零代价，还能减少残影</td></tr>
+  </table>
+  <div class="note">
+    <b>必须诚实的一条：</b>斜纹与网点在固件里没有原生图案 API。<code>实心块 / 线 / 圆 / 三角</code> 可用 LVGL 图元直接画，
+    而 <b>斜纹、网点、徽章这类复杂图形必须预渲染成 1-bit 位图</b>（复用现有 <code>cover.film</code> 那条胶片管线即可）。
+    因此本稿的视觉主体刻意压在"实心 + 细线 + 文字"上，斜纹只作为强调备选。
+  </div>
+</section>
+
+<!-- ============ 2. 元素库 ============ -->
+<section>
+  <h2>02 元素库</h2>
+  <div class="elgrid">
+    <div class="el">
+      <div class="box"><div class="tri tri-r" style="border-left-color:#000"></div></div>
+      <h4>Triangle Marker</h4><p>选择指针。实心=当前，空心=同级未选。列表项前缀、轮播两侧指向均用它。</p>
+    </div>
+    <div class="el">
+      <div class="box" style="padding:8px"><img src="../ui-assets/png/ui_def_badge.png" width="64" height="57" alt="BADGE"></div>
+      <h4>Identity Badge</h4><p>开机主视觉与休眠卡共用同一张图标。它是<b>SD 可替换资源</b>（<code>/sdcard/app/_ui/badge.bin</code>，
+        默认取自 <code>tools/ui-assets/png/icon1.png</code>，量化成 304×272 的 1bpp 位图），固件不缩放、尺寸必须精确匹配。</p>
+    </div>
+    <div class="el">
+      <div class="box" style="padding:10px"><div style="width:100%">
+        <div class="seg" style="margin-bottom:6px"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i></div>
+        <div class="micro">LOADING 60%</div>
+      </div></div>
+      <h4>Segmented Bar</h4><p>进度 / 电量 / 信号。分段而非连续，读数感强，1-bit 下无灰阶歧义。</p>
+    </div>
+    <div class="el">
+      <div class="box"><div style="width:120px;height:44px" class="chamfer hatch"></div></div>
+      <h4>Hatch Block</h4><p>"黄的替身"。用于次级强调（警告、待机）。固件需预渲染位图。</p>
+    </div>
+    <div class="el">
+      <div class="box"><div style="border:1px solid #000;padding:6px 10px" class="micro bracket">PANEL DATA</div></div>
+      <h4>Corner Bracket</h4><p>面板取景框。用于承载动态内容区，暗示"这是被测量的对象"。</p>
+    </div>
+    <div class="el">
+      <div class="box"><div style="width:100%;padding:0 12px">
+        <div class="micro dim">MODEL &nbsp;M1.0</div>
+        <div class="micro dim">SN &nbsp;&nbsp;&nbsp;FILM000001</div>
+        <div class="rule" style="margin:5px 0"></div>
+        <div class="micro">PW 1.0.0 / 3.70"</div>
+      </div></div>
+      <h4>Micro Telemetry</h4><p>UNSCII 8 + 大写字距。整屏的"工程感"主要靠它的密度堆出来。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. 可交互原型 ============ -->
+<section>
+  <h2>03 可交互原型</h2>
+  <div class="stage">
+    <div>
+      <div class="device">
+        <div class="device-inner" id="screen"></div>
+      </div>
+      <div class="device-tag">480 × 720 / 1 bpp / 1:1</div>
+    </div>
+    <div>
+      <p style="color:#9a9d94;max-width:52ch">点击下方原型区域使其获得焦点，然后用键盘操作。原型按真实的按键语义实现，
+        包含 <b>长按 ENTER = 手动休眠</b>（按住不放约 0.8 秒）、<b>双击 ENTER = 退出 app</b>
+        （两次之间 350ms 内）与开机自检序列。</p>
+      <div class="keys">
+        <kbd>↑ / ↓</kbd><kbd>ENTER</kbd><kbd>ENTER ×2（双击退出）</kbd><kbd>ENTER（长按休眠）</kbd><kbd>R 重放开机</kbd>
+      </div>
+      <div class="klist">
+        <b>BOOT</b>　自检序列 → 自动进入主菜单<br>
+        <b>MENU</b>　↑↓ 切换 app · ENTER 进入 · <b>长按 ENTER 休眠</b>（画休眠卡，见 §08）· 双击无语义<br>
+        <b>CLOCK</b>　无按键（↑↓ 无响应）· <b>双击 ENTER 退出</b> · <b>长按 ENTER 休眠</b>（不画卡，屏上留当前画面）<br>
+        <b>SETTINGS</b>　↑↓ 选择 · ENTER 切换 · 双击 ENTER 退出 · 长按 ENTER 休眠<br>
+        <b>内容类 app</b>　显示"层级交接"页 —— 因为它们是直绘层，真实设备上会重新建立 mono 会话；长按休眠同样保留当前画面<br>
+        <b>唤醒</b>　按 ENTER → 复位重放 BOOT（休眠本质是一次复位）<br>
+        <b>注意</b>　单击要等 350ms 双击窗口过期才生效（与固件同款代价，见 §09）
+      </div>
+      <div class="note" style="margin-top:20px">
+        <b>关于"左右切换"与按键的映射：</b>主菜单按你的要求做成<b>横向轮播</b>。但设备只有三个键，
+        且屏幕是<b>旋转 90° 的竖屏</b> —— 物理上的"上/下"键在竖屏画面里很可能对应<b>左/右</b>。
+        这个映射需要你上机确认后再定，本稿暂按 <code>UP=下一项 / DOWN=上一项</code> 实现。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4. 静态稿 ============ -->
+<section>
+  <h2>04 静态稿</h2>
+  <div class="shots">
+    <div class="shot">
+      <h4>SCREEN 01 — BOOT</h4>
+      <div class="device"><div class="device-inner" data-static="boot"></div></div>
+    </div>
+    <div class="shot">
+      <h4>SCREEN 02 — MAIN MENU</h4>
+      <div class="device"><div class="device-inner" data-static="menu"></div></div>
+    </div>
+    <div class="shot">
+      <h4>SCREEN 03 — SETTINGS</h4>
+      <div class="device"><div class="device-inner" data-static="settings"></div></div>
+    </div>
+    <div class="shot">
+      <h4>SCREEN 04 — LAYER HANDOFF</h4>
+      <div class="device"><div class="device-inner" data-static="handoff"></div></div>
+    </div>
+    <div class="shot">
+      <h4>SCREEN 05 — CLOCK（本稿新设计）</h4>
+      <div class="device"><div class="device-inner" data-static="clock"></div></div>
+    </div>
+    <div class="shot">
+      <h4>SCREEN 06 — SLEEP（本稿新设计）</h4>
+      <div class="device"><div class="device-inner" data-static="sleep"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5. 可替换图标资源 ============ -->
+<section>
+  <h2>05 可替换图标资源（SD 卡）</h2>
+  <p style="max-width:76ch;color:#9a9d94">设备端的图标<b>不写死在固件里</b> —— 放 SD 卡上按固定尺寸替换即可。
+     固件内置一份默认图标；SD 卡上存在同名文件且尺寸校验通过时，用 SD 版本覆盖。
+     本节只定义<b>槽位与尺寸</b>，不约束画什么。</p>
+
+  <table style="margin-top:18px">
+    <tr><th>图标</th><th>SD 路径</th><th>尺寸 (px)</th><th>文件大小</th></tr>
+    <tr>
+      <td>菜单 app 图标 ×5</td>
+      <td><code>/sdcard/app/&lt;app&gt;/icon.bin</code><br>
+          <span class="dim">&lt;app&gt; = image / template / clock / animation / settings</span></td>
+      <td><b>80 × 80</b></td>
+      <td>816 B</td>
+    </tr>
+    <tr>
+      <td>身份徽章（开机主视觉）</td>
+      <td><code>/sdcard/app/_ui/badge.bin</code></td>
+      <td><b>304 × 272</b></td>
+      <td>10,352 B</td>
+    </tr>
+  </table>
+
+  <div class="note" style="margin-top:18px">
+    <b>格式：自有 FFUI 容器（小端），1bpp 载荷</b><br>
+    <code>0x00</code> magic <code>"FFUI"</code>　<code>0x04</code> version <code>=1</code>　<code>0x05</code> format <code>=0x01</code>　
+    <code>0x06</code> width <code>u16</code>　<code>0x08</code> height <code>u16</code>　<code>0x0A</code> reserve <code>6B</code>　
+    <code>0x10</code> 载荷<br>
+    · 位序：每字节 8 像素，<b>MSB 在左</b>　· 极性：<code>1</code> = 黑、<code>0</code> = 白<br>
+    · 行字节数 = 宽 / 8（<b>宽必须是 8 的倍数</b>，这也是 80 与 304 的来由；徽章取 304
+      而非 300，是因为 300 不是 8 的倍数）<br>
+    · 徽章纵向 272 由源图 <code>icon1.png</code> 的宽高比（641:573）定，改尺寸须同时改
+      <code>gen_ui_assets.py</code> 的 <code>BADGE_W/H</code> 与固件 <code>ui_assets.h</code> 的 <code>UI_BADGE_W/H</code><br>
+    · 文件总长 = 16（头）+ 宽 × 高 / 8
+  </div>
+
+  <div class="note">
+    <b>为什么不用 LVGL 官方 <code>.bin</code> / LVGLImage.py</b>：官方 I1 路径要外部 pngquant 工具、
+    且 I1 图像依赖调色板方向；这里用 16 字节自有容器，固件侧把 1bpp 展开成 <b>L8</b>（亮度直接表达黑白，
+    没有调色板语义）再交给 LVGL，整条链路零外部依赖。
+  </div>
+
+  <div class="note">
+    <b>校验与回退</b>：尺寸不符 / 文件缺失 / magic 或版本非法 → 回退到固件内置默认图，并打一条日志。
+    <b>固件不做缩放</b>，尺寸必须精确匹配（避免在 MCU 上做位图缩放与重采样）。
+  </div>
+
+  <div class="note">
+    <b>选中态反色是自动的</b>：只需提供<b>一份</b>图标。当前选中项显示为"实心黑板 + 反白图标"，
+    反色由固件对展开后的亮度缓冲整体取反（<code>~L8</code>）得到，<b>不需要画两套</b>。
+  </div>
+
+  <div class="note">
+    <b>为什么只开放这几处</b>：状态栏的电池 / WiFi / 蓝牙是 9~12px 的方块，用图元直接画更清晰、也更省 flash，
+    不值得做成资源；而菜单的 5 个图标与整机徽章是"唯一看得出作者风格"的位置，所以开放替换。
+  </div>
+
+  <div class="note" style="border-left-color:#f2f3ee">
+    <b>硬约束：设备端不支持中文。</b>固件字体只有 Montserrat（拉丁）与 UNSCII 8（终端等宽），
+    <b>没有 CJK 字形</b>，所有设备端文案必须是 ASCII。这也是本稿把 app 名、设置项、描述全部写成英文的原因。
+    若将来需要中文，要额外引入子集字体（占 flash），属于单独议题。
+  </div>
+
+  <div class="note">
+    <b>生成方式</b>：<code>python tools/ui-assets/gen_ui_assets.py</code>（只用 Pillow，零外部工具）
+    一次产出两样东西，两者同一套画法，所以"默认样子"与"替换后样子"一致：<br>
+    ① SD 卡可替换资源 <code>assets/app/&lt;app&gt;/icon.bin</code>、<code>assets/app/_ui/badge.bin</code>（拷进 TF 卡即生效）<br>
+    ② 固件内置默认图 <code>components/film_ui/{inc/ui_defaults.h,src/ui_defaults.c}</code>
+  </div>
+</section>
+
+<!-- ============ 6. 信息架构 ============ -->
+<section>
+  <h2>06 信息架构与输入语义</h2>
+  <table>
+    <tr><th>页面</th><th>层级</th><th>内容</th><th>输入</th></tr>
+    <tr><td>BOOT</td><td>UI</td><td>徽章主视觉 · 自检遥测（面板/内存/存储，全部为真实值）· 分段进度</td><td>无需输入，2~3s 后自动进入</td></tr>
+    <tr><td>MAIN MENU</td><td>UI</td><td>横向轮播 6 项：IMAGE / PASS / TEMPLATE / CLOCK / ANIMATION / SETTINGS，含序号与一句话说明</td><td>UP/DOWN 切换 · ENTER 进入</td></tr>
+    <tr><td>IMAGE / TEMPLATE / ANIMATION</td><td><b>DIRECT</b></td><td>沿用现有 app（彩色直绘），进入时主菜单页面被销毁、UI 层让出面板</td><td>各自按键语义不变 · <b>双击 ENTER 回主菜单</b> · <b>长按 ENTER 休眠</b>（不画卡，屏上留当前画面）</td></tr>
+    <tr><td>PASS</td><td><b>UI</b></td><td>通行证占位页（菜单序号 02）：图标 + <code>PASS</code> 大字 + <code>UNDER DEVELOPMENT</code>，功能待开发</td><td>无按键 · <b>双击 ENTER 回主菜单</b> · <b>长按 ENTER 休眠</b></td></tr>
+    <tr><td>CLOCK</td><td><b>UI</b></td><td>计时仪表（本次重新设计，细则见 <b>§07</b>）：主读数 <b>时:分</b> · 分钟尺（30 格 × 2 分）· 日期 + 星期实心标 · 星期寄存器（7 格）· 设备面板。页面内 <code>lv_timer</code> 每秒比对，仅"分钟/日"变化才上屏</td><td>无按键 · <b>双击 ENTER 回主菜单</b> · <b>长按 ENTER 休眠</b></td></tr>
+    <tr><td>SLEEP</td><td><b>UI</b></td><td>休眠卡（细则见 <b>§08</b>）：<b>全屏、无外壳</b>，居中构图 = 徽章（与 BOOT 同一张资源）+ <code>STANDBY</code> + <code>PRESS ENTER TO WAKE</code>，屏幕底边锚一行 <code>AUTO WAKE hh:mm</code> / <code>AUTO WAKE OFF</code>。设备随后进入 deep sleep，靠电子纸断电保持，这张卡就是休眠期间的"封面"。<b>不受休眠模式开关约束</b></td><td>无按键（主菜单长按 ENTER 进入）· <b>按 ENTER 唤醒</b>（硬件唤醒，不复位到菜单，走完整 BOOT）</td></tr>
+    <tr><td>SETTINGS</td><td>UI</td><td><b>DEVICE</b>：电量 / WiFi / 蓝牙 / LED 灯 / 面板 / 存储 / 固件。<b>WiFi 与蓝牙是"状态 + 开关"同一行</b>，就地可切；LED 是"常亮 / 关闭 / 自动"三态循环（自动 = 闲置后熄灭）；纯状态行（电量、面板、存储、固件）只读、导航会跳过。<br><b>PARAMETERS</b>：开机行为（BOOT PAGE / START APP）、休眠、定时唤醒、唤醒间隔、心跳<br><b>APP PARAMETERS</b>：图片播放模式 / 间隔、动图循环 / 速度</td><td>UP/DOWN 选择行 · ENTER 切换/循环取值 · <b>双击 ENTER 退出</b> · <b>长按 ENTER 休眠</b></td></tr>
+  </table>
+  <div class="note">
+    <b>两个实现约束与落地方式：</b><br>
+    ① <b>SETTINGS 写参数不能直接在 ui_task 里调 <code>service_param_save()</code></b> ——
+    该模块声明"无内部锁，依赖只在 app 任务串联调用"。已按此约束实现：页面只上报
+    <code>[行号, 候选下标]</code>（<code>app_manager_post_ui_msg</code>），由 app 任务侧校验、写参数、落盘，
+    再把设备侧真实值组成的整页快照回投给页面（<code>ui_core_post</code>）。<br>
+    ② <b>BOOT 画面的时间成本</b>：首帧 mono 本来就必须做一次完整清场（实测约 3 秒）。
+    把 BOOT 画面作为<b>首个 mono 帧</b>画出，这次清场就是"免费"的 —— 已按此实现。
+    开机行为现由 <b>BOOT PAGE / START APP</b> 两个 app 层参数决定（设置页可改，默认 <code>SHOW</code> + <code>MENU</code>）：
+    默认仍走 BOOT（约 18s 自检步进，其中首帧清场约 3s）→ 主菜单，之后双击 ENTER 回主菜单、长按 ENTER 休眠；
+    想省掉这次清场可直接 <code>SKIP</code> 开机页落到指定 app（代价是不再清场，残留会留在屏上）。
+  </div>
+</section>
+
+<!-- ============ 7. 时钟页设计 ============ -->
+<section>
+  <h2>07 时钟页设计（CLOCK · 本次重新设计）</h2>
+  <p style="max-width:76ch;color:#9a9d94">旧版时钟只有三行居中文字（日期 24px / 时分 48px / 星期 24px），
+     信息密度低、且看不出它属于这套界面 —— 把"钟"换成任何三个字符串都还是那个样子。
+     新版把它做成一台 <b>计时仪表</b>：主读数之外，补上<b>分钟尺</b>（读数感）、<b>星期寄存器</b>（7 格刻度盘）、
+     <b>取景框设备面板</b>，让整屏每一行都在"测量"同一件事 —— 时间。</p>
+
+  <h2 style="margin-top:32px">版式（正文区 440 × 626，y 为相对正文区顶部的偏移）</h2>
+  <table>
+    <tr><th>行</th><th>y</th><th>h</th><th>内容</th><th>1-bit 实现</th></tr>
+    <tr><td>表头</td><td>0</td><td>14</td><td><code>TIMEKEEPING</code> ── <code>DOY 262 / 365</code></td><td>UNSCII 8 + 1px 横线（flex 撑开）</td></tr>
+    <tr><td>分隔线</td><td>22</td><td>1</td><td>—</td><td>实心细块</td></tr>
+    <tr><td><b>主读数</b></td><td>56</td><td>104</td><td><b>14:32</b></td><td>Montserrat 48 + 两侧实心三角（指向中心）</td></tr>
+    <tr><td><b>分钟尺</b></td><td>176</td><td>12</td><td>30 格 × 2 分钟，已过格实心</td><td>30 个 1px 描边块，填充靠 <code>bg_opa</code> 开关</td></tr>
+    <tr><td>尺注</td><td>196</td><td>14</td><td><code>MIN 32 / 060</code> ── <code>HOUR 14</code></td><td>UNSCII 8</td></tr>
+    <tr><td>分隔线</td><td>236</td><td>1</td><td>—</td><td>—</td></tr>
+    <tr><td><b>日期行</b></td><td>264</td><td>56</td><td><code>SAT</code> 黑标（112×44，左下切角）+ <code>2026-09-19</code></td><td>黑底反白 + Montserrat 24</td></tr>
+    <tr><td>分隔线</td><td>344</td><td>1</td><td>—</td><td>—</td></tr>
+    <tr><td><b>星期寄存器</b></td><td>368</td><td>64</td><td><code>SUN … SAT</code> 7 格等宽，今日实心</td><td>7 个描边块，今日格加粗描边 + 填充</td></tr>
+    <tr><td>寄存器注</td><td>442</td><td>14</td><td><code>WEEK REGISTER</code> ── <code>WEEK 38 / 52</code></td><td>UNSCII 8</td></tr>
+    <tr><td>设备面板</td><td>486</td><td>104</td><td>PANEL / FIRMWARE / REFRESH</td><td>1px 描边 + 四角取景框 + UNSCII 8</td></tr>
+  </table>
+  <div class="note">
+    合计 590px，正文区高 626px —— 余 36px 留白收尾。所有 y 都是整数、且与
+    <code>app_shell</code> 的 <code>SHELL_BODY_*</code> 常量自洽（正文区 = 屏宽 − 2×20，
+    屏高 − 状态栏 30 − 提示行 28 − 上下各 18），固件侧可直接照抄这组数值。
+  </div>
+
+  <h2 style="margin-top:32px">数据从哪来</h2>
+  <table>
+    <tr><th>显示</th><th>来源</th><th>变化频率</th></tr>
+    <tr><td>时 : 分</td><td><code>time(NULL)</code> → <code>localtime_r()</code>（SNTP 同步后的系统时间）</td><td>每分钟</td></tr>
+    <tr><td>日期</td><td><code>struct tm</code> 的 <code>year / mon / mday</code></td><td>每天</td></tr>
+    <tr><td>星期黑标 / 今日格</td><td><code>tm_wday</code></td><td>每天</td></tr>
+    <tr><td><code>DOY</code> / <code>WEEK</code></td><td><code>tm_yday</code>：DOY = <code>yday+1</code>；WEEK = <code>yday/7+1</code>（自然周，非 ISO 周）</td><td>每天</td></tr>
+    <tr><td>PANEL / FIRMWARE</td><td>编译期常量 <code>EPD_WIDTH/HEIGHT</code>、<code>SYS_FIRMWARE_VERSION</code></td><td>恒定</td></tr>
+    <tr><td>BAT / WIFI / BT</td><td>顶部状态栏走 <code>app_shell</code>（app 任务采集后回投），见 §06 的跨线程约束</td><td>事件驱动</td></tr>
+  </table>
+  <div class="note">
+    <b>示例值是真的：</b>本稿取 <code>2026-09-19</code>（周六）——DOY 262 = 平年第 262 天，
+    WEEK 38 = ⌊(262−1)/7⌋+1。三个数互相自洽，实现后可直接核对换算是否正确。
+  </div>
+
+  <h2 style="margin-top:32px">刷新策略（这一页最大的设计约束）</h2>
+  <div class="note" style="border-left-color:#f2f3ee">
+    <b>电子纸每次上屏都是"全帧"，代价与改动面积无关。</b>实测一次 1-bit 单色全屏刷新约 <b>940ms</b>，
+    期间画面会闪一下。所以这一页的设计目标不是"表达力最大化"，而是
+    <b>在不牺牲读数感的前提下把刷新次数压到最低</b>：
+  </div>
+  <table>
+    <tr><th>做法</th><th>理由</th></tr>
+    <tr><td><code>lv_timer</code> 1 秒一拍，<b>只在"分钟"或"日"变化时</b>才 <code>set_text</code></td><td>LVGL 只在 dirty 时渲染 → 实际约每分钟一帧，而不是每秒一帧</td></tr>
+    <tr><td>分钟尺取 <b>2 分钟一格</b>（30 格）</td><td>尺子每 2 分钟才动一次；取 1 分钟一格（60 格）则格宽只剩约 6px、且每分钟都动</td></tr>
+    <tr><td><b>不做秒针 / 秒级读数</b></td><td>1 秒一帧 = 86,400 帧/天，面板闪烁与功耗都不可接受</td></tr>
+  </table>
+  <div class="note">
+    <b>代价要诚实说：</b>即便如此，仍是 <b>≈1,440 帧/天</b>。作为桌面钟长期通电使用时，
+    "每分钟闪一下"很可能不能接受。<b>建议在 SETTINGS 里增一档"时钟刷新间隔"（1 / 5 / 15 分钟）</b>，
+    让用户自己把闪烁换到可接受的程度 —— 这是本次设计新提出的一项待办，尚未实现。
+  </div>
+
+  <h2 style="margin-top:32px">可实施性核对</h2>
+  <table>
+    <tr><th>项</th><th>结论</th></tr>
+    <tr><td>字体</td><td>只用 Montserrat 48 / 24 + UNSCII 8 —— <b>都是当前已编入 sdkconfig 的档位，不需要新增字体</b>（新增字体会吃 flash）</td></tr>
+    <tr><td>图元</td><td>实心块 / 1px 线 / 描边框 —— 全是 LVGL 基础图元。<b>但"实心三角"与"切角"没有现成图元</b>（LVGL 的边框宽度是全边统一的，CSS 那套"零宽边框拼三角"无等价物；也没有 <code>clip-path</code>），
+      所以固件侧自带了一个最简三角形光栅化（<code>app_clock.c</code> 的 <code>clock_tri_px</code>），页面创建时生成 3 张 L8 小位图 —— <b>是代码内生成，不需要新增 SD 资源</b></td></tr>
+    <tr><td>文案</td><td>全 ASCII（固件无 CJK 字形）</td></tr>
+    <tr><td>状态栏</td><td>本页已接 <code>app_shell</code>：页面创建时 <code>app_shell_start_tick(&m_shell, NULL)</code> 挂 10s 周期 tick，状态栏正中显示 <code>HH:MM</code>，两侧为 BAT/WIFI/BT。写控件前做变更检测（状态 <code>memcmp</code>、时间字符串比对），电子纸全帧约 940ms 且会闪，去重后实际刷新 ≤1 次/分钟</td></tr>
+    <tr><td>跨线程</td><td>页面<b>不读</b> <code>g_service_param</code> / 电池 / SD；面板与固件版本用编译期宏，零跨线程</td></tr>
+  </table>
+
+  <h2 style="margin-top:32px">未决问题（需要你定）</h2>
+  <table>
+    <tr><th>#</th><th>问题</th><th>取舍</th></tr>
+    <tr><td>1</td><td><b>主读数字号是否加大</b></td><td>48 是当前最大的已编字体，"14:32" 只占正文宽的约 1/3。若要时间成为绝对主视觉，得额外开一档 Montserrat 72/80 —— 代价是 flash（当前 app 分区余量约 5%）。<b>本稿按"不加字体"设计</b>，主视觉由构图承担。</td></tr>
+    <tr><td>2</td><td><b>是否改用环形表盘</b></td><td>LVGL 有 <code>lv_arc</code>，可画"今日进度环 + 中心数字"，更像"钟"。但 1-bit 下圆弧边缘会毛糙，且偏离现有"工程读数"语汇 —— <b>本稿未采用</b>，作为备选记录。</td></tr>
+    <tr><td>3</td><td><b>分钟尺量程</b></td><td>本稿 30 格 × 2 分。若想更"仪表"，可改 60 格 × 1 分（需去掉格间距，格宽约 7px）；或改 12 格 × 5 分（更省刷新）。</td></tr>
+  </table>
+
+  <div class="note">
+    <b>本稿的一处不精确：</b>设计稿用浏览器里的 Helvetica 代替固件的 Montserrat，
+    两者数字宽度不同 —— <b>真机上 "14:32" 会略宽一点、字面更高</b>。
+    评估版式余量时请按 Montserrat 的度量放宽 10%~15% 来看。
+  </div>
+</section>
+
+<!-- ============ 8. 休眠卡设计 ============ -->
+<section>
+  <h2>08 休眠卡设计（SLEEP · 本次新设计）</h2>
+  <p style="max-width:76ch;color:#9a9d94">从主菜单<b>长按 ENTER</b> 进入休眠。设备在睡着之前先把屏幕换成这张卡，
+     然后进 deep sleep —— 电子纸断电保像，所以<b>这张卡就是设备整个休眠期间的"封面"</b>，
+     会一直挂在冰箱上看。它的设计目标因此不是"信息量"，而是三件事：<b>确认它真的睡了</b>、
+     <b>告诉人怎么叫醒它</b>、<b>保持安静的姿态</b>。</p>
+
+  <h2 style="margin-top:32px">版式（整屏 480 × 720，无正文边距，y 为相对屏幕顶部的偏移）</h2>
+  <table>
+    <tr><th>行</th><th>y</th><th>h</th><th>内容</th><th>1-bit 实现</th></tr>
+    <tr><td><b>徽章</b></td><td>136</td><td>272</td><td>与 <b>BOOT 页同一张资源</b>（<code>/sdcard/app/_ui/badge.bin</code>，304×272）</td><td>SD 可替换 1bpp 位图，展开成 L8 后交给 LVGL</td></tr>
+    <tr><td>细线</td><td>452</td><td>1</td><td>宽 400，水平居中（左右各留 40）</td><td>实心细块</td></tr>
+    <tr><td><b>状态字</b></td><td>473</td><td>58</td><td><b>STANDBY</b></td><td>Montserrat 48，字距 0.18em，居中</td></tr>
+    <tr><td>细线</td><td>551</td><td>1</td><td>宽 400，水平居中</td><td>实心细块</td></tr>
+    <tr><td>唤醒说明</td><td>574</td><td>10</td><td><code>PRESS ENTER TO WAKE</code></td><td>UNSCII 8，字距 0.2em，居中</td></tr>
+    <tr><td>页脚</td><td>—</td><td>10</td><td><code>AUTO WAKE 15:32</code>（开了定时唤醒）/ <code>AUTO WAKE OFF</code>（没开）</td><td>锚在屏幕底边（bottom 50），居中</td></tr>
+  </table>
+  <div class="note">
+    居中构图块高 448（徽章 272 + 44 + 1 + 20 + 58 + 20 + 1 + 22 + 10），
+    垂直居中于 y = (720 − 448) / 2 = <b>136</b>，上下各留 136 —— 也就是屏幕高度的 19% 是纯白。
+    <b>这个留白是设计的一部分</b>：它让这张卡从远处看就是"安静的"。
+  </div>
+
+  <h2 style="margin-top:32px">为什么是"BOOT 卡片的折叠版"</h2>
+  <table>
+    <tr><th>BOOT</th><th>SLEEP</th><th>说明</th></tr>
+    <tr><td>徽章（同尺寸）</td><td>徽章（同尺寸）</td><td><b>同一个资源、同一个位置</b>：开机与休眠是设备的"两头"，用同一张脸</td></tr>
+    <tr><td>细线 + 品牌字标 <code>FRAMEFILM</code> + 细线 + 一行说明</td><td>细线 + <b>状态字</b> <code>STANDBY</code> + 细线 + 一行说明</td><td>同一套骨架。BOOT 的大字是"我是谁"，SLEEP 的大字是"我现在怎样"</td></tr>
+    <tr><td>分段进度 + 4 行遥测</td><td>—</td><td><b>全部去掉</b>。休眠没有进行中的事，也没有需要读的数</td></tr>
+    <tr><td>带外壳（状态栏 + 提示行）</td><td><b>不带外壳</b></td><td>休眠意味着"UI 体系已关掉"；留着状态栏会让人以为设备还醒着，也会误导（WiFi/蓝牙其实即将断电）</td></tr>
+  </table>
+
+  <h2 style="margin-top:32px">交互时序</h2>
+  <table>
+    <tr><th>#</th><th>步骤</th><th>要点</th></tr>
+    <tr><td>1</td><td>主菜单长按 ENTER（约 0.8s）</td><td>长按已是<b>全局的"手动休眠"</b>语义（各 app 内长按同样睡，只是不画这张卡）；双击才是"退回主菜单"</td></tr>
+    <tr><td>2</td><td>调度器切到休眠页，页面绘制这张卡</td><td>一次全帧刷新（~940ms），画面在按下期间就已换成卡</td></tr>
+    <tr><td>3</td><td><b>等按键松开</b></td><td><b>关键坑</b>：唤醒源是 ENTER 所在 GPIO 的<b>电平</b>触发（<code>ext0</code>，STD/PRO 低有效、MAX 高有效）。若在"长按还按着"时就 <code>esp_deep_sleep_start()</code>，唤醒条件当场就满足，设备会立刻醒回来 —— 表现为"长按后闪一下就恢复"</td></tr>
+    <tr><td>4</td><td>按参数配好定时唤醒，进 deep sleep</td><td>沿用 <code>monitor_enter_low_power()</code> 的顺序：停心跳 → 逐个 deinit（BLE / LED / 电池 / SD / EPD / 输入）→ <code>hal_pwr_enter_sleep()</code>；<code>sleep_auto &amp;&amp; sleep_time &gt; 0</code> 时才 <code>hal_pwr_set_timer_wakeup()</code></td></tr>
+    <tr><td>5</td><td>唤醒 = <b>复位重启</b> → BOOT → MENU</td><td>deep sleep 本质是复位，所以休眠页不会"退回去"，也没有返回路径</td></tr>
+  </table>
+
+  <h2 style="margin-top:32px">数据从哪来</h2>
+  <table>
+    <tr><th>显示</th><th>来源</th><th>代价</th></tr>
+    <tr><td>徽章</td><td><code>ui_assets_badge()</code>，与 BOOT 页同一份</td><td>已存在，零新增</td></tr>
+    <tr><td><code>STANDBY</code> / <code>PRESS ENTER TO WAKE</code></td><td>固定文案</td><td>零</td></tr>
+    <tr><td><code>AUTO WAKE 15:32</code></td><td><code>g_service_param.sleep.sleep_auto</code> / <code>sleep_time</code> + 当前时间</td><td><b>需要新增一条数据管道</b>：页面在 ui_task，读不到 <code>g_service_param</code>。照 BOOT 页 <code>app_boot_set_telemetry()</code> 的做法 —— 由 app 任务侧在展示休眠页之前把 <code>[auto(1)][minutes(4)]</code> 设进去</td></tr>
+    <tr><td>电量 / WiFi / 蓝牙</td><td><b>不显示</b></td><td>休眠页是"入睡前最后一帧"，<code>app_shell</code> 的往返可能来不及；且这些值在几秒后就失效了，显示反而是误导</td></tr>
+  </table>
+  <div class="note">
+    <b>文案为什么是 ENTER：</b>唤醒源是 <code>hal_pwr.c</code> 里固定的那一路 GPIO
+    （STD/PRO = GPIO5，MAX = GPIO13），对照引脚表，这两脚<b>都是"确认"键</b>。
+    所以"按 ENTER 唤醒"是准确的，不是随口写的通用提示。
+  </div>
+
+  <h2 style="margin-top:32px">可实施性核对</h2>
+  <table>
+    <tr><th>项</th><th>结论</th></tr>
+    <tr><td>字体</td><td>Montserrat 48 + UNSCII 8 —— 都是已编入的档位，不需要新增</td></tr>
+    <tr><td>图元</td><td>只有实心细块与标签，<b>连实心三角都没有</b>（本页刻意不用指向性符号）</td></tr>
+    <tr><td>资源</td><td>复用 BOOT 的徽章资源，<b>不新增任何 SD 资源</b>；页脚那行是纯文字，不需要 SD 卡</td></tr>
+    <tr><td>刷新成本</td><td><b>一次全帧</b>，且之后设备就断电了 —— 这是全工程里最"划算"的一次刷新</td></tr>
+    <tr><td>残影</td><td>休眠期间不刷新，没有残影问题；要留意的是<b>唤醒后</b>：这张卡的黑块会残到 BOOT 页上，而 BOOT 首帧本来就带一次整屏清场，正好把它洗掉</td></tr>
+  </table>
+
+  <h2 style="margin-top:32px">已定（2026-09-19）</h2>
+  <table>
+    <tr><th>#</th><th>问题</th><th>决定</th></tr>
+    <tr><td>1</td><td>手动长按休眠要不要受"休眠模式开关"（BLE 0x25）约束</td><td><b>不受</b>。该开关管的是<b>自动</b>休眠；用户明确按下的动作就该执行。定时唤醒仍按既有条件跟随参数（<code>sleep_auto &amp;&amp; sleep_time &gt; 0</code>），与自动休眠路径同一判据。</td></tr>
+    <tr><td>2</td><td>页脚那行怎么显示</td><td><b>没开定时唤醒显示 <code>AUTO WAKE OFF</code>，开了显示 <code>AUTO WAKE hh:mm</code></b>（hh:mm = 当前时间 + 唤醒间隔）。为此新增一条数据管道：app 任务侧在展示休眠卡之前把 <code>[auto_on][minutes]</code> 交给页面（<code>app_sleep_set_info()</code>）。</td></tr>
+    <tr><td>3</td><td>状态字</td><td><code>STANDBY</code></td></tr>
+    <tr><td>4</td><td>唤醒后是否跳过 BOOT</td><td><b>不跳过</b>，完整走 BOOT（约 18s 进度条）→ 主菜单</td></tr>
+  </table>
+
+  <h2 style="margin-top:32px">实现落点</h2>
+  <table>
+    <tr><th>层</th><th>文件</th><th>内容</th></tr>
+    <tr><td>HAL</td><td><code>hal_pwr.{h,c}</code></td><td>新增 <code>hal_pwr_wake_condition_met()</code>：回答"唤醒条件此刻是否已成立"，读的就是 <code>hal_pwr_enter_sleep()</code> 里 ext0 配的那路 GPIO。<b>输入驱动零改动</b> —— 这是"唤醒源"的语义，不是"按键"的语义。</td></tr>
+    <tr><td>Service</td><td><code>service_monitor.{h,c}</code></td><td>新增 <code>MSG_ENTER_SLEEP</code> + <code>service_monitor_request_sleep()</code>：只投消息，实际的 deinit + deep sleep 仍在 monitor 任务里做（复用既有的 <code>monitor_enter_low_power()</code>）。手动路径<b>不看休眠开关</b>，但会按条件设置定时唤醒。</td></tr>
+    <tr><td>App</td><td><code>app_sleep.{h,c}</code>（新建）</td><td>休眠卡页面 + <code>app_sleep_set_info()</code> + <code>app_sleep_run()</code>（出示卡片 → 等 4s 地板 + 唤醒条件解除 → 请求低功耗）。</td></tr>
+    <tr><td>App</td><td><code>app_manager.{h,c}</code></td><td>新增 <code>app_manager_sleep_show()</code> 与 <code>m_sleep_page</code> 占屏门闸；主菜单 <code>INPUT_PRESS_LONG</code> → <code>app_sleep_run()</code>。</td></tr>
+  </table>
+
+  <div class="note" style="border-left-color:#f2f3ee">
+    <b>流程就是</b>：长按事件 → 画休眠卡 → 断电。代码也是这个形状，"可以断电了"要同时满足两件事，<b>缺一不可</b>：<br>
+    ① <b>距切页已过 4s</b>（<code>SP_DRAW_WAIT_MS</code>）—— <code>ui_core_page_enter()</code> 是异步的，<b>没有回调能告诉你"第一帧已上屏"</b>，只能按时间兜。
+    这个值别按"单帧 940ms"去推：<b>上机实测 2s 不够</b>（卡还没刷出来就断电，屏幕停在旧画面/半张卡），换页后第一次上屏明显慢于稳态单帧；
+    而 EPD 挂在外设供电轨上，<b>断电即停在半途</b>。<br>
+    ② <b>唤醒条件已解除</b>（<code>hal_pwr_wake_condition_met()</code> 为 false）—— ext0 是<u>电平</u>触发，而长按是<b>按住期间</b>上报的，那一刻唤醒脚必然还满足条件，按着断电会当场醒回来。
+    这条只会让入睡<b>更晚</b>、不会更早，所以是与 ① <b>叠加</b>而非二选一。<br>
+    一直按着不放时 15s 兜底（打告警后照睡）。
+  </div>
+</section>
+
+<section>
+  <h2>09 主菜单补充（2026-09-19 实现轮）</h2>
+
+  <h3>状态栏：三档，不是两档</h3>
+  <table>
+    <tr><th>档</th><th>文字</th><th>方块</th><th>语义</th></tr>
+    <tr><td>关闭</td><td><b>不显示</b></td><td><b>不显示</b></td><td>协议栈未初始化（不开启就不初始化，蓝牙与 WiFi 同款）</td></tr>
+    <tr><td>已开启</td><td><code>WIFI</code> / <code>BT</code></td><td>空框（1px 描边）</td><td>已开启但尚未连上 / 尚未被连接</td></tr>
+    <tr><td>已连接</td><td><code>WIFI</code> / <code>BT</code></td><td>实心框</td><td>WiFi 已连上，或 BLE 已被主机连上</td></tr>
+  </table>
+  <div class="note">
+    1-bit 没有灰度，三档只能靠"不画 / 描边 / 实心"区分；<b>关闭时整项隐藏</b>（不是留个空框），
+    右侧因此收成 <code>BAT 82%</code>。电量块仍是两档（低电量留空），不参与隐藏。<br>
+    <b>刷新时机</b>：只在交互点同步（页面 create、换选中项）—— 电子纸每次更新都是全帧 + 闪一下，
+    不值得为它做周期刷新。故插上充电器/对端连上后，要等下一次交互才会更新。
+  </div>
+
+  <h3>进入失败的提示</h3>
+  <table>
+    <tr><th>项</th><th>规格</th><th>说明</th></tr>
+    <tr><td>位置</td><td>版式面板下方、提示行上方（正文行合计 509px，正文区 626px，这块留白本来空着）</td><td>距面板 18px，高 34px</td></tr>
+    <tr><td>形态</td><td><code>FAILED</code> 黑标（62×22，黑底反白）+ 一行说明</td><td>与 ACTIVE 那个标签同一套语汇</td></tr>
+    <tr><td>文案</td><td><code>&lt;APP 名&gt; - &lt;原因&gt;</code>，如 <code>ANIMATION - NO FILM IN /sdcard/animation</code></td><td>原因由该 app 自己给（<code>enter_block_reason</code>），页面补 app 名</td></tr>
+    <tr><td>默认</td><td>隐藏</td><td>隐藏时 flex 不占位，不影响其它行排布</td></tr>
+    <tr><td>何时消失</td><td>换选中项 / 离开主菜单（页面销毁）</td><td>提示只对"当时那一条"有效</td></tr>
+  </table>
+  <div class="note">
+    <b>为什么要有这一行</b>：图片/动图在目录为空时原本只会打日志、不绘制，切过去屏幕仍停在上一帧 ——
+    用户会以为已经进到那个 app 了，而且切换过程还会先把面板停一次、白闪一帧。
+    现在改成<b>进不去就不切</b>（<code>app_entry_t.enter_block_reason</code>），把原因写在菜单上。
+  </div>
+
+  <h3>选中卡片左下角的切角</h3>
+  <div class="note">
+    设计稿是 <code>.chamfer-bl</code>：9×9 的 45° 拉削。LVGL 没有 <code>clip-path</code>、
+    边框宽度又是全边统一的（<code>clip_corner</code> 只对圆角生效，radius=0 时等于没做），
+    所以固件里是<b>程序生成一张 9×9 白三角 L8 位图</b>盖在那个角上（三角外填黑，与卡片底色融为一体），
+    挂在<b>轮播容器</b>下而非卡片下 —— 卡片的子对象会被裁到内容区（3px 描边之内），盖不住外角。
+  </div>
+</section>
+
+</div>
+
+<script>
+/* ============================================================
+   1-bit 界面原型（纯 DOM，无依赖）
+   ============================================================ */
+(function(){
+  'use strict';
+
+  /* 设备端 UI 为**纯拉丁字符集**：固件只有 Montserrat（拉丁）与 UNSCII 8（终端等宽），无 CJK 字形。
+     故 app 名、短码、描述全部为 ASCII —— 这也是本稿不出现中文文案的原因。 */
+  /* 菜单轮播顺序 = app_manager 的 m_menu_entries（行为表），
+     必须与 app_menu.c 的 MENU_ITEMS（视觉表）严格一致。 */
+  var APPS = [
+    {name:'IMAGE',     code:'IMG', desc:'SD PHOTO WALL / UP-DOWN PAGING',       glyph:'image'},
+    {name:'PASS',      code:'PAS', desc:'ARKNIGHTS PASS / UNDER DEVELOPMENT',   glyph:'pass'},
+    {name:'TEMPLATE',  code:'TPL', desc:'LIVE PUSH CONTENT / WEATHER, CALENDAR',glyph:'template'},
+    {name:'CLOCK',     code:'CLK', desc:'DEVICE TIME / DATE AND WEEKDAY',       glyph:'clock'},
+    {name:'ANIMATION', code:'ANI', desc:'FRAME ANIMATION / ADJUSTABLE RATE',    glyph:'animation'},
+    {name:'SETTINGS',  code:'SET', desc:'DEVICE INFO AND SYSTEM PARAMETERS',    glyph:'settings'}
+  ];
+
+  /* v: 'bar' 电量条 | 'text' 只读 | 'toggle' 开关 | 'cycle' 循环取值
+     ro: true = 只读行（导航会跳过，Enter 不会落在死行上）
+     txt 同时出现在 toggle 行时，表示"开关 + 状态"同一行（WiFi / 蓝牙） */
+  var SETTINGS = [
+    {sec:'DEVICE',      k:'BATTERY',        v:'bar',    bar:82, txt:'82%', ro:true},
+    {sec:'DEVICE',      k:'WIFI',           v:'toggle', on:true,  txt:'CONNECTED 2.4G'},
+    {sec:'DEVICE',      k:'BLUETOOTH',      v:'toggle', on:true,  txt:'CONNECTED'},
+    {sec:'DEVICE',      k:'LED',            v:'cycle',  on:2, opts:['ALWAYS','OFF','AUTO']},
+    {sec:'DEVICE',      k:'PANEL',          v:'text',   txt:'E6 3.70" 720x480', ro:true},
+    {sec:'DEVICE',      k:'STORAGE',        v:'text',   txt:'23 FILM / 1.2G FREE', ro:true},
+    {sec:'DEVICE',      k:'FIRMWARE',       v:'text',   txt:'1.0.0  SN 000001', ro:true},
+    {sec:'PARAMETERS',  k:'BOOT PAGE',      v:'cycle',  on:0, opts:['SHOW','SKIP']},
+    {sec:'PARAMETERS',  k:'START APP',      v:'cycle',  on:0, opts:['MENU','LAST','IMAGE','TEMPLATE','CLOCK','ANIMATION','SETTINGS','PASS']},
+    {sec:'PARAMETERS',  k:'SLEEP MODE',     v:'toggle', on:true},
+    {sec:'PARAMETERS',  k:'AUTO WAKE',      v:'toggle', on:false},
+    {sec:'PARAMETERS',  k:'WAKE INTERVAL',  v:'cycle',  on:3, opts:['10 MIN','30 MIN','60 MIN','2 H','6 H','12 H','24 H','48 H']},
+    {sec:'PARAMETERS',  k:'HEARTBEAT',      v:'cycle',  on:4, opts:['5 S','10 S','30 S','60 S','120 S','180 S']}
+  ];
+
+  /* clock* 为时钟页的示例读数：取 2026-09-19（周六）这一天的真实值 ——
+     DOY 262 = 平年第 262 天（1/1 起算），WEEK 38 = floor((262-1)/7)+1。
+     示例值自洽，不是随手编的，便于核对 DOY / WEEK 的换算是否正确。 */
+  var state = {screen:'boot', menu:2, row:0, bootStep:0, booted:false, handoff:null, asleep:false,
+               clockHour:14, clockMin:32, clockWday:6, clockDate:'2026-09-19',
+               clockDoy:262, clockWeek:38,
+               sleepAuto:true, sleepWake:'15:32'};
+  var bootTimer = null;
+
+  /* ---------- 身份徽章（开机页主视觉 / 休眠卡图标） ----------
+     固件里它是**一张 SD 可替换资源**：`/sdcard/app/_ui/badge.bin`（FFUI 容器，1bpp），
+     默认取自 `tools/ui-assets/png/icon1.png`，由 gen_ui_assets.py 量化成 **304×272**。
+     所以设计稿直接引那张 PNG —— 与设备上看到的像素完全一致。
+     （早先这里用 JS 现画一套合成徽章，那张图固件里根本没有，稿与实现会对不上。） */
+  function badgePx(w){
+    var h = Math.round(w * 272 / 304);
+    return '<img src="../ui-assets/png/ui_def_badge.png" width="' + w + '" height="' + h + '" alt="BADGE">';
+  }
+
+  /* ---------- 1-bit 图标：纯几何、只用 currentColor ----------
+     关键约束：不能使用白色"挖空"（当前项是实心黑底，挖空会露白块），
+     故一律用 border 画环/框、用实心块画笔画。全部可由 LVGL 图元或预渲染位图实现。 */
+  function glyph(kind){
+    var BOX = 'position:relative;width:76px;height:76px';
+    var F   = 'position:absolute;background:currentColor;';
+    var O   = 'position:absolute;background:none;';
+    var d   = function(st){ return '<i style="'+F+st+'"></i>'; };
+    var box = function(inner){ return '<div style="'+BOX+'">'+inner+'</div>'; };
+
+    switch(kind){
+      case 'image': // 取景框 + 山 + 太阳
+        return box(
+          '<i style="'+O+'left:4px;top:8px;right:4px;bottom:8px;border:4px solid currentColor"></i>'
+          + '<i style="'+O+'left:16px;bottom:16px;width:22px;height:18px;background:currentColor;clip-path:polygon(50% 0,100% 100%,0 100%)"></i>'
+          + d('right:14px;top:18px;width:11px;height:11px;border-radius:50%')
+        );
+      case 'template': // 版式网格
+        return box(
+          d('left:4px;top:8px;width:68px;height:16px')
+          + d('left:4px;top:30px;width:38px;height:14px')
+          + d('right:4px;top:30px;width:26px;height:14px')
+          + d('left:4px;top:50px;width:68px;height:14px')
+          + d('left:4px;top:68px;width:44px;height:6px')
+        );
+      case 'clock': // 表环 + 指针（用 border 画环，避免挖空）
+        return box(
+          '<i style="'+O+'left:2px;top:2px;right:2px;bottom:2px;border:6px solid currentColor;border-radius:50%"></i>'
+          + d('left:50%;top:20px;width:5px;height:22px;margin-left:-2.5px')
+          + d('left:50%;top:39px;width:22px;height:5px')
+        );
+      case 'animation': // 取景框 + 播放三角
+        return box(
+          '<i style="'+O+'left:6px;top:12px;right:6px;bottom:12px;border:4px solid currentColor"></i>'
+          + '<i style="'+O+'left:30px;top:25px;width:0;height:0;border-left:20px solid currentColor;border-top:13px solid transparent;border-bottom:13px solid transparent"></i>'
+        );
+      case 'settings': // 推子（三条轨道 + 旋钮）
+        return box(
+          d('left:4px;top:17px;width:68px;height:4px') + d('left:46px;top:12px;width:15px;height:15px')
+          + d('left:4px;top:37px;width:68px;height:4px') + d('left:18px;top:32px;width:15px;height:15px')
+          + d('left:4px;top:57px;width:68px;height:4px') + d('left:56px;top:52px;width:15px;height:15px')
+        );
+      case 'pass': // 通行证：卡片外框 + 人像圆 + 两行文字
+        return box(
+          '<i style="'+O+'left:14px;top:6px;right:14px;bottom:6px;border:4px solid currentColor"></i>'
+          + '<i style="'+O+'left:22px;top:20px;width:16px;height:16px;border:3px solid currentColor;border-radius:50%"></i>'
+          + d('left:22px;top:44px;width:32px;height:5px')
+          + d('left:22px;top:55px;width:20px;height:5px')
+        );
+    }
+    return '';
+  }
+
+  /* ---------- 公共外壳 ----------
+     状态栏正中显示 HH:MM（app_shell 在页面重绘时刷 + 空闲每 10s 兜一次，
+     未校时显示 --:--），左右两侧仍是品牌标与 BAT/WIFI/BT。 */
+  function status(){
+    var hh = ('0' + state.clockHour).slice(-2), mm = ('0' + state.clockMin).slice(-2);
+    return '<div class="status">'
+      + '<span class="brand"><span class="tri tri-r" style="border-left-width:8px;border-top-width:5px;border-bottom-width:5px"></span>FRAMEFILM</span>'
+      + '<span class="sp"></span>'
+      + '<span class="clock">'+hh+':'+mm+'</span>'
+      + '<span class="cell">BAT 82%<span class="pip on"></span></span>'
+      + '<span class="cell">WIFI<span class="pip on"></span></span>'
+      + '<span class="cell">BT<span class="pip on"></span></span>'
+      + '</div>';
+  }
+  function foot(left, right){
+    return '<div class="foot"><span>'+left+'</span><span class="sp"></span><span>'+right+'</span></div>';
+  }
+  function shell(inner, footL, footR){
+    return status() + '<div class="body">'+inner+'</div>' + foot(footL, footR);
+  }
+
+  /* ---------- BOOT ---------- */
+  function screenBoot(){
+    var total = 24, on = Math.round(total * (state.bootStep/6));
+    var segs = '';
+    for(var i=0;i<total;i++){ segs += '<i class="'+(i<on?'on':'')+'"></i>'; }
+    var tele = [
+      ['PANEL', 'E6 3.70" 720x480', state.bootStep>=1],
+      ['MEMORY','PSRAM 2048K / HEAP OK', state.bootStep>=2],
+      ['STORAGE','SD MOUNTED / 23 FILES', state.bootStep>=3],
+      ['DISPLAY','SPECTRA SESSION BUILD', state.bootStep>=4]
+    ];
+    var rows = tele.map(function(t){
+      var ok = t[2];
+      return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0">'
+        + '<span class="micro" style="width:62px">'+t[0]+'</span>'
+        + '<span class="rule" style="flex:1;opacity:.35"></span>'
+        + '<span class="micro '+(ok?'':'dim')+'">'+t[1]+'</span>'
+        + '<span class="micro" style="width:20px;text-align:right">'+(ok?'OK':'--')+'</span></div>';
+    }).join('');
+
+    var inner =
+      '<div style="display:flex;gap:3px;margin-bottom:6px" class="micro dim">'
+      + '<span>CMYK→</span><span class="hatch-d" style="width:34px;height:9px"></span>'
+      + '<span class="hatch" style="width:34px;height:9px"></span>'
+      + '<span style="width:34px;height:9px;background:#000"></span>'
+      + '<span class="sp" style="flex:1"></span><span>BOOT SEQ A-01</span></div>'
+      + '<div class="rule"></div>'
+      + '<div style="height:16px"></div>'
+      + badgePx(304)
+      + '<div style="height:8px"></div>'
+      + '<div class="micro" style="text-align:center;letter-spacing:.26em">MARK FF-01 / REV A</div>'
+      + '<div style="height:16px"></div>'
+      + '<div style="text-align:center">'
+      +   '<div style="font-size:38px;font-weight:700;letter-spacing:.30em;margin-left:.30em">FRAMEFILM</div>'
+      +   '<div class="rule" style="margin:10px 40px"></div>'
+      +   '<div class="micro" style="letter-spacing:.30em">COLOR E-PAPER TERMINAL</div>'
+      + '</div>'
+      + '<div style="height:24px"></div>'
+      + '<div class="seg" style="margin-bottom:8px">'+segs+'</div>'
+      + '<div style="display:flex" class="micro"><span>SYSTEM INIT</span><span style="flex:1"></span>'
+      +   '<span>'+Math.round(on/total*100)+'%</span></div>'
+      + '<div style="height:18px"></div>'
+      + '<div class="rule" style="opacity:.5"></div>'
+      + rows;
+
+    return shell(inner, 'MODEL M1.0 / FW 1.0.0', 'SN FILM000001');
+  }
+
+  /* ---------- 主菜单 ---------- */
+  function screenMenu(){
+    var i = state.menu;
+    function plate(idx, cls){
+      var a = APPS[idx];
+      var inner = '<span class="idx">'+String(idx+1).padStart(2,'0')+'</span>'
+                + '<div style="display:flex;flex-direction:column;align-items:center;gap:12px">'
+                + glyph(a.glyph)
+                + '<span class="micro" style="letter-spacing:.14em">'+a.code+'</span>'
+                + '</div>';
+      return '<div class="plate '+cls+' chamfer-bl">'+inner+'</div>';
+    }
+    var order = [i-2,i-1,i,i+1,i+2];
+    var plates = order.map(function(v){
+      if(v<0||v>=APPS.length) return '<div class="plate" style="opacity:.25;width:92px"></div>';
+      return plate(v, v===i?'cur':'');
+    }).join('');
+
+    var dots = APPS.map(function(_,k){
+      return '<b class="'+(k===i?'on':'')+'" style="width:'+(k===i?26:18)+'px"></b>';
+    }).join('');
+
+    var a = APPS[i];
+    var uiLayer = (a.name === 'SETTINGS' || a.name === 'PASS');
+    var inner =
+      '<div style="display:flex;align-items:center;gap:8px" class="micro">'
+      + '<span>SELECT APPLICATION</span><span class="rule" style="flex:1"></span>'
+      + '<span class="dim">'+String(i+1).padStart(2,'0')+' / 0'+APPS.length+'</span></div>'
+      + '<div class="carousel">'
+      +   '<span class="tri tri-l"></span>'
+      +   '<div style="display:flex;align-items:center;gap:10px">'+plates+'</div>'
+      +   '<span class="tri tri-r"></span>'
+      + '</div>'
+      + '<div class="dots" style="margin-bottom:20px">'+dots+'</div>'
+      + '<div class="rule"></div>'
+      + '<div style="display:flex;align-items:center;gap:12px;padding:14px 0">'
+      +   '<span class="tab" style="background:#000;color:#fff;font:9.5px/1 var(--font-mono);letter-spacing:.16em;padding:6px 9px">ACTIVE</span>'
+      +   '<span style="font-size:30px;font-weight:700;letter-spacing:.16em">'+a.name+'</span>'
+      + '</div>'
+      + '<div class="micro dim" style="line-height:1.9">'+a.desc+'</div>'
+      + '<div style="height:16px"></div>'
+      + '<div class="bracket" style="border:1px solid #000;padding:10px 12px">'
+      +   '<div class="micro dim" style="line-height:2">'
+      +     'APP&nbsp;&nbsp;'+String(i+1).padStart(2,'0')+' &nbsp; LAYER&nbsp;'+(uiLayer?'UI':'DIRECT')
+      +     '<br>ENTRY &nbsp;'+(a.name==='PASS'?'UI PAGE (PLACEHOLDER)':(uiLayer?'UI PAGE (LOW COST)':'MONO SESSION REBUILD'))+'</div>'
+      + '</div>';
+
+    return shell(inner, 'UP/DOWN SELECT &nbsp; ENTER OPEN &nbsp; HOLD SLEEP', 'MENU');
+  }
+
+  /* ---------- 时钟 ----------
+     版式：自上而下的"计时仪表"堆叠。所有 y / h 都是**正文区内**的偏移
+     （正文区 = 440 × 626 = 屏宽减两侧 20 安全边距 × 屏高减状态栏 30 与提示行 28
+     再减上下各 18 留白），因此数值可与固件代码 1:1 对应。
+     时间用 48px 而不是更大字号 —— 固件当前只编入 Montserrat 14/24/48，48 已是上限；
+     故主视觉的份量由"两侧三角 + 通栏细线 + 分钟尺"的构图承担，而不是靠字号。 */
+  function screenClock(){
+    var WD = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+    var hh = String(state.clockHour).padStart(2,'0');
+    var mm = String(state.clockMin).padStart(2,'0');
+
+    /* 分钟尺：30 格 × 2 分钟，已过格实心。取 2 分钟一格而非 1 分钟一格，
+       既保留"在读秒"的仪表感，又让尺子每 2 分钟才动一次。 */
+    var segs = '';
+    for(var i = 0; i < 30; i++){ segs += '<i class="' + (i < Math.floor(state.clockMin / 2) ? 'on' : '') + '"></i>'; }
+
+    var strip = WD.map(function(d, k){
+      return '<div class="wk' + (k === state.clockWday ? ' on' : '') + '">' + d + '</div>';
+    }).join('');
+
+    /* 正文区内的绝对定位：y / h 直接就是固件里要写的偏移量 */
+    function abs(y, h){ return 'position:absolute;left:0;right:0;top:' + y + 'px;height:' + h + 'px;'; }
+
+    var inner = '<div style="position:relative;height:626px">'
+
+      /* ---- 表头：章节名 ── 年内第几天 ---- */
+      + '<div style="' + abs(0,14) + 'display:flex;align-items:center;gap:8px" class="micro">'
+      +   '<span>TIMEKEEPING</span><span class="rule" style="flex:1"></span>'
+      +   '<span class="dim">DOY ' + state.clockDoy + ' / 365</span></div>'
+      + '<div class="rule" style="' + abs(22,1) + '"></div>'
+
+      /* ---- 主读数：两侧实心三角把视线压向中心（与主菜单轮播同一套指向语汇） ---- */
+      + '<div style="' + abs(56,104) + 'display:flex;align-items:center;justify-content:center;gap:20px">'
+      +   '<span class="tri tri-r" style="border-left-width:16px;border-top-width:11px;border-bottom-width:11px"></span>'
+      +   '<span style="font-size:48px;font-weight:700;letter-spacing:.06em;line-height:1">'
+      +     hh + '<span style="opacity:.5">:</span>' + mm + '</span>'
+      +   '<span class="tri tri-l" style="border-right-width:16px;border-top-width:11px;border-bottom-width:11px"></span>'
+      + '</div>'
+
+      /* ---- 分钟尺 + 尺注 ---- */
+      + '<div class="gauge" style="' + abs(176,12) + '">' + segs + '</div>'
+      + '<div style="' + abs(196,14) + 'display:flex;align-items:center" class="micro">'
+      +   '<span>MIN ' + mm + ' / 060</span><span style="flex:1"></span>'
+      +   '<span class="dim">HOUR ' + hh + '</span></div>'
+      + '<div class="rule" style="' + abs(236,1) + '"></div>'
+
+      /* ---- 日期行：星期用实心黑底反白 + 左下切角（与主菜单的"当前项"同一套语汇） ---- */
+      + '<div style="' + abs(264,56) + 'display:flex;align-items:center;gap:16px">'
+      +   '<span class="chamfer-bl" style="width:112px;height:44px;background:var(--ink);color:var(--paper);'
+      +     'display:flex;align-items:center;justify-content:center;font:11px/1 var(--font-mono);'
+      +     'letter-spacing:.2em">' + WD[state.clockWday] + '</span>'
+      +   '<span style="font-size:24px;font-weight:700;letter-spacing:.04em">' + state.clockDate + '</span>'
+      + '</div>'
+      + '<div class="rule" style="' + abs(344,1) + '"></div>'
+
+      /* ---- 星期寄存器：7 格等宽，今日实心 ---- */
+      + '<div class="weekstrip" style="' + abs(368,64) + '">' + strip + '</div>'
+      + '<div style="' + abs(442,14) + 'display:flex;align-items:center" class="micro">'
+      +   '<span>WEEK REGISTER</span><span style="flex:1"></span>'
+      +   '<span class="dim">WEEK ' + state.clockWeek + ' / 52</span></div>'
+
+      /* ---- 设备面板：与主菜单同款取景框（只放编译期常量，不引入跨线程读数） ---- */
+      + '<div class="bracket" style="' + abs(486,104) + 'border:1px solid var(--ink);padding:12px 14px">'
+      +   '<div class="micro dim" style="line-height:2.3">'
+      +   'PANEL &nbsp;&nbsp;&nbsp;&nbsp;E6 3.70" 720x480<br>'
+      +   'FIRMWARE &nbsp;1.0.0 SN 000001<br>'
+      +   'REFRESH &nbsp;&nbsp;MONO FULL FRAME / 60 S</div>'
+      + '</div>'
+
+      + '</div>';
+
+    return shell(inner, 'DBL ENTER EXIT &nbsp; HOLD SLEEP', 'CLOCK');
+  }
+
+  /* ---------- 休眠卡 ----------
+     全屏，**不带外壳** —— 休眠意味着"UI 体系已经关掉"，留着状态栏与提示行
+     会让人以为设备还醒着，也破坏了这张卡"不参与导航"的姿态。
+
+     构图是 BOOT 卡片的"折叠版"：徽章 → 细线 → 大字 → 细线 → 一行说明。
+     同一族语汇、同一个图标，但把信息压到最少、把留白放到最大 —— BOOT 是
+     "开机自检"（有进度、有遥测），休眠是"设备休息"（只剩一句话）。
+
+     坐标为整屏 480×720（无正文边距）：块高 448，垂直居中于 y=136。 */
+  function screenSleep(){
+    var foot = state.sleepAuto ? ('AUTO WAKE ' + state.sleepWake) : 'AUTO WAKE OFF';
+
+    return '<div class="sleepcard">'
+      +   badgePx(304)                                   /* 与 BOOT 页同一张图标 */
+      +   '<div style="height:44px"></div>'
+      +   '<div class="rule"></div>'
+      +   '<div style="height:20px"></div>'
+      +   '<div style="height:58px;font-size:48px;font-weight:700;letter-spacing:.18em;'
+      +     'line-height:58px;margin-left:.18em">STANDBY</div>'
+      +   '<div style="height:20px"></div>'
+      +   '<div class="rule"></div>'
+      +   '<div style="height:22px"></div>'
+      +   '<div class="micro" style="height:10px;line-height:10px;letter-spacing:.2em">PRESS ENTER TO WAKE</div>'
+      + '</div>'
+      /* 页脚不参与居中构图，锚在屏幕底边：只回答"它会自己醒吗"这一个问题 */
+      + '<div style="position:absolute;left:0;right:0;bottom:50px;height:10px;line-height:10px;'
+      +   'text-align:center" class="micro dim">'
+      +   foot + '</div>';
+  }
+
+  /* ---------- 设置 ---------- */
+  function screenSettings(){
+    var out = '', lastSec = '', rowIdx = 0;
+    var model = [];
+    SETTINGS.forEach(function(it, i){ model.push({it:it, i:i}); });
+
+    model.forEach(function(m){
+      var it = m.it;
+      if(it.sec !== lastSec){
+        lastSec = it.sec;
+        out += '<div class="sec-head"><span class="tab">'+it.sec+'</span><span class="line"></span></div>';
+      }
+      var sel = (m.i === state.row);
+      var val = '';
+      if(it.v === 'bar'){
+        val = '<span class="bar"><u style="width:'+it.bar+'%"></u></span><span class="v" style="width:52px;text-align:right">'+it.txt+'</span>';
+      } else if(it.v === 'toggle'){
+        /* 开关 + 状态同一行：状态文案在前，开关在后（WiFi / 蓝牙 都可就地开关） */
+        val = (it.txt ? '<span class="v" style="margin-right:10px">'+it.txt+'</span>' : '')
+            + '<span class="toggle '+(it.on?'on':'')+'"><span>'+(it.on?'ON':'OFF')+'</span></span>';
+      } else if(it.v === 'cycle'){
+        val = '<span class="v">'+it.opts[it.on]+'</span>';
+      } else {
+        val = '<span class="v">'+it.txt+'</span>';
+      }
+      /* 只读行不给选择指针 —— 明确传达"这行不可操作" */
+      var ptr = (sel && !it.ro)
+        ? '<span class="tri tri-r" style="border-left-color:currentColor;border-left-width:9px;border-top-width:6px;border-bottom-width:6px"></span>'
+        : '<span style="width:9px"></span>';
+      out += '<div class="row '+(sel?'sel':'')+(it.ro?' ro':'')+'">'+ptr+'<span class="k">'+it.k+'</span>'+val+'</div>';
+    });
+
+    var inner =
+      '<div style="display:flex;align-items:center;gap:8px" class="micro">'
+      + '<span>SYSTEM CONFIGURATION</span><span class="rule" style="flex:1"></span>'
+      + '<span class="dim">ROW '+String(state.row+1).padStart(2,'0')+' / '+String(SETTINGS.length).padStart(2,'0')+'</span></div>'
+      + '<div style="height:6px"></div>'
+      + out;
+
+    return shell(inner, 'UP/DOWN &nbsp; ENTER TOGGLE &nbsp; DBL EXIT &nbsp; HOLD SLEEP', 'SETTINGS');
+  }
+
+  /* ---------- 层级交接（内容类 app） ---------- */
+  function screenHandoff(){
+    var a = APPS[state.handoff];
+    var inner =
+      '<div style="display:flex;align-items:center;gap:8px" class="micro">'
+      + '<span>LAYER HANDOFF</span><span class="rule" style="flex:1"></span><span class="dim">A-04</span></div>'
+      + '<div style="height:60px"></div>'
+      + '<div style="text-align:center">'
+      +   '<div class="tri tri-u" style="margin:0 auto 20px;border-bottom-width:22px;border-left-width:14px;border-right-width:14px"></div>'
+      +   '<div style="font-size:32px;font-weight:700;letter-spacing:.2em">'+a.name+'</div>'
+      +   '<div class="rule" style="margin:14px 60px"></div>'
+      +   '<div class="micro dim" style="line-height:2">UI LAYER SUSPENDED<br>MONO SESSION REBUILD<br>SPECTRA FULL CLEAR</div>'
+      + '</div>'
+      + '<div style="height:52px"></div>'
+      + '<div class="bracket" style="border:1px solid #000;padding:12px 14px;margin:0 24px">'
+      +   '<div class="micro dim" style="line-height:2.1">'
+      +   'FROM &nbsp;UI (LVGL / I1 1bpp)<br>TO &nbsp;&nbsp;&nbsp;DIRECT (COLOR FILM 4/8bpp)<br>COST &nbsp;&nbsp;FULL CLEAR ~3 S</div>'
+      + '</div>';
+
+    return shell(inner, 'DBL ENTER EXIT &nbsp; HOLD SLEEP', 'HANDOFF');
+  }
+
+  function render(){
+    var html = '';
+    if(state.screen === 'boot') html = screenBoot();
+    else if(state.screen === 'menu') html = screenMenu();
+    else if(state.screen === 'settings') html = screenSettings();
+    else if(state.screen === 'clock') html = screenClock();
+    else if(state.screen === 'sleep') html = screenSleep();
+    else html = screenHandoff();
+
+    var live = document.getElementById('screen');
+    if(live) live.innerHTML = html;
+
+    document.querySelectorAll('[data-static]').forEach(function(el){
+      var k = el.getAttribute('data-static');
+      /* 静态稿借用同一套渲染函数：临时改状态、画完即刻还原（含 row，避免污染原型） */
+      var bakScreen = state.screen, bakRow = state.row, bakHandoff = state.handoff, bakStep = state.bootStep;
+      if(k === 'boot'){ state.bootStep = 6; }
+      if(k === 'menu'){ state.menu = 2; }
+      if(k === 'settings'){ state.row = 6; }
+      if(k === 'handoff'){ state.handoff = 2; }
+
+      el.innerHTML = (k === 'boot' ? screenBoot()
+                    : k === 'menu' ? screenMenu()
+                    : k === 'settings' ? screenSettings()
+                    : k === 'clock' ? screenClock()
+                    : k === 'sleep' ? screenSleep()
+                    : screenHandoff());
+
+      state.screen = bakScreen; state.row = bakRow; state.handoff = bakHandoff; state.bootStep = bakStep;
+    });
+  }
+
+  /* ---------- 开机序列 ---------- */
+  function startBoot(){
+    state.screen = 'boot'; state.bootStep = 0; state.booted = false;
+    clearInterval(bootTimer);
+    bootTimer = setInterval(function(){
+      state.bootStep++;
+      if(state.bootStep >= 6){
+        clearInterval(bootTimer);
+        state.booted = true;
+        render();
+        setTimeout(function(){ if(state.screen === 'boot'){ state.screen = 'menu'; render(); } }, 520);
+        return;
+      }
+      render();
+    }, 420);
+    render();
+  }
+
+  /* ---------- 输入：单一来源 —— 短按在 keyup 判定、长按用计时器 ----------
+     与固件一致：长按 = 手动休眠（菜单里画休眠卡；app 内不画、保持当前画面）；
+     双击 = 从 app 退回主菜单（原长按语义）。双击要等窗口，所以单击也被推迟一个
+     DBL_MS 才生效 —— 固件里同样付这个代价（PRO/MAX 由 iot_button 内置消歧，
+     STD 由 hal_encoder.c 的 esp_timer 配对窗口补）。 */
+  var HOLD_MS = 800;
+  var DBL_MS = 350;
+  var holdTimer = null;
+  var longFired = false;
+  var clickTimer = null;
+
+  function leaveToMenu(){
+    state.handoff = null;
+    state.asleep = false;
+    state.screen = 'menu';
+    render();
+  }
+
+  /* ---------- 主菜单长按 → 休眠（画卡） ----------
+     真实设备上这里是"画完这张卡 → 等确认键松开 + 帧上屏 → deep sleep"。
+     深度休眠本质是一次复位，所以"唤醒"在原型里就等于重放开机序列。 */
+  function enterSleep(){
+    if(state.screen !== 'menu'){ return; }
+    state.screen = 'sleep';
+    render();
+  }
+
+  /* ---------- app 内长按 → 休眠但**不画休眠卡** ----------
+     屏上保持当前 app 的画面（固件里先 app_stop_current() 让它停止绘制，再 deep sleep）。
+     原型里按 ENTER 即"唤醒" = 重放 BOOT。 */
+  function enterSleepInApp(){
+    if(state.screen === 'menu' || state.screen === 'boot' || state.screen === 'sleep'){ return; }
+    state.asleep = true;
+    render();
+  }
+
+  /* ---------- 双击 → 从 app 退回主菜单（菜单里没有语义：它就是根） ---------- */
+  function enterDouble(){
+    if(state.screen === 'menu' || state.screen === 'boot' || state.screen === 'sleep' || state.asleep){ return; }
+    leaveToMenu();
+  }
+
+  function enterShort(){
+    if(state.asleep){ startBoot(); return; }     /* 睡着时按 ENTER = 唤醒 → 重放 BOOT */
+    if(state.screen === 'boot'){
+      if(state.booted){ state.screen = 'menu'; render(); }
+      return;
+    }
+    if(state.screen === 'menu'){
+      var name = APPS[state.menu].name;
+      if(name === 'SETTINGS'){ state.screen = 'settings'; state.row = 6; render(); }
+      /* 时钟是 UI 层页面：进入即换页，不发生"层级交接"（不重建 mono 会话） */
+      else if(name === 'CLOCK'){ state.screen = 'clock'; render(); }
+      else { state.handoff = state.menu; state.screen = 'handoff'; render(); }
+      return;
+    }
+    if(state.screen === 'settings'){
+      var it = SETTINGS[state.row];
+      if(it.ro){ return; }                        /* 只读行不响应 */
+      if(it.v === 'toggle'){ it.on = !it.on; render(); }
+      else if(it.v === 'cycle'){ it.on = (it.on + 1) % it.opts.length; render(); }
+      return;
+    }
+    if(state.screen === 'sleep'){ startBoot(); return; }   /* 唤醒 = 重启 → 回到 BOOT */
+    if(state.screen === 'handoff'){ leaveToMenu(); }
+  }
+
+  function move(delta){
+    if(state.screen === 'menu'){
+      state.menu = (state.menu + delta + APPS.length) % APPS.length;
+      render();
+    } else if(state.screen === 'settings'){
+      /* 跳过只读行 —— 保证 Enter 只会落在真正可操作的行上 */
+      var n = SETTINGS.length, i = state.row, step;
+      for(step = 0; step < n; step++){
+        i = (i + delta + n) % n;
+        if(!SETTINGS[i].ro){ state.row = i; render(); return; }
+      }
+    }
+    /* 时钟页无交互：↑↓ 不做事（固件里该页 on_key 为空，按键由调度器吞掉） */
+  }
+
+  window.addEventListener('keydown', function(e){
+    var k = e.key;
+
+    if(k === 'r' || k === 'R'){ startBoot(); e.preventDefault(); return; }
+
+    if(k === 'Enter'){
+      if(e.repeat) return;                       /* 连发不重复触发短按 */
+      if(!holdTimer && !longFired){
+        holdTimer = setTimeout(function(){
+          longFired = true;
+          /* 长按 = 手动休眠：菜单里画休眠卡，app 内不画（屏上保持当前画面） */
+          if(state.screen === 'menu'){ enterSleep(); }
+          else { enterSleepInApp(); }
+        }, HOLD_MS);
+      }
+      return;
+    }
+
+    if(k === 'ArrowUp'){ e.preventDefault(); if(state.screen !== 'boot' && !state.asleep) move(+1); return; }
+    if(k === 'ArrowDown'){ e.preventDefault(); if(state.screen !== 'boot' && !state.asleep) move(-1); return; }
+    if(k === 'Escape'){ e.preventDefault(); if(state.screen === 'sleep' || state.asleep){ startBoot(); } else if(state.screen !== 'boot'){ leaveToMenu(); } return; }
+  });
+
+  window.addEventListener('keyup', function(e){
+    if(e.key !== 'Enter') return;
+    clearTimeout(holdTimer); holdTimer = null;
+    if(!longFired){
+      /* 单击等双击窗口过期才生效；窗口内第二击 → 双击（撤掉待发的单击） */
+      if(clickTimer){
+        clearTimeout(clickTimer); clickTimer = null;
+        enterDouble();
+      } else {
+        clickTimer = setTimeout(function(){ clickTimer = null; enterShort(); }, DBL_MS);
+      }
+    }
+    longFired = false;
+  });
+
+  render();
+
+  startBoot();
+  setTimeout(function(){ document.body.focus(); }, 50);
+})();
+</script>
+</body>
+</html>
