@@ -1,0 +1,938 @@
+/* ============================================================
+   ForFilm · ARK 通行证版皮肤（终末地视觉语言）
+   ------------------------------------------------------------
+   用法：连接通行证版（FRAMEFILMARK）后，由 js/ark-theme.js 给
+        <body> 加 .theme-ark；断开即移除。默认（其他机型）完全不加载效果。
+   约定：
+     · 只覆盖视觉，不动布局结构（断点与栅格沿用 style.css 的 900px 规则）
+     · 全部规则挂在 body.theme-ark 下，保证优先级高于原皮肤
+     · 设计稿见 tools/ui-mockup/ark/index.html
+   ============================================================ */
+
+body.theme-ark{
+    /* —— 令牌 —— */
+    --ark-bg:#FFFFFF;
+    --ark-bg-2:#F7F7F7;
+    --ark-bg-3:#EFEFEF;
+    --ark-ink:#191919;
+    --ark-ink-2:#6B6B6B;
+    --ark-ink-3:#9E9E9E;
+    --ark-line:#E8E8E8;
+    --ark-line-2:#D9D9D9;
+    --ark-yellow:#FFFA00;
+    --ark-red:#D93A2B;
+    --ark-r-sm:3px;
+    --ark-r-md:6px;
+    --ark-r-pill:999px;
+    --ark-display:'Chakra Petch','Noto Sans SC','PingFang SC',sans-serif;
+    --ark-body:'Barlow','Noto Sans SC','PingFang SC',sans-serif;
+    --ark-mono:'JetBrains Mono','Noto Sans SC','PingFang SC',ui-monospace,Menlo,Consolas,monospace;
+    /* ▲ 黄底黑描边三角（官网 Header_tri 造型），做成内联 SVG 便于当背景用 */
+    --ark-tri:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 31 28'%3E%3Cpath fill='%23FFFA00' stroke='%23191919' stroke-width='2.2' stroke-linejoin='round' fill-rule='evenodd' d='M23.146,13.962 L15.554,0.843 L30.739,0.843 L23.146,13.962 ZM0.261,0.843 L15.446,0.843 L7.854,13.962 L0.261,0.843 ZM15.554,27.156 L7.961,14.036 L23.146,14.036 L15.554,27.156 Z'/%3E%3C/svg%3E");
+
+    /* 覆盖原皮肤的令牌：让所有旧组件直接落到新色板 */
+    --cream:#FFFFFF;
+    --cream-2:#FFFFFF;
+    --paper:#FFFFFF;
+    --ink:var(--ark-ink);
+    --ink-soft:var(--ark-ink-2);
+    --lemon:var(--ark-yellow);
+    --coral:var(--ark-yellow);
+    --sky:var(--ark-yellow);
+    --mint:var(--ark-yellow);
+    --sun:var(--ark-yellow);
+    --line:1px;
+    --r-xs:3px;
+    --r-sm:3px;
+    --r:6px;
+    --r-lg:6px;
+    --sh-1:none;
+    --sh-2:none;
+    --sh-3:none;
+    --font-display:var(--ark-display);
+    --font-body:var(--ark-body);
+    --font-num:var(--ark-display);
+
+    background:#FFFFFF;
+    color:var(--ark-ink);
+    font-family:var(--ark-body);
+}
+/* 页面底色与卡片底色一致（设计稿：--bg 与 .panel 都是 #FFFFFF），
+   PC / 手机都不做灰底衬白卡 —— 层次只靠 1px 发丝线 */
+
+body.theme-ark .container{background:transparent}
+
+/* ============================================================
+   1. 页头：◆ [ 标题 ] + REC + 标尺
+   ============================================================ */
+body.theme-ark .app-head{
+    position:relative;
+    align-items:center;
+    flex-wrap:wrap;
+    padding:16px 16px 14px;
+    background:var(--ark-bg);
+}
+/* 品牌行：ENDFIELD 徽标 + FRAMEFILM + ARK 标 …… 电量（设计稿手机顶栏第一行） */
+body.theme-ark .ark-brandrow{
+    flex:0 0 100%;
+    display:flex;align-items:center;gap:10px;
+    min-width:0;margin-bottom:13px;
+}
+body.theme-ark .ark-brand{display:flex;align-items:center;gap:9px;min-width:0}
+body.theme-ark .ark-brand .mk{width:18px;height:20px;color:var(--ark-ink);flex:none}
+body.theme-ark .ark-brand .nm{
+    font:700 14.5px/1 var(--ark-display);letter-spacing:.16em;color:var(--ark-ink);white-space:nowrap;
+}
+body.theme-ark .ark-brand .ark-tag{margin-left:1px}
+body.theme-ark .ark-sp{flex:1;min-width:0}
+
+/* 页头标题：◆(SVG菱形标) + [ 短名 ] —— 与设计稿 .hero 一致。
+   原 #appTitle 保留在 DOM 里（main.js 会写它、Observer 读它），仅视觉隐藏 */
+body.theme-ark #appTitle{display:none}
+body.theme-ark .ark-title{
+    flex:1 1 auto;min-width:0;
+    display:flex;align-items:center;gap:9px;
+}
+body.theme-ark .ark-title .dia{width:19px;height:19px;color:var(--ark-ink);flex:none}
+body.theme-ark .ark-title .ttl{
+    font:700 26px/1 var(--ark-display);letter-spacing:.01em;color:var(--ark-ink);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+body.theme-ark .ark-title .ttl i{
+    font-style:normal;font-weight:400;color:var(--ark-ink-3);
+}
+body.theme-ark .ark-title .ttl i:first-child{margin-right:.24em}
+body.theme-ark .ark-title .ttl i:last-child{margin-left:.24em}
+
+/* 页头第一行：▌段头 + 等宽大写 + 分隔线 + CMYK（由 JS 注入 .ark-herobar） */
+body.theme-ark .ark-herobar{
+    flex:0 0 100%;
+    display:flex;align-items:center;gap:9px;
+    margin-bottom:12px;
+}
+body.theme-ark .ark-herobar .bar{width:4px;height:13px;background:var(--ark-ink);flex:none}
+body.theme-ark .ark-herobar .lbl{font:600 10px/1 var(--ark-mono);letter-spacing:.22em;color:var(--ark-ink);white-space:nowrap}
+body.theme-ark .ark-herobar .rule{flex:1;height:1px;background:var(--ark-line)}
+body.theme-ark .ark-herobar .cmyk{display:flex;gap:2px;flex:none}
+body.theme-ark .ark-herobar .cmyk i{width:4px;height:11px;background:var(--ark-ink)}
+body.theme-ark .ark-herobar .cmyk i:nth-child(2){background:#7A7A7A}
+body.theme-ark .ark-herobar .cmyk i:nth-child(3){background:var(--ark-line-2)}
+body.theme-ark .ark-herobar .cmyk i:nth-child(4){background:var(--ark-yellow)}
+body.theme-ark #appTitle{
+    font-family:var(--ark-display);
+    font-weight:700;
+    font-size:26px;
+    letter-spacing:.01em;
+    color:var(--ark-ink);
+}
+body.theme-ark #appTitle::before{
+    content:'◆  [ ';
+    color:var(--ark-ink-3);
+    font-weight:400;
+    font-size:.72em;
+}
+body.theme-ark #appTitle::after{
+    content:' ]';
+    color:var(--ark-ink-3);
+    font-weight:400;
+}
+/* 页头下的刻度标尺 */
+body.theme-ark .app-head::after{
+    content:'';
+    position:absolute;left:16px;right:16px;bottom:4px;height:6px;
+    background-image:repeating-linear-gradient(90deg,var(--ark-line-2) 0 1px,transparent 1px 11px);
+    border-bottom:1px solid var(--ark-line-2);
+}
+/* 电量：设计稿里是「墨色电池 + 数字」直接落在白底上 —— 不给底色，不要 chip */
+body.theme-ark .batt-chip{
+    background:transparent;
+    color:var(--ark-ink);
+    border:0;
+    border-radius:0;
+    box-shadow:none;
+    padding:4px 0;
+    font-family:var(--ark-mono);
+    font-size:12.5px;
+}
+body.theme-ark .batt-chip:hover{background:transparent;transform:none;box-shadow:none}
+body.theme-ark .batt-chip:active{transform:none;box-shadow:none}
+/* 原皮肤是圆角电池 + 粗描边；这里只拉回设计稿的直角细描边。
+   ⚠ 不要改填充的 x/y/width/height（原属性就是设计稿的 x2 y2 h10，贴满内腔）；
+     一旦把它缩成居中小方块，就会变成"框里浮着一块砖"。 */
+body.theme-ark .battery-svg{color:var(--ark-ink)}
+body.theme-ark .battery-svg rect{rx:0;ry:0}
+body.theme-ark .battery-outline{stroke:var(--ark-ink);stroke-width:1.3}
+body.theme-ark .battery-cap{fill:var(--ark-ink);stroke:none}
+body.theme-ark .battery-fill-icon{fill:var(--ark-ink);stroke:none}
+body.theme-ark .battery-icon-text{font-family:var(--ark-mono);letter-spacing:.04em;min-width:0}
+
+/* 页头装饰：ARK 黄标 + [ REC ]（由 JS 注入）
+   未启用主题时必须 display:none —— 否则它们会以裸元素露在「贴纸玩具」皮肤里 */
+.ark-tag,.ark-rec,.ark-band,.ark-herobar,.ark-no,.ark-k,
+.ark-giant,.ark-tl,.ark-tl__mk,.ark-filechip,.ark-readout,
+.ark-brandrow,.ark-brand,.ark-sp,.ark-title{display:none}
+body.theme-ark .ark-tag{
+    display:inline-flex;align-items:center;margin-left:9px;padding:4px 6px;
+    background:var(--ark-yellow);color:var(--ark-ink);
+    font:700 9px/1 var(--ark-mono);letter-spacing:.14em;vertical-align:middle;
+}
+body.theme-ark .ark-rec{
+    display:inline-flex;align-items:center;gap:6px;margin-right:10px;
+    font:600 9.5px/1 var(--ark-mono);letter-spacing:.18em;color:var(--ark-ink-2);
+}
+.ark-rec b{width:6px;height:6px;border-radius:50%;background:var(--ark-red);flex:none;
+    box-shadow:0 0 0 3px rgba(217,58,43,.14)}
+
+/* 页内黄横幅（每页一条） */
+body.theme-ark .ark-band{
+    display:flex;align-items:center;gap:9px;
+    background:var(--ark-yellow);color:var(--ark-ink);
+    padding:9px 12px;margin:0 0 14px;
+}
+body.theme-ark .ark-band .tri{width:11px;height:10px;fill:var(--ark-yellow);
+    stroke:var(--ark-ink);stroke-width:2.2;stroke-linejoin:round;flex:none}
+body.theme-ark .ark-band span{font:700 11.5px/1 var(--ark-display);letter-spacing:.24em}
+body.theme-ark .ark-band .r{margin-left:auto;font:500 9.5px/1 var(--ark-mono);letter-spacing:.2em;opacity:.66}
+
+/* ============================================================
+   2. 卡片与段头
+   ============================================================ */
+body.theme-ark .card{
+    background:var(--ark-bg);
+    border:1px solid var(--ark-line);
+    border-radius:var(--ark-r-md);
+    box-shadow:none;
+    padding:14px 15px 16px;
+}
+body.theme-ark .card--lemon,
+body.theme-ark .card--mint,
+body.theme-ark .card--sky,
+body.theme-ark .card--sun{background:var(--ark-bg)}
+
+body.theme-ark .card__title{
+    position:relative;
+    gap:10px;
+    font-family:var(--ark-display);
+    font-weight:600;
+    font-size:14.5px;
+    letter-spacing:.02em;
+    color:var(--ark-ink);
+}
+/* CMYK 色标（灰阶 + 黄）；有右侧操作按钮(=.spacer)时不加，避免拥挤 */
+body.theme-ark .card__title:not(:has(.spacer))::after{
+    content:'';margin-left:auto;flex:none;width:14px;height:11px;
+    background:linear-gradient(90deg,
+        var(--ark-ink) 0 2px, transparent 2px 4px,
+        #7A7A7A 4px 6px, transparent 6px 8px,
+        var(--ark-line-2) 8px 10px, transparent 10px 12px,
+        var(--ark-yellow) 12px 14px);
+}
+
+/* 图标托盘：墨黑方块 + 白图标 */
+body.theme-ark .ic-wrap{
+    width:28px;height:28px;
+    min-width:28px;
+    background:var(--ark-ink);
+    color:#fff;
+    border:0;border-radius:0;
+    box-shadow:none;
+    font-size:20px;
+    line-height:1;
+}
+body.theme-ark .ic-wrap--coral,
+body.theme-ark .ic-wrap--sky,
+body.theme-ark .ic-wrap--mint,
+body.theme-ark .ic-wrap--lemon,
+body.theme-ark .ic-wrap--sun,
+body.theme-ark .ic-wrap--paper{background:var(--ark-ink);color:#fff}
+body.theme-ark .ic{stroke-width:1.7}
+body.theme-ark .card__title .ic{width:15px;height:15px}
+/* 原皮肤 .ic 是 stroke:var(--ink)；落到墨底上要转白，否则图标看不见 */
+body.theme-ark .ic-wrap .ic,
+body.theme-ark .mcard .ic-wrap .ic,
+body.theme-ark .primary-button .ic,
+body.theme-ark .mode-button.active .ic,
+body.theme-ark .kb-event-tab.active .ic,
+body.theme-ark .kb-key.active .ic,
+body.theme-ark .batch-remove:hover .ic{stroke:#fff}
+body.theme-ark .mcard .ic-wrap .ic{width:16px;height:16px}
+body.theme-ark .disconnect-btn .ic{stroke:var(--ark-red)}
+
+/* 手机端顶栏放不下 [ REC ]，隐藏（桌面保留） */
+@media (max-width: 899px){
+    body.theme-ark .ark-rec{display:none}
+}
+
+body.theme-ark .divider{
+    height:6px;
+    background:repeating-linear-gradient(90deg,var(--ark-line-2) 0 1px,transparent 1px 11px);
+    border-bottom:1px solid var(--ark-line-2);
+    margin:12px 0;
+}
+body.theme-ark .spacer{margin-left:auto}
+
+/* ============================================================
+   3. 按钮
+   ============================================================ */
+body.theme-ark .primary-button,
+body.theme-ark .secondary-button{
+    font-family:var(--ark-display);
+    font-weight:600;
+    font-size:13.5px;
+    letter-spacing:.06em;
+    border-radius:var(--ark-r-sm);
+    box-shadow:none;
+    transition:background .14s,border-color .14s,color .14s;
+}
+body.theme-ark .primary-button{background:var(--ark-ink);color:#fff;border:1px solid var(--ark-ink)}
+body.theme-ark .primary-button:hover{background:#000;transform:none;box-shadow:none}
+body.theme-ark .primary-button:active{transform:none;box-shadow:none}
+/* 页内主按钮 = 官网「黄方块 + 标签」结构（弹窗里的按钮不套用） */
+body.theme-ark .page .primary-button{
+    position:relative;
+    justify-content:flex-start;
+    background:#fff;color:var(--ark-ink);
+    border:1px solid var(--ark-line-2);
+    padding:13px 16px 13px 58px;
+    min-height:44px;
+}
+body.theme-ark .page .primary-button::before{
+    content:'';position:absolute;left:0;top:0;bottom:0;width:44px;background:var(--ark-yellow);
+}
+body.theme-ark .page .primary-button .ic{
+    position:absolute;left:13px;top:50%;transform:translateY(-50%);
+    width:18px;height:18px;stroke:var(--ark-ink);
+}
+body.theme-ark .page .primary-button:hover{background:var(--ark-bg-2);border-color:var(--ark-ink)}
+body.theme-ark .page .primary-button:disabled{background:#fff}
+body.theme-ark .secondary-button{background:#fff;color:var(--ark-ink);border:1px solid var(--ark-line-2)}
+body.theme-ark .secondary-button:hover{border-color:var(--ark-ink);transform:none;box-shadow:none;background:#fff}
+body.theme-ark .secondary-button:active{transform:none;box-shadow:none}
+body.theme-ark .secondary-button.warning{background:#fff;border-color:var(--ark-line-2)}
+body.theme-ark .secondary-button.danger{background:#fff;color:var(--ark-red);border-color:#E7C4BF}
+body.theme-ark .secondary-button.danger:hover{border-color:var(--ark-red);background:#fff}
+body.theme-ark .primary-button:disabled,
+body.theme-ark .secondary-button:disabled{opacity:.4;box-shadow:none}
+body.theme-ark .frame-send-btn:disabled{background:var(--ark-bg-2);color:var(--ark-ink-3);border-color:var(--ark-line)}
+
+body.theme-ark .icon-button{
+    width:34px;height:34px;
+    background:#fff;color:var(--ark-ink);
+    border:1px solid var(--ark-line-2);border-radius:50%;box-shadow:none;
+}
+body.theme-ark .icon-button:hover{background:#fff;border-color:var(--ark-ink);transform:none;box-shadow:none}
+body.theme-ark .icon-button:active{transform:none;box-shadow:none}
+
+/* ============================================================
+   4. 状态 / 徽章 / 设备列表
+   ============================================================ */
+body.theme-ark .status{
+    background:#fff;color:var(--ark-ink);
+    border:1px solid var(--ark-line);border-radius:var(--ark-r-sm);
+    box-shadow:none;font-weight:600;
+}
+body.theme-ark .status.connected{
+    background:#fff;border-color:var(--ark-ink);
+    box-shadow:inset 3px 0 0 var(--ark-yellow);
+}
+body.theme-ark .device-type-info{background:transparent}
+body.theme-ark .device-type-badge{
+    background:var(--ark-ink);color:#fff;border:0;border-radius:0;box-shadow:none;
+    font-family:var(--ark-mono);font-size:10px;letter-spacing:.12em;padding:5px 8px;
+}
+body.theme-ark .device-resolution{font-family:var(--ark-mono);color:var(--ark-ink-2);font-size:11.5px}
+body.theme-ark .info{color:var(--ark-ink-3)}
+body.theme-ark .device-hint{color:var(--ark-ink-3)}
+body.theme-ark .no-devices{color:var(--ark-ink-3);font-family:var(--ark-mono);font-size:11px;letter-spacing:.14em;text-align:center;padding:18px 0}
+
+body.theme-ark .device-item{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);box-shadow:none;
+    padding:11px 12px;
+}
+body.theme-ark .device-item:hover{background:var(--ark-bg-3)}
+body.theme-ark .connected-device{background:#fff;box-shadow:inset 0 0 0 1px var(--ark-ink)}
+body.theme-ark .device-info strong{font-family:var(--ark-display);font-weight:600;color:var(--ark-ink)}
+body.theme-ark .device-id{font-family:var(--ark-mono);color:var(--ark-ink-3);font-size:11px}
+body.theme-ark .disconnect-btn{
+    background:#fff;color:var(--ark-red);border:1px solid #E7C4BF;border-radius:var(--ark-r-sm);
+    font-family:var(--ark-display);font-weight:600;box-shadow:none;
+}
+
+/* ============================================================
+   5. 表单 / 开关 / 滑杆
+   ============================================================ */
+body.theme-ark .field label,
+body.theme-ark .field--tight label{
+    font-family:var(--ark-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ark-ink-3);font-weight:500;
+}
+body.theme-ark .field input,
+body.theme-ark .field select,
+body.theme-ark .quote-input,
+body.theme-ark .input-row input{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-sm);
+    color:var(--ark-ink);font-family:var(--ark-mono);font-size:13px;box-shadow:none;
+}
+body.theme-ark .field input:focus,
+body.theme-ark .field select:focus,
+body.theme-ark .quote-input:focus{outline:none;box-shadow:inset 0 0 0 1px var(--ark-ink);background:#fff}
+body.theme-ark .quote-input{font-family:var(--ark-body);resize:vertical}
+body.theme-ark .field-hint{color:var(--ark-ink-3)}
+body.theme-ark .value-chip{
+    background:var(--ark-ink);color:#fff;border-radius:var(--ark-r-pill);
+    font-family:var(--ark-mono);font-size:10.5px;padding:3px 9px;
+}
+
+body.theme-ark .switch-row{border-color:var(--ark-line)}
+body.theme-ark .switch-row__label{font-family:var(--ark-display);font-weight:600;color:var(--ark-ink)}
+body.theme-ark .switch-row__hint{color:var(--ark-ink-3)}
+/* 开关：轨道小而圆；把手用 top:50% + translateY(-50%) 保证绝对垂直居中
+   （原皮肤靠 border-box 算 left/top，去掉边框后必然偏心） */
+body.theme-ark .switch{width:46px;height:26px}
+body.theme-ark .slider-toggle{
+    background:var(--ark-line-2);border:0;box-shadow:none;border-radius:var(--ark-r-pill);
+}
+body.theme-ark .slider-toggle::before{
+    top:50%;left:3px;width:20px;height:20px;
+    border:0;background:#fff;border-radius:50%;
+    transform:translateY(-50%);
+    box-shadow:0 1px 2px rgba(0,0,0,.22);
+}
+body.theme-ark .switch input:checked + .slider-toggle{background:var(--ark-ink)}
+body.theme-ark .switch input:checked + .slider-toggle::before{
+    background:var(--ark-yellow);transform:translate(20px,-50%);
+}
+
+body.theme-ark .slider-container{padding:7px 0}
+body.theme-ark .slider-container label{
+    font-family:var(--ark-mono);font-size:10.5px;letter-spacing:.06em;color:var(--ark-ink-2);
+}
+body.theme-ark input[type="range"]{
+    -webkit-appearance:none;appearance:none;height:18px;background:transparent;
+}
+body.theme-ark input[type="range"]::-webkit-slider-runnable-track{height:2px;background:var(--ark-line-2);border-radius:0}
+body.theme-ark input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:12px;height:12px;margin-top:-5px;border-radius:50%;
+    background:#fff;border:2px solid var(--ark-ink);
+}
+body.theme-ark input[type="range"]::-moz-range-track{height:2px;background:var(--ark-line-2)}
+body.theme-ark input[type="range"]::-moz-range-thumb{
+    width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid var(--ark-ink);
+}
+body.theme-ark .wake-min,body.theme-ark .wake-max{font-family:var(--ark-mono);font-size:10px;color:var(--ark-ink-3)}
+
+/* ============================================================
+   6. 折叠面板 / 提示
+   ============================================================ */
+body.theme-ark .panel{border:1px solid var(--ark-line);border-radius:var(--ark-r-md)}
+body.theme-ark .panel__head{
+    background:#fff;color:var(--ark-ink);border:0;border-radius:0;
+    font-family:var(--ark-display);font-weight:600;
+}
+body.theme-ark .panel__head:hover{background:var(--ark-bg-2)}
+body.theme-ark .panel__content{background:#fff}
+body.theme-ark .wifi-status-row{color:var(--ark-ink-2);font-family:var(--ark-mono);font-size:11px}
+body.theme-ark .wifi-status-dot{background:var(--ark-line-2);border:0}
+body.theme-ark .download-status-text{color:var(--ark-ink-2);font-family:var(--ark-mono)}
+
+/* ============================================================
+   7. Frame 入口卡（灰底软块 + 墨方块图标）
+   ============================================================ */
+body.theme-ark .frame-cards{gap:10px}
+body.theme-ark .mcard{
+    background:var(--ark-bg-2);
+    border:0;border-radius:var(--ark-r-md);box-shadow:none;
+    rotate:0;
+    color:var(--ark-ink);
+    transition:background .14s;
+}
+body.theme-ark .mcard:nth-child(odd),
+body.theme-ark .mcard:nth-child(even){rotate:0}
+body.theme-ark .mcard:hover{background:var(--ark-bg-3);transform:none;box-shadow:none}
+body.theme-ark .mcard:active{transform:none;box-shadow:none}
+body.theme-ark .mcard .ic-wrap{background:var(--ark-ink);color:#fff}
+body.theme-ark .mcard__name{font-family:var(--ark-display);font-weight:600;letter-spacing:.03em;color:var(--ark-ink)}
+body.theme-ark .mcard__sub{font-family:var(--ark-body);font-weight:400;color:var(--ark-ink-2)}
+body.theme-ark .mcard__emo{display:none}
+body.theme-ark .mcard__new{
+    background:var(--ark-yellow);color:var(--ark-ink);border:0;border-radius:0;
+    font-family:var(--ark-mono);font-weight:700;letter-spacing:.14em;padding:5px 8px;
+}
+
+/* ============================================================
+   8. 二级页 / 预览取景框 / 传输
+   ============================================================ */
+body.theme-ark .detail-bar{background:transparent;border:0;border-bottom:1px solid var(--ark-line);border-radius:0;padding:0 0 10px;margin-bottom:14px}
+body.theme-ark .detail-back{
+    background:transparent;border:0;box-shadow:none;color:var(--ark-ink-2);
+    font-family:var(--ark-mono);font-size:11px;letter-spacing:.1em;
+}
+body.theme-ark .detail-back:hover{color:var(--ark-ink);transform:none;box-shadow:none}
+body.theme-ark .detail-name{
+    font-family:var(--ark-mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ark-ink-3);
+}
+
+body.theme-ark .polaroid-frame{
+    background:var(--ark-bg-2);
+    border:0;border-radius:var(--ark-r-md);box-shadow:none;
+    padding:10px 36px 10px 10px;
+    position:relative;max-width:100%;
+}
+/* 黄竖标：官网 GAMEPLAY 竖黄条 */
+body.theme-ark .polaroid-frame::after{
+    content:'PREVIEW';
+    position:absolute;right:0;top:0;bottom:0;width:22px;
+    background:var(--ark-yellow);color:var(--ark-ink);
+    writing-mode:vertical-rl;display:flex;align-items:center;justify-content:center;
+    font:700 9.5px/1 var(--ark-mono);letter-spacing:.2em;
+}
+body.theme-ark .polaroid-inner{
+    background:#fff;border:1px solid var(--ark-line-2);border-radius:var(--ark-r-sm);
+}
+body.theme-ark #frameVideo{border:1px solid var(--ark-line-2);border-radius:var(--ark-r-sm)}
+
+body.theme-ark .transfer-container{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);box-shadow:none;
+}
+body.theme-ark .transfer-status{font-family:var(--ark-mono);font-size:10.5px;letter-spacing:.12em;color:var(--ark-ink-2)}
+body.theme-ark .progress-bar{background:var(--ark-line-2);border-radius:0;height:8px;overflow:visible;position:relative}
+body.theme-ark .progress-bar::after{
+    content:'';position:absolute;inset:0;
+    background-image:repeating-linear-gradient(90deg,var(--ark-line) 0 1px,transparent 1px 9px);
+}
+body.theme-ark .progress-fill{background:var(--ark-ink);border-radius:0}
+body.theme-ark .transfer-progress{font-family:var(--ark-mono);color:var(--ark-ink-2)}
+body.theme-ark .result{background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);color:var(--ark-ink-2)}
+body.theme-ark .custom-quote-panel{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);
+}
+
+/* ============================================================
+   9. 批量 / 文件列表 / 模式选择
+   ============================================================ */
+body.theme-ark .batch-list{gap:6px}
+body.theme-ark .batch-row{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);box-shadow:none;
+}
+body.theme-ark .batch-row[data-state="wait"]{background:var(--ark-bg-2)}
+body.theme-ark .batch-row[data-state="busy"]{background:#fff;box-shadow:inset 0 0 0 1px var(--ark-ink)}
+body.theme-ark .batch-row[data-state="done"]{background:var(--ark-bg-2);box-shadow:inset 3px 0 0 var(--ark-yellow)}
+body.theme-ark .batch-row[data-state="fail"]{background:#fff;box-shadow:inset 0 0 0 1px var(--ark-red)}
+body.theme-ark .batch-thumb{border-radius:var(--ark-r-sm);border:1px solid var(--ark-line-2)}
+body.theme-ark .batch-meta b{font-family:var(--ark-display);color:var(--ark-ink)}
+body.theme-ark .batch-meta small{font-family:var(--ark-mono);color:var(--ark-ink-3)}
+body.theme-ark .batch-state{font-family:var(--ark-mono);font-size:9.5px;letter-spacing:.12em;color:var(--ark-ink-2)}
+body.theme-ark .batch-remove{background:#fff;border:1px solid var(--ark-line-2);border-radius:50%;box-shadow:none}
+body.theme-ark .batch-remove:hover{background:var(--ark-red);border-color:var(--ark-red);color:#fff}
+body.theme-ark .batch-count{
+    background:var(--ark-ink);color:#fff;border:0;border-radius:var(--ark-r-pill);
+    font-family:var(--ark-mono);font-size:10px;letter-spacing:.1em;padding:4px 9px;
+}
+body.theme-ark .empty-state{color:var(--ark-ink-3);font-family:var(--ark-mono);font-size:11px;letter-spacing:.14em}
+
+body.theme-ark .file-list{gap:6px}
+body.theme-ark .file-item{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);box-shadow:none;
+}
+body.theme-ark .file-item:hover{background:var(--ark-bg-3)}
+body.theme-ark .file-item.displaying{
+    background:#fff;box-shadow:inset 0 0 0 1px var(--ark-ink),inset 3px 0 0 var(--ark-yellow);
+}
+body.theme-ark .file-id{font-family:var(--ark-mono);font-size:10.5px;color:var(--ark-ink-3)}
+body.theme-ark .file-name{font-family:var(--ark-display);font-weight:600;color:var(--ark-ink)}
+body.theme-ark .file-size{font-family:var(--ark-mono);font-size:10.5px;color:var(--ark-ink-3)}
+
+/* 模式选择：收成紧凑 chip（原皮肤是「flex:1 + 上下两行」的大方块，太占地方） */
+body.theme-ark .modes{display:flex;gap:7px;flex-wrap:wrap}
+body.theme-ark .mode-button{
+    flex:0 0 auto;
+    flex-direction:row;gap:7px;
+    padding:8px 13px;
+    background:#fff;color:var(--ark-ink-2);
+    border:1px solid var(--ark-line-2);border-radius:var(--ark-r-pill);box-shadow:none;
+    font-family:var(--ark-body);font-size:11.5px;font-weight:500;letter-spacing:.04em;
+}
+body.theme-ark .mode-button .ic{width:15px;height:15px}
+body.theme-ark .mode-button:hover{border-color:var(--ark-ink);color:var(--ark-ink);transform:none;box-shadow:none;background:#fff}
+body.theme-ark .mode-button.active{
+    background:var(--ark-ink);border-color:var(--ark-ink);color:#fff;transform:none;box-shadow:none;
+}
+
+/* ── 蓝牙遥控：十字方向键的「遥控器」 ──────────────────────────
+   两个 .modes 用 display:contents 摊平，5 个键直接进 3×3 网格。
+   键位靠 :nth-child 硬映射（依赖 index.html 里按钮的既有顺序）。
+   键帽：白底 + 发丝线 + 1px 底边（轻按键感）；按下整体下沉一档。 */
+body.theme-ark .ark-remote{
+    position:relative;
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    grid-auto-rows:48px;
+    gap:6px;
+    width:178px;
+    margin:6px auto 0;
+    padding:14px;
+    background:var(--ark-bg-2);
+    border-radius:10px;
+}
+/* 取景角标（左上 / 右下），呼应预览框那套语言 */
+body.theme-ark .ark-remote::before,
+body.theme-ark .ark-remote::after{
+    content:'';position:absolute;width:11px;height:11px;pointer-events:none;
+}
+body.theme-ark .ark-remote::before{
+    left:5px;top:5px;border-left:1px solid var(--ark-line-2);border-top:1px solid var(--ark-line-2);
+}
+body.theme-ark .ark-remote::after{
+    right:5px;bottom:5px;border-right:1px solid var(--ark-line-2);border-bottom:1px solid var(--ark-line-2);
+}
+
+body.theme-ark .ark-remote > .modes{display:contents}
+body.theme-ark .ark-remote .mode-button{
+    flex-direction:column;justify-content:center;gap:3px;
+    height:48px;padding:0;
+    background:#fff;border:1px solid var(--ark-line-2);border-radius:6px;
+    color:var(--ark-ink);box-shadow:0 1px 0 var(--ark-line-2);
+    font-family:var(--ark-body);font-size:9.5px;font-weight:500;letter-spacing:.02em;
+    transition:background .1s,border-color .1s,transform .06s,box-shadow .06s;
+}
+body.theme-ark .ark-remote .mode-button .ic{width:16px;height:16px}
+body.theme-ark .ark-remote .mode-button:hover{background:#fff;border-color:var(--ark-ink)}
+body.theme-ark .ark-remote .mode-button:active{
+    background:var(--ark-ink);border-color:var(--ark-ink);color:#fff;
+    transform:translateY(2px);box-shadow:none;
+}
+body.theme-ark .ark-remote .mode-button:active .ic{stroke:#fff}
+/* 键位映射：上 / 返回·确认·休眠 / 下 */
+body.theme-ark .ark-remote > .modes:nth-child(1) > .mode-button:nth-child(1){grid-area:1/2}
+body.theme-ark .ark-remote > .modes:nth-child(1) > .mode-button:nth-child(2){grid-area:3/2}
+body.theme-ark .ark-remote > .modes:nth-child(1) > .mode-button:nth-child(3){grid-area:2/2}
+body.theme-ark .ark-remote > .modes:nth-child(2) > .mode-button:nth-child(1){grid-area:2/1}
+body.theme-ark .ark-remote > .modes:nth-child(2) > .mode-button:nth-child(2){grid-area:2/3}
+/* 中心「确认」= 主键：墨底 + 黄图标（同底栏激活项的语言） */
+body.theme-ark .ark-remote > .modes:nth-child(1) > .mode-button:nth-child(3){
+    background:var(--ark-ink);border-color:var(--ark-ink);color:#fff;
+}
+body.theme-ark .ark-remote > .modes:nth-child(1) > .mode-button:nth-child(3) .ic{stroke:var(--ark-yellow)}
+body.theme-ark .ark-remote > .modes:nth-child(1) > .mode-button:nth-child(3):active{
+    background:#000;transform:translateY(2px);box-shadow:none;
+}
+
+/* ============================================================
+   10. 设备控制 / 工具条目
+   ============================================================ */
+body.theme-ark .action-item{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);
+}
+body.theme-ark .action-header{font-family:var(--ark-display);font-weight:600;color:var(--ark-ink)}
+body.theme-ark .action-item .divider{background:var(--ark-line)}
+body.theme-ark .file-size-text{font-family:var(--ark-mono);color:var(--ark-ink-3)}
+body.theme-ark .debug-log{
+    background:#fff;border:1px solid var(--ark-line);border-radius:var(--ark-r-sm);
+    color:var(--ark-ink-2);font-family:var(--ark-mono);font-size:11px;
+}
+body.theme-ark .keyboard-key-summary{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-sm);
+    font-family:var(--ark-mono);color:var(--ark-ink-2);
+}
+body.theme-ark .keyboard-key-summary .kb-chip,
+body.theme-ark .kb-chip{background:var(--ark-ink);color:#fff;border-radius:var(--ark-r-sm);border:0}
+body.theme-ark .zoom-hint-row{color:var(--ark-ink-3)}
+
+/* ============================================================
+   11. 底部导航（手机）：激活 = 墨色图标 + 黄菱形
+   ============================================================ */
+body.theme-ark .bottom-nav{
+    background:var(--ark-bg);
+    border:0;border-top:1px solid var(--ark-line);
+    border-radius:0;box-shadow:none;
+}
+body.theme-ark .nav-item{
+    color:var(--ark-line-2);
+    border:0;box-shadow:none;border-radius:0;
+    font-family:var(--ark-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;
+}
+body.theme-ark .nav-item:hover{background:transparent;border:0;transform:none;box-shadow:none;color:var(--ark-ink-2)}
+body.theme-ark .nav-item.active{
+    background:transparent;border:0;box-shadow:none;transform:none;color:var(--ark-ink);
+}
+body.theme-ark .nav-item.active::after{
+    content:'';position:absolute;bottom:6px;width:5px;height:5px;
+    background:var(--ark-yellow);border:1px solid var(--ark-ink);transform:rotate(45deg);
+}
+body.theme-ark .nav-item.active span{color:var(--ark-ink)}
+
+/* ============================================================
+   12. 键值弹窗（键值设置）
+   ============================================================ */
+body.theme-ark .kb-modal-mask{background:rgba(25,25,25,.5)}
+body.theme-ark .kb-modal-panel{
+    background:#fff;border:1px solid var(--ark-line);border-radius:var(--ark-r-md);box-shadow:0 18px 50px rgba(0,0,0,.18);
+}
+body.theme-ark .kb-modal-header{border-bottom:1px solid var(--ark-line);font-family:var(--ark-display);font-weight:600}
+body.theme-ark .kb-event-tab{
+    background:#fff;border:1px solid var(--ark-line-2);color:var(--ark-ink-2);
+    border-radius:var(--ark-r-pill);font-family:var(--ark-mono);font-size:11px;
+}
+body.theme-ark .kb-event-tab.active{background:var(--ark-ink);border-color:var(--ark-ink);color:#fff}
+body.theme-ark .kb-current-label{font-family:var(--ark-mono);color:var(--ark-ink-3)}
+body.theme-ark .kb-chip{background:var(--ark-ink);color:#fff}
+body.theme-ark .kb-chip-empty{color:var(--ark-ink-3);font-family:var(--ark-mono)}
+body.theme-ark .kb-key{
+    background:#fff;border:1px solid var(--ark-line-2);border-radius:var(--ark-r-sm);
+    color:var(--ark-ink);font-family:var(--ark-mono);box-shadow:none;
+}
+body.theme-ark .kb-key:hover{border-color:var(--ark-ink);transform:none}
+body.theme-ark .kb-key.active{background:var(--ark-ink);border-color:var(--ark-ink);color:#fff}
+body.theme-ark .kb-tip{color:var(--ark-ink-3)}
+
+/* ============================================================
+   12b. 官网造型零件：▲子弹 / KV药丸 / 标尺进度 / HUD环 / 编号
+   ============================================================ */
+
+/* --- ▲ 黄三角子弹：行前导（设备 / 文件 / 批量） --- */
+body.theme-ark .device-item,
+body.theme-ark .file-item,
+body.theme-ark .batch-row{justify-content:flex-start;gap:10px}
+body.theme-ark .device-item::before,
+body.theme-ark .file-item::before,
+body.theme-ark .batch-row::before{
+    content:'';flex:0 0 auto;width:11px;height:10px;
+    background:var(--ark-tri) center/contain no-repeat;
+}
+body.theme-ark .device-info{flex:1;min-width:0}
+body.theme-ark .file-name{flex:1;min-width:0}
+body.theme-ark .file-item input[type="checkbox"]{accent-color:var(--ark-ink)}
+body.theme-ark .file-id{
+    background:var(--ark-ink);color:#fff;border:0;border-radius:0;
+    font-family:var(--ark-mono);font-size:10px;letter-spacing:.1em;padding:4px 7px;min-width:24px;
+}
+
+/* --- 设备信息 = 键值药丸行：■黑标签 + ○白药丸值（值前带 ▲） --- */
+/* 注：display 被 JS 写成内联 flex，这里必须 !important 才能改成两列网格 */
+body.theme-ark .device-type-info{
+    display:grid !important;
+    grid-template-columns:auto minmax(0,1fr);
+    gap:7px 9px;
+    align-items:center;
+    justify-content:flex-start;
+    margin:12px 0;
+    padding:0;
+    background:transparent;
+    border:0;
+    box-shadow:none;
+}
+body.theme-ark .ark-k{
+    display:block;
+    background:var(--ark-ink);color:#fff;
+    font:500 10px/1 var(--ark-mono);letter-spacing:.14em;
+    padding:7px 9px;white-space:nowrap;
+}
+body.theme-ark .device-type-badge,
+body.theme-ark .device-resolution{
+    display:inline-flex;align-items:center;
+    background:#fff;border:1px solid var(--ark-line-2);border-radius:var(--ark-r-pill);
+    color:var(--ark-ink);padding:6px 12px;
+    font-family:var(--ark-mono);font-size:11.5px;letter-spacing:.04em;
+    min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+body.theme-ark .device-type-badge::before,
+body.theme-ark .device-resolution::before{
+    content:'';width:11px;height:10px;margin-right:8px;flex:none;
+    background:var(--ark-tri) center/contain no-repeat;
+}
+
+/* --- 传输：黑 chip + 大百分比 + 刻度标尺 --- */
+body.theme-ark .transfer-container{
+    display:flex;flex-wrap:wrap;align-items:center;gap:10px;
+    padding:12px 13px;
+}
+body.theme-ark .transfer-status{
+    order:1;flex:0 0 auto;
+    background:var(--ark-ink);color:#fff;
+    font:500 9.5px/1 var(--ark-mono);letter-spacing:.12em;padding:5px 8px;
+}
+body.theme-ark .transfer-progress{
+    order:3;margin-left:auto;
+    font:700 15px/1 var(--ark-display);color:var(--ark-ink);
+}
+body.theme-ark .progress-bar{
+    order:4;flex:0 0 100%;height:12px;
+    background:transparent;border-radius:0;position:relative;margin:2px 0 0;overflow:visible;
+}
+body.theme-ark .progress-bar::before{
+    content:'';position:absolute;left:0;right:0;top:5px;height:2px;background:var(--ark-line-2);
+}
+body.theme-ark .progress-bar::after{
+    content:'';position:absolute;left:0;right:0;top:0;height:11px;
+    background-image:repeating-linear-gradient(90deg,var(--ark-line-2) 0 1px,transparent 1px 9px);
+    opacity:.75;
+}
+body.theme-ark .progress-fill{
+    position:absolute;left:0;top:5px;height:2px;width:0;background:var(--ark-ink);
+    border-radius:0;z-index:2;transition:width .2s linear;
+}
+
+/* --- 模块卡编号（JS 注入） --- */
+body.theme-ark .mcard{padding:15px 14px 16px}
+body.theme-ark .mcard .ark-no{
+    display:block;
+    position:absolute;right:12px;top:11px;
+    font:500 9.5px/1 var(--ark-mono);letter-spacing:.12em;color:var(--ark-ink-3);
+}
+
+/* --- 桌面页眉巨型压缩字（官网 // ENDFIELD 那条；手机不显示） --- */
+body.theme-ark .ark-giant{
+    display:none;
+    flex:0 0 100%;
+    font:700 78px/.86 var(--ark-display);letter-spacing:-.02em;
+    color:#F1F1F1;white-space:nowrap;overflow:hidden;
+    margin:2px 0 6px;user-select:none;
+}
+body.theme-ark .ark-giant b{color:var(--ark-ink);font-weight:700}
+@media (min-width: 900px){ body.theme-ark .ark-giant{display:block} }
+
+/* --- 自动唤醒时长：chip 刻度尺（取代两端小字） --- */
+body.theme-ark .wake-slider-wrapper{display:block}
+body.theme-ark .wake-min,
+body.theme-ark .wake-max{display:none}
+body.theme-ark .wake-slider-wrapper .slider-container{padding:0}
+body.theme-ark .ark-tl{display:block;position:relative;height:26px;margin:2px 0 4px}
+body.theme-ark .ark-tl__mk{
+    display:inline-block;position:absolute;top:0;
+    background:#fff;color:var(--ark-ink-2);border:1px solid var(--ark-line-2);
+    font:500 9.5px/1 var(--ark-mono);letter-spacing:.1em;padding:5px 8px;
+}
+body.theme-ark .ark-tl__mk.a{left:0}
+body.theme-ark .ark-tl__mk.b{left:50%;transform:translateX(-50%)}
+body.theme-ark .ark-tl__mk.c{right:0}
+body.theme-ark .ark-tl__mk.on{
+    background:var(--ark-yellow);border-color:var(--ark-ink);color:var(--ark-ink);font-weight:700;
+}
+
+/* --- 传输块的文件名 chip --- */
+body.theme-ark .ark-filechip{
+    display:inline-flex;order:2;flex:0 0 auto;max-width:180px;
+    background:#fff;color:var(--ark-ink);border:1px solid var(--ark-line-2);
+    font:500 9.5px/1 var(--ark-mono);letter-spacing:.1em;padding:5px 8px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+/* --- 取景框底部等宽读数 --- */
+body.theme-ark .ark-readout{
+    display:flex;justify-content:space-between;gap:10px;
+    max-width:420px;margin:10px auto 0;padding:0 2px;
+    font:500 9.5px/1 var(--ark-mono);letter-spacing:.12em;color:var(--ark-ink-3);
+}
+body.theme-ark .ark-readout b{color:var(--ark-ink);font-weight:500}
+
+/* --- 间距节奏收一收，别松垮 --- */
+body.theme-ark .card{margin-bottom:12px}
+body.theme-ark .card__title{margin-bottom:13px}
+body.theme-ark .status{padding:12px 13px;margin-bottom:10px}
+body.theme-ark .device-list{margin-bottom:10px}
+body.theme-ark .divider{margin:12px 0}
+body.theme-ark .frame-action-btn,
+body.theme-ark .frame-send-btn{margin-top:0}
+
+/* --- 尺寸对齐设计稿 --- */
+body.theme-ark .mcard .ic-wrap{width:30px;height:30px}
+body.theme-ark .mcard__name{font-size:15.5px}
+body.theme-ark .page .primary-button{min-height:42px}
+body.theme-ark .device-item{padding:11px 12px}
+body.theme-ark .file-item{padding:11px 12px}
+body.theme-ark .mode-button{padding:9px 14px}
+body.theme-ark .detail-bar{padding:0 0 11px}
+body.theme-ark .ark-herobar{margin-bottom:13px}
+
+/* ============================================================
+   13. 加载屏（连接 ARK 的过渡；规格对映官网 __00-Loading_*）
+   ============================================================ */
+.ark-loader{
+    position:fixed;inset:0;z-index:9999;
+    background:#141414;color:#fff;overflow:hidden;
+    font-family:var(--ark-body,'Barlow','Noto Sans SC',sans-serif);
+}
+.ark-loader[hidden]{display:none !important}
+.ark-loader__bg{position:absolute;inset:0;
+    background:radial-gradient(120% 80% at 50% 30%,rgba(255,255,255,.035),transparent 60%)}
+.ark-loader__bar{position:absolute;left:0;top:0;width:20px;height:100%;background:rgba(255,255,255,.055)}
+.ark-loader__bar i{display:block;width:100%;height:0;background:#FFFA00;transition:height .26s linear}
+.ark-loader__pct{position:absolute;left:76px;bottom:30px;color:#FFFA00;line-height:1;z-index:2}
+.ark-loader__pct .mk{display:block;width:4px;height:8px;
+    border-left:8px solid #666;border-right:8px solid #666;margin-bottom:10px}
+.ark-loader__pct .tick{display:block;width:8px;height:30px;border-radius:4px;background:#FFFA00;margin-bottom:8px}
+.ark-loader__pct .num{display:block;font-family:var(--ark-display,'Chakra Petch',sans-serif);font-weight:700;
+    font-size:70px;line-height:.86;letter-spacing:-.02em}
+.ark-loader__pct .num i{font-style:normal;font-size:52px}
+.ark-loader__pct .cap{display:block;margin-top:12px;font-family:var(--ark-mono,'JetBrains Mono',monospace);
+    font-size:9px;letter-spacing:.24em;color:#8A8F94}
+.ark-loader__center{position:absolute;left:0;right:0;top:40%;transform:translateY(-50%);
+    display:flex;flex-direction:column;align-items:center;z-index:2}
+.ark-loader__center .lg{width:124px;height:135px;color:#fff}
+.ark-loader__center .nm{margin-top:26px;font-family:var(--ark-display,'Chakra Petch',sans-serif);font-weight:700;
+    font-size:19px;letter-spacing:.3em;color:#fff;padding-left:.3em}
+.ark-loader__center .sub{margin-top:10px;font-family:var(--ark-mono,'JetBrains Mono',monospace);
+    font-size:9.5px;letter-spacing:.34em;color:#FFFA00;padding-left:.34em}
+.ark-loader__center .dv{width:252px;height:2px;margin:26px 0 18px;
+    background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.16) 50%,rgba(255,255,255,0))}
+.ark-loader__slogrow{display:flex;align-items:center;gap:14px}
+.ark-loader__slogrow .tris{width:17px;height:15px;color:#FCFC1F;flex:none}
+.ark-loader__slogrow span{font-family:var(--ark-display,'Chakra Petch',sans-serif);
+    font-size:11px;letter-spacing:.12em;color:#C7CBC8}
+.ark-loader.is-leaving{transition:opacity 1s 1.4s;opacity:0}
+.ark-loader.is-leaving::after{
+    content:'';position:absolute;inset:0;background:#FFFA00;
+    transform-origin:left;transform:scaleX(0);z-index:5;
+    animation:arkWipe .6s cubic-bezier(1,0,.7,1) .5s forwards;
+}
+@keyframes arkWipe{0%{transform:scaleX(0)}to{transform:scaleX(1)}}
+
+/* ============================================================
+   14. 桌面端（≥900px）：只覆盖视觉，布局沿用 style.css 的栅格
+   ============================================================ */
+@media (min-width: 900px){
+    body.theme-ark .app-head{padding:0 0 14px;align-items:center}
+    body.theme-ark .ark-title .ttl{font-size:32px}
+    body.theme-ark .ark-title .dia{width:22px;height:22px}
+    body.theme-ark .app-head::after{left:0;right:0;bottom:0}
+
+    /* 桌面页头压回一行：◆[标题] + 段码 …… 品牌 + 电量；巨型字独占下一行 */
+    body.theme-ark .ark-title{order:1;flex:0 0 auto}
+    body.theme-ark .ark-herobar{order:2;flex:0 1 auto;margin:0 0 0 14px}
+    body.theme-ark .ark-herobar .bar,
+    body.theme-ark .ark-herobar .rule,
+    body.theme-ark .ark-herobar .cmyk{display:none}
+    body.theme-ark .ark-brandrow{order:3;flex:0 0 auto;margin:0 0 0 auto}
+    body.theme-ark .ark-brandrow .ark-sp{display:none}
+    body.theme-ark .ark-brandrow .ark-brand .nm{font-size:13px}
+    /* [ REC ] 只属手机页头；设计稿桌面页头没有它 */
+    body.theme-ark .ark-rec{display:none}
+    body.theme-ark .ark-giant{order:5}
+
+    /* 左导航：行式；激活 = 黑底 + 黄图标（同官网左栏） */
+    body.theme-ark .bottom-nav{
+        background:transparent;
+        border:0;border-radius:0;box-shadow:none;
+        gap:10px;padding:0;
+    }
+    body.theme-ark .nav-item{
+        flex-direction:row;justify-content:flex-start;gap:11px;
+        padding:10px 12px;border-radius:var(--ark-r-md);
+        font-family:var(--ark-display);font-weight:600;font-size:13.5px;letter-spacing:.06em;
+        color:var(--ark-ink-3);text-transform:none;
+    }
+    body.theme-ark .nav-item .ic{width:19px;height:19px}
+    body.theme-ark .nav-item:hover{background:var(--ark-bg-2);color:var(--ark-ink-2);border:0;box-shadow:none;transform:none}
+    body.theme-ark .nav-item.active{
+        background:var(--ark-ink);color:#fff;border:0;box-shadow:none;transform:none;
+    }
+    body.theme-ark .nav-item.active .ic{stroke:var(--ark-yellow)}
+    body.theme-ark .nav-item.active::after{display:none}
+
+    body.theme-ark .card{padding:16px 20px 18px}
+    body.theme-ark .card__title{font-size:15.5px}
+    body.theme-ark .ark-band{column-span:all}
+    body.theme-ark .frame-cards{gap:20px}
+    body.theme-ark .mcard{padding:16px 15px 17px}
+    body.theme-ark .mcard__name{font-size:17px}
+}

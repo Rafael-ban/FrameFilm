@@ -111,6 +111,10 @@ function onDeviceTypeChanged() {
     if (typeof syncRemoteAvailability === 'function') {
         syncRemoteAvailability();
     }
+    // ARK 通行证版皮肤：连上 FRAMEFILMARK 才切换，其余机型保持原皮肤
+    if (typeof arkThemeSync === 'function') {
+        arkThemeSync();
+    }
 }
 
 // 屏幕面板 ID → 机型 + 像素排布（与固件 EPD_PANEL_ID 对应）

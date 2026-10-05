@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ForFilm ARK · 界面设计稿 03（终末地视觉语言）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   ForFilm · ARK 通行证版 —— 设计稿 03
+   视觉母题：《明日方舟：终末地》官网
+   本版重点：不再"给老版换皮"。学官网真正的造型语言 ——
+     · 黄是「块」不是「线」：黄横幅 / 黄方块按钮 / 黄竖标 / 黄三角子弹
+     · 数据用「黑 chip」：黑底白字小标签（日期、编号、数值）
+     · 形状要杂：圆（圆头像/圆按钮）、药丸（标签）、方（技术块）、带（横幅）
+     · 技术装饰：▌段头 · 标尺刻度 · HUD 圆环 · CMYK 色标 · 网点/斜纹底纹
+   默认：ForFilm 打开仍是现有界面；连上 FRAMEFILMARK 才过渡到本皮肤。
+   ============================================================ */
+
+/* ---------- 令牌 ---------- */
+.ark{
+  --bg:#FFFFFF;
+  --bg-2:#F7F7F7;
+  --bg-3:#EFEFEF;
+  --ink:#191919;
+  --ink-2:#6B6B6B;
+  --ink-3:#9E9E9E;
+  --line:#E8E8E8;
+  --line-2:#D9D9D9;
+  --yellow:#FFFA00;
+  --red:#D93A2B;
+  --r-sm:3px;
+  --r-md:6px;
+  --r-pill:999px;
+  --font-display:'Chakra Petch','Noto Sans SC','PingFang SC',sans-serif;
+  --font-body:'Barlow','Noto Sans SC','PingFang SC',sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+
+/* ============================================================
+   0. 设计稿外壳
+   ============================================================ */
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{background:#EFEFEF;color:#3A3A3A;font:14px/1.65 'Barlow','Noto Sans SC',sans-serif;padding:52px 26px 110px}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:radial-gradient(#DCDCDC 1px,transparent 1.2px);background-size:22px 22px}
+.wrap{position:relative;z-index:1;max-width:1440px;margin:0 auto}
+
+.masthead{border-bottom:2px solid #191919;padding-bottom:24px;margin-bottom:46px}
+.masthead .kicker{font:11px/1 'JetBrains Mono',monospace;letter-spacing:.24em;color:#8A8A8A;text-transform:uppercase}
+.masthead .kicker b{color:#191919;font-weight:500}
+.masthead h1{font-family:'Chakra Petch','Noto Sans SC',sans-serif;font-size:36px;font-weight:700;letter-spacing:-.01em;color:#111;margin:16px 0 12px}
+.masthead p{max-width:84ch;color:#5A5A5A;font-size:14.5px}
+.masthead p strong{color:#191919;font-weight:600}
+.masthead .meta{margin-top:18px;font:11px/1.95 'JetBrains Mono',monospace;color:#8A8A8A;letter-spacing:.06em}
+.masthead .meta b{color:#191919;font-weight:500}
+
+section{margin-bottom:60px}
+h2.sec{font:700 12px/1 'JetBrains Mono',monospace;letter-spacing:.22em;text-transform:uppercase;color:#111;
+   display:flex;align-items:center;gap:12px;margin-bottom:24px}
+h2.sec::before{content:'';width:4px;height:14px;background:#191919;flex:none}
+h2.sec::after{content:'';height:1px;background:#D9D9D9;flex:1}
+h3.lead{font:600 15px/1.5 'Chakra Petch','Noto Sans SC',sans-serif;color:#111;letter-spacing:.04em;margin:26px 0 12px}
+section>p{max-width:84ch;color:#5A5A5A;margin-bottom:8px}
+
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+th,td{text-align:left;padding:10px 13px;border-bottom:1px solid #DDD;vertical-align:top}
+th{font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.14em;color:#8A8A8A;text-transform:uppercase}
+td:first-child{color:#111;white-space:nowrap;font-weight:500}
+td code{font:11.5px/1.5 'JetBrains Mono',monospace;color:#333;background:#FFF;border:1px solid #DDD;padding:1px 6px}
+.note{font-size:12.5px;color:#6A6A6A;margin-top:14px;padding-left:14px;border-left:3px solid #191919}
+.note b{color:#191919;font-weight:600}
+.note.y{border-left-color:#FFFA00}
+
+.tokgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:0;border-top:1px solid #D9D9D9;border-left:1px solid #D9D9D9}
+.tok{background:#FFF;padding:14px;border-right:1px solid #D9D9D9;border-bottom:1px solid #D9D9D9}
+.tok .chip{height:52px;border:1px solid #DDD;margin-bottom:10px}
+.tok h4{font:500 11px/1.4 'JetBrains Mono',monospace;letter-spacing:.1em;color:#191919;text-transform:uppercase}
+.tok p{font-size:11.5px;color:#8A8A8A;margin-top:4px;font-family:'JetBrains Mono',monospace}
+
+.elgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(246px,1fr));gap:0;border-top:1px solid #D9D9D9;border-left:1px solid #D9D9D9}
+.el{background:#FFF;padding:18px;border-right:1px solid #D9D9D9;border-bottom:1px solid #D9D9D9}
+.el .box{min-height:104px;background:#F7F7F7;display:flex;flex-direction:column;align-items:stretch;justify-content:center;
+         gap:10px;padding:16px;margin-bottom:13px}
+.el h4{font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.12em;color:#191919;text-transform:uppercase;margin-bottom:7px}
+.el p{font-size:12px;color:#6A6A6A;line-height:1.55}
+.el p b{color:#191919}
+
+/* ============================================================
+   1. 主题组件（白底墨字 + 终末地造型语言）
+   ============================================================ */
+.ark{font-family:var(--font-body)}
+.ark *{box-sizing:border-box}
+
+/* --- 图标基础（必须：否则内联 SVG 会按 300×150 默认尺寸炸开） --- */
+.ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ic-f{width:16px;height:16px;flex:none;fill:currentColor;stroke:none}
+.btn-block .sq .ic,.cbtn .ic{width:17px;height:17px}
+.band .triy,.kv__r .triy,.li .triy{width:11px;height:10px}
+
+/* --- 屏体 --- */
+.screen{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;display:flex;flex-direction:column;
+        background:var(--bg);color:var(--ink)}
+.screen>*{position:relative;z-index:1}
+
+/* --- 顶栏 --- */
+.p-head{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:15px 16px 13px;background:var(--bg)}
+.brand{display:flex;align-items:center;gap:9px;min-width:0}
+.brand .mk{width:18px;height:20px;color:var(--ink);flex:none}
+.brand .nm{font:700 14.5px/1 var(--font-display);letter-spacing:.16em;color:var(--ink)}
+.brand .tag{font:700 9px/1 var(--font-mono);letter-spacing:.14em;color:var(--ink);background:var(--yellow);padding:4px 6px}
+.p-head .sp{flex:1}
+.batt{display:flex;align-items:center;gap:7px;font:600 12.5px/1 var(--font-mono);color:var(--ink)}
+.batt .b-svg{width:24px;height:12px;color:var(--ink)}
+.b-svg rect{fill:none;stroke:currentColor;stroke-width:1.3}
+.b-svg .cap{fill:currentColor;stroke:none}
+.b-svg .fill{fill:var(--ink);stroke:none}
+/* 顶栏下的细标尺：官网到处可见的"测量线" */
+.p-headline{flex:0 0 auto;height:9px;margin:0 16px 2px;position:relative}
+.p-headline::before{content:'';position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--line-2)}
+.p-headline::after{content:'';position:absolute;left:0;right:0;bottom:0;height:5px;
+  background-image:repeating-linear-gradient(90deg,var(--line-2) 0 1px,transparent 1px 11px)}
+
+.p-body{flex:1 1 auto;min-height:0;overflow:hidden;padding:16px}
+
+/* --- ▌段头（官网 section header 同款） --- */
+.sechead{display:flex;align-items:center;gap:9px;margin-bottom:12px}
+.sechead .bar{width:4px;height:13px;background:var(--ink);flex:none}
+.sechead .lbl{font:600 10px/1 var(--font-mono);letter-spacing:.22em;color:var(--ink)}
+.sechead .rule{flex:1;height:1px;background:var(--line)}
+.sechead .num{font:500 10px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.1em}
+/* CMYK 色标（本皮肤降为「灰阶 + 黄」四格） */
+.cmyk{display:flex;gap:2px;flex:none}
+.cmyk i{width:4px;height:11px;background:#191919}
+.cmyk i:nth-child(2){background:#7A7A7A}
+.cmyk i:nth-child(3){background:#D9D9D9}
+.cmyk i:nth-child(4){background:#FFFA00}
+
+/* --- 页头 hero：面标 + [ 方括号标题 ] + REC + 标尺 --- */
+.p-hero{margin-bottom:16px}
+.hero{display:flex;align-items:center;gap:9px;margin-bottom:11px}
+.hero .dia{width:19px;height:19px;color:var(--ink);flex:none}
+.hero h2{margin:0;font:700 26px/1 var(--font-display);letter-spacing:.01em;color:var(--ink)}
+.hero h2::before{content:'[ ';color:var(--ink-3);font-weight:400}
+.hero h2::after{content:' ]';color:var(--ink-3);font-weight:400}
+.hero h2 em{font-style:normal;color:var(--ink-3);font-weight:400}
+.hero .rec{margin-left:auto;display:flex;align-items:center;gap:6px;
+  font:600 9.5px/1 var(--font-mono);letter-spacing:.18em;color:var(--ink-2)}
+.hero .rec b{width:6px;height:6px;border-radius:50%;background:var(--red);flex:none;
+  box-shadow:0 0 0 3px rgba(217,58,43,.14)}
+.ruler{position:relative;height:13px}
+.ruler::before{content:'';position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--line-2)}
+.ruler::after{content:'';position:absolute;left:0;right:0;bottom:0;height:6px;
+  background-image:repeating-linear-gradient(90deg,var(--line-2) 0 1px,transparent 1px 12px)}
+
+/* --- 黄横幅（官网 LORE / GAMEPLAY 那条） --- */
+.band{display:flex;align-items:center;gap:9px;background:var(--yellow);color:var(--ink);padding:9px 12px;margin-bottom:14px}
+.band .triy{width:11px;height:10px;flex:none}
+.band span{font:700 11.5px/1 var(--font-display);letter-spacing:.24em}
+.band .r{margin-left:auto;font:500 9.5px/1 var(--font-mono);letter-spacing:.2em;opacity:.66}
+
+/* --- 黑 chip / 药丸 --- */
+.chip-k{display:inline-flex;align-items:center;gap:5px;background:var(--ink);color:#fff;
+  font:500 9.5px/1 var(--font-mono);letter-spacing:.12em;padding:5px 8px}
+.chip-o{display:inline-flex;align-items:center;gap:5px;background:#fff;color:var(--ink);
+  font:500 9.5px/1 var(--font-mono);letter-spacing:.1em;padding:5px 8px;border:1px solid var(--line-2)}
+.chip-y{display:inline-flex;align-items:center;gap:5px;background:var(--yellow);color:var(--ink);
+  font:700 9.5px/1 var(--font-mono);letter-spacing:.12em;padding:5px 8px}
+.chip-pill{border-radius:var(--r-pill)}
+
+/* --- 黄三角子弹（官网列表/标签前的 ▲） --- */
+.triy{width:11px;height:10px;flex:none;color:var(--ink)}
+
+/* --- 面板：白底细线 / 灰底无框，两种交替避免全是大边框 --- */
+.panel{background:#fff;border:1px solid var(--line);border-radius:var(--r-md);padding:14px}
+.panel--fill{background:var(--bg-2);border:0}
+.panel+.panel,.panel+.sechead,.sechead+.panel{margin-top:0}
+
+/* --- KV 药丸行：▲ + 黑标签 + 白值（官网「阵营/种族」同款） --- */
+.kv{display:flex;flex-direction:column;gap:7px}
+.kv__r{display:flex;align-items:center;gap:7px}
+.kv__r .k{background:var(--ink);color:#fff;font:500 10px/1 var(--font-mono);letter-spacing:.14em;padding:5px 9px;flex:none}
+.kv__r .v{flex:1;min-width:0;background:#fff;border:1px solid var(--line-2);border-radius:var(--r-pill);
+  font:500 11.5px/1 var(--font-body);color:var(--ink);padding:6px 11px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kv__r .v--on{background:var(--yellow);border-color:var(--yellow);font-weight:600}
+
+/* --- 设备行：圆环信号 + 名称 + 黑 chip --- */
+.devs{display:flex;flex-direction:column;gap:8px}
+.dev{display:flex;align-items:center;gap:11px;padding:11px 12px;background:var(--bg-2);border-radius:var(--r-md);cursor:pointer}
+.dev:hover{background:var(--bg-3)}
+.dev.on{background:#fff;box-shadow:inset 0 0 0 1px var(--ink)}
+.dev__sig{width:22px;height:22px;border-radius:50%;border:1px solid var(--line-2);display:grid;place-items:center;flex:none}
+.dev__sig i{width:7px;height:7px;border-radius:50%;background:var(--line-2);display:block}
+.dev.on .dev__sig{border-color:var(--ink)}
+.dev.on .dev__sig i{background:var(--ink)}
+.dev__nm{flex:1;min-width:0;font:600 13.5px/1.3 var(--font-display);color:var(--ink)}
+.dev__nm small{display:block;font:400 10px/1.4 var(--font-mono);color:var(--ink-3);letter-spacing:.04em}
+
+/* --- 按钮：黄方块 + label（官网「更多视频 / 前往游戏」同款） --- */
+.btn-block{display:flex;align-items:center;gap:0;width:100%;border:0;background:transparent;padding:0;cursor:pointer;margin:0}
+.btn-block .sq{width:40px;height:40px;background:var(--yellow);display:grid;place-items:center;flex:none;color:var(--ink)}
+.btn-block .tx{flex:1;height:40px;display:flex;align-items:center;padding:0 14px;background:#fff;
+  border:1px solid var(--line-2);border-left:0;font:600 13.5px/1 var(--font-display);letter-spacing:.06em;color:var(--ink)}
+.btn-block:hover .tx{background:var(--bg-2)}
+.cbtn{width:40px;height:40px;flex:none;border-radius:50%;background:#fff;border:1px solid var(--line-2);
+  display:grid;place-items:center;color:var(--ink);cursor:pointer}
+.cbtn:hover{border-color:var(--ink)}
+.cbtn--k{background:var(--ink);border-color:var(--ink);color:#fff}
+.ark .primary-button,.ark .secondary-button{
+  font:600 13.5px/1 var(--font-display);letter-spacing:.06em;display:flex;align-items:center;justify-content:center;
+  gap:8px;width:100%;padding:13px 16px;margin:8px 0;cursor:pointer;border:1px solid transparent;border-radius:var(--r-sm);
+}
+.ark .primary-button{background:var(--ink);color:#fff}
+.ark .primary-button:hover{background:#000}
+.ark .primary-button .mk{width:9px;height:8px;color:var(--yellow);flex:none}
+.ark .secondary-button{background:#fff;color:var(--ink);border-color:var(--line-2)}
+.ark .secondary-button:hover{border-color:var(--ink)}
+.btn-row{display:flex;gap:9px}
+.btn-row>*{flex:1;margin:0;min-width:0}
+.acts{display:flex;gap:9px;align-items:center}
+.acts>.btn-block{flex:1;min-width:0;width:auto}
+
+/* --- 模块入口：灰底软块 + 黑方块图标（不再是"全是框"） --- */
+.mods{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mod{position:relative;background:var(--bg-2);border-radius:var(--r-md);padding:14px;cursor:pointer;
+     min-height:112px;display:flex;flex-direction:column;overflow:hidden;transition:background .14s}
+.mod:hover{background:var(--bg-3)}
+.mod .sq{width:30px;height:30px;background:var(--ink);color:#fff;display:grid;place-items:center;margin-bottom:auto}
+.mod .sq .ic{width:16px;height:16px}
+.mod .nm{margin-top:14px;font:600 15.5px/1.1 var(--font-display);letter-spacing:.03em;color:var(--ink)}
+.mod .sub{font:400 10.5px/1.4 var(--font-body);color:var(--ink-2);margin-top:4px}
+.mod .no{position:absolute;right:12px;top:12px;font:500 9.5px/1 var(--font-mono);letter-spacing:.12em;color:var(--ink-3)}
+/* 黄竖标（官网 GAMEPLAY 竖条） */
+.vstrip{position:absolute;right:0;top:0;bottom:0;width:20px;background:var(--yellow);display:grid;place-items:center}
+.vstrip span{writing-mode:vertical-rl;font:700 9px/1 var(--font-mono);letter-spacing:.18em;color:var(--ink)}
+
+/* --- 取景框：黄竖标 + HUD 环 + 四角 + 底部标尺 --- */
+.viewer{position:relative;background:var(--bg-2);border-radius:var(--r-md);padding:10px 10px 10px 10px;overflow:hidden}
+.viewer__hud{position:absolute;right:-46px;top:-46px;width:150px;height:150px;border-radius:50%;
+  border:1px dashed var(--line-2);pointer-events:none}
+.viewer__hud::after{content:'';position:absolute;inset:18px;border-radius:50%;border:1px solid var(--line-2)}
+.viewer__strip{position:absolute;right:0;top:0;bottom:0;width:22px;background:var(--yellow);display:grid;place-items:center;z-index:2}
+.viewer__strip span{writing-mode:vertical-rl;font:700 9.5px/1 var(--font-mono);letter-spacing:.2em;color:var(--ink)}
+.viewer__inner{position:relative;margin-right:26px}
+.film{height:150px;position:relative;overflow:hidden;border-radius:var(--r-sm);
+      background:linear-gradient(128deg,#CBD5DD 0%,#BCB0CD 32%,#D9C0C7 55%,#E5D3B6 76%,#C8CED4 100%)}
+.film::after{content:'';position:absolute;inset:0;opacity:.14;mix-blend-mode:multiply;
+      background-image:radial-gradient(#000 1px,transparent 1.1px);background-size:3px 3px}
+.viewer .corner{position:absolute;width:13px;height:13px}
+.viewer .corner.tl{left:-1px;top:-1px;border-left:1.5px solid var(--ink);border-top:1.5px solid var(--ink)}
+.viewer .corner.tr{right:-1px;top:-1px;border-right:1.5px solid var(--ink);border-top:1.5px solid var(--ink)}
+.viewer .corner.bl{left:-1px;bottom:-1px;border-left:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink)}
+.viewer .corner.br{right:-1px;bottom:-1px;border-right:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink)}
+.viewer__foot{display:flex;justify-content:space-between;align-items:center;margin:10px 26px 0 0}
+.viewer__foot .m{font:500 9.5px/1 var(--font-mono);letter-spacing:.12em;color:var(--ink-3)}
+.viewer__foot .m b{color:var(--ink);font-weight:500}
+
+/* --- 标尺进度（取代连续进度条） --- */
+.xfer{margin-top:2px}
+.xfer__head{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.xfer__pct{margin-left:auto;font:700 15px/1 var(--font-display);color:var(--ink)}
+.xfer__bar{position:relative;height:12px}
+.xfer__bar::before{content:'';position:absolute;left:0;right:0;top:5px;height:2px;background:var(--line-2)}
+.xfer__bar::after{content:'';position:absolute;left:0;right:0;top:0;height:12px;
+  background-image:repeating-linear-gradient(90deg,var(--line-2) 0 1px,transparent 1px 9px);opacity:.7}
+.xfer__bar i{position:absolute;left:0;top:5px;height:2px;background:var(--ink);z-index:2}
+.xfer__bar u{position:absolute;top:0;width:2px;height:12px;background:var(--yellow);z-index:3}
+.xfer__foot{display:flex;justify-content:space-between;margin-top:7px;font:500 9.5px/1 var(--font-mono);
+  letter-spacing:.1em;color:var(--ink-3)}
+
+/* --- 时间轴（官网版本日历的刻度 + 黑 chip） --- */
+.tl{position:relative;height:46px;margin:6px 0 2px}
+.tl__line{position:absolute;left:0;right:0;top:26px;height:1px;background:var(--line-2)}
+.tl__line::after{content:'';position:absolute;left:0;right:0;top:0;height:9px;
+  background-image:repeating-linear-gradient(90deg,var(--line-2) 0 1px,transparent 1px 8px)}
+.tl__mk{position:absolute;top:0;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:3px}
+.tl__mk .chip-k,.tl__mk .chip-o,.tl__mk .chip-y{white-space:nowrap}
+.tl__pt{width:7px;height:7px;border-radius:50%;background:#fff;border:1.5px solid var(--ink)}
+.tl__mk.on .tl__pt{background:var(--yellow);border-color:var(--ink)}
+
+/* --- 开关 / 表单 --- */
+.switch-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+.switch-row:last-child{border-bottom:0}
+.switch-row .k{flex:1;min-width:0}
+.switch-row .k b{display:block;font:600 13.5px/1.3 var(--font-display);color:var(--ink)}
+.switch-row .k small{font:400 10.5px/1.4 var(--font-body);color:var(--ink-3)}
+.toggle{width:40px;height:22px;flex:none;background:var(--line-2);border-radius:var(--r-pill);position:relative;transition:background .15s}
+.toggle i{position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.15s;
+  box-shadow:0 1px 2px rgba(0,0,0,.22)}
+.toggle.on{background:var(--ink)}
+.toggle.on i{left:20px;background:var(--yellow)}
+.field{margin-bottom:12px}
+.field label{display:block;font:500 10px/1 var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:7px}
+.input{width:100%;padding:11px 12px;background:var(--bg-2);border:0;border-radius:var(--r-sm);color:var(--ink);
+       font:500 13px/1 var(--font-mono);outline:none}
+.input:focus{background:#fff;box-shadow:inset 0 0 0 1px var(--ink)}
+.select{display:flex;align-items:center;justify-content:space-between;padding:11px 12px;background:var(--bg-2);
+        border-radius:var(--r-sm);font:500 12.5px/1 var(--font-body);color:var(--ink)}
+.select .cv{width:9px;height:9px;color:var(--ink-2)}
+.hint{font:400 10.5px/1.5 var(--font-body);color:var(--ink-3);margin-top:6px}
+.slider{display:flex;align-items:center;gap:10px;padding:7px 0}
+.slider label{flex:0 0 60px;font:500 10.5px/1 var(--font-mono);letter-spacing:.06em;color:var(--ink-2)}
+.track{flex:1;height:12px;position:relative}
+.track::before{content:'';position:absolute;left:0;right:0;top:5px;height:2px;background:var(--line-2)}
+.track::after{content:'';position:absolute;left:0;right:0;top:0;height:12px;
+  background-image:repeating-linear-gradient(90deg,var(--line-2) 0 1px,transparent 1px 14px);opacity:.8}
+.track u{position:absolute;left:0;top:5px;height:2px;background:var(--ink);z-index:2}
+.track b{position:absolute;top:50%;width:12px;height:12px;background:#fff;border:2px solid var(--ink);
+  border-radius:50%;transform:translate(-50%,-50%);z-index:3}
+.slider .val{flex:0 0 32px;text-align:right;font:500 10.5px/1 var(--font-mono);color:var(--ink-2)}
+
+.chipbar{display:flex;gap:7px;flex-wrap:wrap}
+.chipx{font:500 11px/1 var(--font-mono);letter-spacing:.08em;color:var(--ink-2);padding:8px 12px;
+       background:#fff;border:1px solid var(--line-2);border-radius:var(--r-pill);cursor:pointer}
+.chipx:hover{border-color:var(--ink);color:var(--ink)}
+.chipx.on{background:var(--ink);border-color:var(--ink);color:#fff}
+
+/* --- 文件列表行 --- */
+.list{display:flex;flex-direction:column;gap:6px}
+.li{display:flex;align-items:center;gap:10px;padding:11px 12px;background:var(--bg-2);border-radius:var(--r-md);cursor:pointer}
+.li:hover{background:var(--bg-3)}
+.li.on{background:#fff;box-shadow:inset 0 0 0 1px var(--ink)}
+.li .triy{width:10px;height:9px;color:var(--ink-3)}
+.li.on .triy{color:var(--ink)}
+.li .info{flex:1;min-width:0}
+.li .info b{display:block;font:600 13px/1.3 var(--font-display);color:var(--ink)}
+.li .info small{font:400 10px/1.4 var(--font-mono);color:var(--ink-3)}
+
+/* --- 底栏：黑方块激活（同官网左栏）+ 黄三角 --- */
+.p-nav{flex:0 0 auto;display:grid;grid-template-columns:repeat(4,1fr);background:var(--bg);border-top:1px solid var(--line)}
+.nav-item{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0 15px;color:var(--line-2)}
+.nav-item .ic{width:20px;height:20px}
+.nav-item span{font:500 9px/1 var(--font-mono);letter-spacing:.14em;text-transform:uppercase}
+.nav-item.active{color:var(--ink)}
+.nav-item.active .ic{color:var(--ink)}
+.nav-item.active::after{content:'';position:absolute;bottom:6px;width:5px;height:5px;background:var(--yellow);
+  border:1px solid var(--ink);transform:rotate(45deg)}
+
+/* --- 返回条 --- */
+.detail-bar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.detail-bar .back{display:flex;align-items:center;gap:6px;font:500 11px/1 var(--font-mono);letter-spacing:.1em;
+  color:var(--ink-2);cursor:pointer}
+.detail-bar .back .ic{width:14px;height:14px;transform:rotate(90deg)}
+.detail-bar .dn{margin-left:auto;font:500 10px/1 var(--font-mono);letter-spacing:.18em;color:var(--ink-3);text-transform:uppercase}
+
+/* ============================================================
+   2. 加载屏（官网深色首屏，规格逐条对映）
+   ============================================================ */
+.loader{position:absolute;inset:0;z-index:50;background:#141414;color:#fff;overflow:hidden;font-family:var(--font-body)}
+.loader__bg{position:absolute;inset:0;background:radial-gradient(120% 80% at 50% 30%,rgba(255,255,255,.035),transparent 60%)}
+.loader__bar{position:absolute;left:0;top:0;width:20px;height:100%;background:rgba(255,255,255,.055)}
+.loader__bar i{display:block;width:100%;height:0;background:#FFFA00;transition:height .28s linear}
+.loader__pct{position:absolute;left:76px;bottom:30px;color:#FFFA00;line-height:1;z-index:2}
+.loader__pct .mk{display:block;width:4px;height:8px;border-left:8px solid #666;border-right:8px solid #666;margin-bottom:10px}
+.loader__pct .tick{display:block;width:8px;height:30px;border-radius:4px;background:#FFFA00;margin-bottom:8px}
+.loader__pct .num{display:block;font-family:var(--font-display);font-weight:700;font-size:70px;line-height:.86;letter-spacing:-.02em}
+.loader__pct .num i{font-style:normal;font-size:52px}
+.loader__pct .cap{display:block;margin-top:12px;font-family:var(--font-mono);font-size:9px;letter-spacing:.24em;color:#8A8F94}
+.loader__center{position:absolute;left:0;right:0;top:40%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;z-index:2}
+.loader__center .lg{width:124px;height:135px;color:#fff}
+.loader__center .nm{margin-top:26px;font-family:var(--font-display);font-weight:700;font-size:19px;letter-spacing:.3em;color:#fff;padding-left:.3em}
+.loader__center .sub{margin-top:10px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.34em;color:#FFFA00;padding-left:.34em}
+.loader__center .dv{width:252px;height:2px;margin:26px 0 18px;background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.16) 50%,rgba(255,255,255,0))}
+.loader__slogrow{display:flex;align-items:center;gap:14px}
+.loader__slogrow .tris{width:17px;height:15px;color:#FCFC1F;flex:none}
+.loader__slogrow span{font-family:var(--font-display);font-size:11px;letter-spacing:.12em;color:#C7CBC8}
+.loader.is-leaving{transition:opacity 1s 1.4s;opacity:0}
+.loader.is-leaving::after{content:'';position:absolute;inset:0;background:#FFFA00;transform-origin:left;transform:scaleX(0);
+  animation:arkWipe .6s cubic-bezier(1,0,.7,1) .5s forwards;z-index:5}
+@keyframes arkWipe{0%{transform:scaleX(0)}to{transform:scaleX(1)}}
+
+/* ============================================================
+   3. 机位
+   ============================================================ */
+.shots{display:flex;gap:34px;flex-wrap:wrap;align-items:flex-start}
+.shot{width:390px}
+.shot .shot-cap{margin-bottom:12px;display:flex;align-items:baseline;gap:10px}
+.shot .shot-cap b{font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.18em;color:#111;text-transform:uppercase}
+.shot .shot-cap span{font:10.5px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#8A8A8A}
+.phone{width:390px;height:844px;position:relative;overflow:hidden;display:flex;flex-direction:column;background:#fff;
+  box-shadow:0 1px 0 #D9D9D9,0 0 0 1px #E3E3E3}
+
+/* ============================================================
+   4. 桌面端（≥900px，与现有皮肤同断点同结构）
+   ============================================================ */
+.desk{width:1180px;max-width:100%;margin:0 0 34px;background:#fff;box-shadow:0 0 0 1px #E3E3E3,0 1px 0 #D9D9D9}
+.desk__bar{display:flex;align-items:center;gap:8px;padding:9px 14px;background:#F7F7F7}
+.desk__bar .d{width:9px;height:9px;border:1px solid #C8C8C8;border-radius:50%}
+.desk__bar .url{flex:1;text-align:center;font:500 10.5px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.1em}
+.desk__bar .w{width:150px}
+.desk__body{display:grid;grid-template-columns:210px minmax(0,1fr);gap:0 30px;padding:24px;align-items:start}
+.desk__nav{position:sticky;top:24px}
+.desk__brand{display:flex;align-items:center;gap:10px;padding:0 6px 14px;margin-bottom:8px}
+.desk__brand .lg{width:26px;height:29px;color:var(--ink);flex:none}
+.desk__brand .t1{font:700 14px/1 var(--font-display);letter-spacing:.16em;color:var(--ink)}
+.desk__brand .t2{font:500 8.5px/1 var(--font-mono);letter-spacing:.22em;color:var(--ink-3);margin-top:6px}
+.desk__navitem{position:relative;display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:var(--r-md);
+  font:600 13.5px/1 var(--font-display);letter-spacing:.06em;color:var(--ink-3);cursor:pointer}
+.desk__navitem .ic{width:19px;height:19px}
+.desk__navitem:hover{background:var(--bg-2);color:var(--ink-2)}
+.desk__navitem.on{background:var(--ink);color:#fff}
+.desk__navitem.on .ic{color:var(--yellow)}
+.desk__main{min-width:0}
+.desk__head{display:flex;align-items:center;gap:11px;margin-bottom:8px}
+.desk__head .dia{width:22px;height:22px;color:var(--ink)}
+.desk__head h3{margin:0;font:700 32px/1 var(--font-display);color:var(--ink)}
+.desk__head h3::before{content:'[ ';color:var(--ink-3);font-weight:400}
+.desk__head h3::after{content:' ]';color:var(--ink-3);font-weight:400}
+.desk__head .lbl{font:600 10px/1 var(--font-mono);letter-spacing:.22em;color:var(--ink);align-self:flex-end;padding-bottom:4px}
+.desk__head .batt{margin-left:auto;display:flex;align-items:center;gap:8px;font:600 14px/1 var(--font-mono);color:var(--ink)}
+.desk__head .batt svg{width:28px;height:14px}
+.desk__cols{column-count:2;column-gap:24px;margin-top:16px}
+.desk__cols>.panel,.desk__cols>.devs{break-inside:avoid;margin-bottom:22px}
+.desk__span{column-span:all}
+.desk__split{display:grid;grid-template-columns:minmax(0,1fr) 396px;gap:24px;align-items:start;margin-top:16px}
+.desk__split>.panel{grid-column:1;margin-bottom:22px}
+.desk__split>.r{grid-column:2;grid-row:1 / span 99;margin-bottom:0}
+.desk .mods{grid-template-columns:repeat(4,minmax(0,1fr))}
+/* 巨型压缩字：官网 // ENDFIELD 那条 */
+.giant{font:700 78px/0.86 var(--font-display);letter-spacing:-.02em;color:#F1F1F1;white-space:nowrap;overflow:hidden;
+  margin:2px 0 6px;user-select:none}
+.giant b{color:#191919;font-weight:700}
+</style>
+</head>
+<body>
+
+<!-- ===== 图标：官网提取 + 工具图标 ===== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="ef-logo" viewBox="0 0 214 233"><path fill-rule="evenodd" fill="currentColor" d="M95.1 95.5V115L63.5 92.7 76.8 82.9 95.1 95.5ZM171.1 53.2V63.1H204.5V78.8H171.1V81.9L213.8 111.5V130.3H214.4V233.6H59.4L44.1 225.8V186.3L35.2 189.7V171.5H30V193.6L39.8 190V212.2L1.4 226.3V204.1L12.1 200.2V171.5H3.7V155.8H12.1V136H30V155.8H39.8V168.7L44.1 167V142.1H62V160.2L66.3 158.5V130.8H84.2V151.7L106.7 143.1V197.1L88.8 204.6V169.2L84.2 171V206L66.3 213.5V177.8L62 179.5V217.3H111.1V130.3H151.5V101.1L109.8 130.5H84.2L48.5 105.2 61.8 95.4 97 119.6 151.5 81.9V78.8H118V63.1H151.5V53.2H107.9V57.1L89.8 69.8 110.8 83.5V102.1L76.8 78.8 45.6 100.5 45.6 102.9 4.7 111.7V106.4L38.9 47.6H45.4L59.8 28.3H79.1L72.3 37.5H151.5V27.7H171.1V37.5H214.6V53.2H171.1ZM53.4 62.8 47.1 71.2H42.6L33.4 89 41.6 87V84.8L63.4 69.6 53.4 62.8ZM64.3 53.2 76.1 60.8 87.1 53.2H64.3ZM171.1 101.1V130.3H212.6L171.1 101.1ZM186 208V212.4H188.7V201.2H186V205.5H181.8V201.2H179.1V212.4H181.8V208H186ZM203.2 210.2C202 210.2 201.2 209.4 200.9 208.5L198.3 209.2C199.1 211.3 200.7 212.6 203 212.6 205.6 212.6 207.4 211.1 207.4 209.1 207.4 207.2 205.7 206.2 204 205.6 202.6 205.1 201.5 204.9 201.5 204.1 201.5 203.7 202 203.3 202.8 203.3 203.6 203.3 204.4 203.8 204.7 204.7L207.3 204C206.8 202.3 205.1 201 202.9 201 200.5 201 198.8 202.6 198.8 204.3 198.8 206.3 200.3 207 201.7 207.5 203.2 208.1 204.6 208.3 204.6 209.2 204.6 209.8 204.1 210.2 203.2 210.2ZM195.5 228.2H201.3C205.1 228.2 208.1 225.6 208.1 221.6 208.1 217.7 205.1 215 201.3 215H195.5V228.2ZM198.7 203.7V201.2H189.3V203.7H192.6V212.4H195.3V203.7H198.7ZM185.1 228.2H194.6V225.2H188.3V215H185.1V228.2ZM173.5 228.2H183.3V225.2H176.7V222.9H181.8V220.1H176.7V217.9H183.2V215H173.5V228.2ZM168.3 228.2H171.5V215H168.3V228.2ZM157.7 228.2H160.9V223.4H165.7V220.5H160.9V217.9H167.1V215H157.7V228.2ZM144 228.2H149.8C153.6 228.2 156.6 225.6 156.6 221.6 156.6 217.7 153.6 215 149.8 215H144V228.2ZM130.1 228.2H133.3V225.3C133.3 222.4 133.3 220.3 133.3 220.3H133.3C133.3 220.3 135.1 222.8 136.3 224.5L139 228.2H142V215H138.8V218C138.8 220.4 138.9 222.7 138.8 222.7H138.8C138.8 222.7 136.8 219.9 135.9 218.7L133.1 215H130.1V228.2ZM118.5 228.2H128.2V225.2H121.7V222.9H126.7V220.1H121.7V217.9H128.1V215H118.5V228.2ZM125.7 201.2H123.1L118.7 212.4H121.6L122.2 210.6H126.6L127.3 212.4H130.2L125.7 201.2ZM139 205C139 202.7 137.3 201.2 134.5 201.2H130.3V212.4H133V208.7H134.4L136.4 212.4H139.4L137 208.2C138.2 207.6 139 206.5 139 205ZM150.5 201.2H147.2L144.5 203.9C143.4 205 143.1 205.4 143 205.4H143C143 205.4 143.1 204.9 143.1 203V201.2H140.4V212.4H143.1V208.7L144 207.7 147.4 212.4H150.5L145.8 206 150.5 201.2ZM161.3 201.2H158.6V203.8C158.6 205.8 158.7 207.8 158.6 207.8H158.6C158.6 207.8 156.9 205.3 156.2 204.4L153.8 201.2H151.3V212.4H154V209.9C154 207.5 153.9 205.7 154 205.7H154C154 205.7 155.5 207.9 156.5 209.3L158.8 212.4H161.3V201.2ZM165.7 201.2H163V212.4H165.7V201.2ZM166.6 206.8C166.6 210.1 169.2 212.6 172.4 212.6 173.5 212.6 174.8 212.2 175.4 211.5H175.4C175.4 211.5 175.4 211.6 175.4 212.4H177.7V206H172.5V208.2H175.4V208.2C175.1 209 174.3 210 172.5 210 170.7 210 169.4 208.7 169.4 206.8 169.4 204.9 170.5 203.6 172.4 203.6 173.3 203.6 174.2 204 174.7 204.7L177.5 203.9C176.5 202.1 174.6 201 172.4 201 169.2 201 166.6 203.4 166.6 206.8ZM134.8 206.4H133V203.7H134.8C135.8 203.7 136.2 204.4 136.2 205 136.2 205.6 135.8 206.4 134.8 206.4ZM123.9 206.1C124.1 205.5 124.4 204.5 124.4 204.5H124.4C124.4 204.5 124.7 205.5 125 206.1L125.8 208.3H123.1L123.9 206.1ZM153.3 221.6C153.3 223.9 151.7 225.2 149.8 225.2H147.2V217.9H149.8C151.7 217.9 153.3 219.4 153.3 221.6ZM204.8 221.6C204.8 223.9 203.2 225.2 201.3 225.2H198.7V217.9H201.3C203.2 217.9 204.8 219.4 204.8 221.6ZM88.4 19.9C87.6 19 86 17.6 84.6 16.7L86.7 14.9C88.1 15.7 89.9 16.9 90.7 17.9L88.4 19.9ZM95.3 19.9C95.3 21.5 95 22.4 94.1 22.9 93.1 23.4 91.8 23.5 90.1 23.5 90 22.6 89.6 21.1 89.1 20.3A45.2 45.2 0 0091.4 20.3C91.7 20.3 91.8 20.2 91.8 19.9V14.6H83.4C83 17.9 81.9 21.3 79.2 23.6 78.7 22.9 77.3 21.7 76.6 21.3 78.8 19.5 79.7 17 80 14.6H77.1V11.5H80.2V4.2H85C85.3 3.3 85.6 2.3 85.8 1.5L90 1.8C89.6 2.7 89.1 3.5 88.6 4.2H95.3V11.5H98.2V14.6H95.3V19.9ZM83.6 7.2V11.5H87.8C87.1 10.7 85.8 9.7 84.8 8.9L86.8 7.2H83.6ZM91.8 7.2H87.1C88.2 8 89.6 9.1 90.3 9.9L88.4 11.5H91.8V7.2ZM65.5 10.7H75.5S75.4 11.7 75.4 12.1C75 18.3 74.5 20.9 73.5 22 72.7 22.8 71.9 23.1 70.7 23.2 69.7 23.3 68.2 23.3 66.7 23.2 66.6 22.3 66.1 20.9 65.4 20A48.4 48.4 0 0069.4 20.1C69.8 20.1 70.2 20.1 70.5 19.8 71.1 19.4 71.5 17.5 71.8 13.9H65C64.2 17.7 62.5 21.2 58.4 23.6 57.9 22.7 56.9 21.5 56 20.9 61.3 17.9 61.7 13.1 61.9 8.4H56.3V5.1H65.8C65.5 4.3 65 3.3 64.6 2.4L67.9 1.2C68 0 69.2 3.6 69.6 4.5L68 5.1H77.4V8.4H65.6A83.2 83.2 0 0165.5 10.7ZM50.8 21.7H41.2V23.2H37.8V2.9H54.4V23.2H50.8V21.7ZM50.8 6.3H41.2V10.5H50.8V6.3ZM50.8 13.8H41.2V18.3H50.8V13.8ZM34.1 22.9C33.1 23.4 31.7 23.5 29.8 23.5 29.7 22.6 29.1 21.1 28.7 20.3 29.8 20.3 31.2 20.3 31.5 20.3 32 20.3 32.1 20.2 32.1 19.8V16.3H28C27.5 19 26.4 21.8 24.1 23.6 23.6 23 22.2 21.9 21.5 21.5 24.9 18.7 25.2 14.3 25.2 10.9V2.5H35.4V19.8C35.4 21.5 35.1 22.4 34.1 22.9ZM32.1 5.6H28.5V7.9H32.1V5.6ZM32.1 10.9H28.5C28.5 11.7 28.4 12.5 28.4 13.3H32.1V10.9ZM18.3 19.1H15.2V2.8H23.3V17.2H18.3V19.1ZM20.2 5.8H18.3V8.4H20.2V5.8ZM20.2 14.1V11.4H18.3V14.1H20.2ZM43.1 27.7 16.8 77.3H4.7V61.4L23.5 27.7H43.1ZM47.5 121.8 4.6 130.5V115.5L47.5 106.8V121.8Z"></path></symbol>
+  <!-- 黄底黑描边三角：官网列表/标签前的 ▲ -->
+  <symbol id="ef-tri-y" viewBox="0 0 31 28"><path fill-rule="evenodd" fill="#FFFA00" stroke="#191919" stroke-width="2.2" stroke-linejoin="round" d="M23.146,13.962 L15.554,0.843 L30.739,0.843 L23.146,13.962 ZM0.261,0.843 L15.446,0.843 L7.854,13.962 L0.261,0.843 ZM15.554,27.156 L7.961,14.036 L23.146,14.036 L15.554,27.156 Z"></path></symbol>
+  <symbol id="ef-tri" viewBox="0 0 31 28"><path fill-rule="evenodd" fill="currentColor" d="M23.146,13.962 L15.554,0.843 L30.739,0.843 L23.146,13.962 ZM0.261,0.843 L15.446,0.843 L7.854,13.962 L0.261,0.843 ZM15.554,27.156 L7.961,14.036 L23.146,14.036 L15.554,27.156 Z"></path></symbol>
+  <symbol id="ef-tris" viewBox="0 0 23 21"><path fill-rule="evenodd" fill="currentColor" d="M17.035 10.633L11.466.977h11.138l-5.569 9.656zM.249.977h11.138l-5.569 9.656L.249.977zm11.217 19.368l-5.569-9.657h11.138l-5.569 9.657z"></path></symbol>
+  <!-- 菱形罗盘标：官网标题前的 ◆ -->
+  <symbol id="ef-dia" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" d="M12 1.6 22.4 12 12 22.4 1.6 12Z"/><path fill="currentColor" d="M12 7.4 16.6 12 12 16.6 7.4 12Z"/></symbol>
+
+  <symbol id="i-bluetooth" viewBox="0 0 24 24"><path d="M6.5 7l11 10L12 21V3l5.5 4L6.5 17"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="0.5"/><circle cx="8.6" cy="10" r="1.7"/><path d="M3.5 17l4.8-4.6 4 3.8 3-2.8 5.2 4"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2.5h7L17 8h3a1.5 1.5 0 011.5 1.5v8A1.5 1.5 0 0120 19H4a1.5 1.5 0 01-1.5-1.5v-8A1.5 1.5 0 014 8z"/><circle cx="12" cy="13" r="3.4"/></symbol>
+  <symbol id="i-quote" viewBox="0 0 24 24"><path d="M9 7c-2.6.6-4 2.5-4 5.2V18h5v-5.6H7.2c0-2 .6-3.2 2.2-3.8L9 7zM19 7c-2.6.6-4 2.5-4 5.2V18h5v-5.6h-2.8c0-2 .6-3.2 2.2-3.8L19 7z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="0.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M4.5 7.5l2.6 1.5M16.9 15l2.6 1.5M4.5 16.5l2.6-1.5M16.9 9l2.6-1.5"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 8V5.5A2.5 2.5 0 015.5 3H8M16 3h2.5A2.5 2.5 0 0121 5.5V8M21 16v2.5A2.5 2.5 0 0118.5 21H16M8 21H5.5A2.5 2.5 0 013 18.5V16M3 12h18"/></symbol>
+  <symbol id="i-usb" viewBox="0 0 24 24"><path d="M12 2v14"/><path d="M12 6l3-2-3-2-3 2 3 2z"/><path d="M12 12l4.5-3v-2"/><rect x="14" y="5" width="4" height="4" rx="0.5"/><circle cx="12" cy="18" r="2.4"/><path d="M9 15.5L4.5 12H3"/><rect x="2" y="10" width="3" height="4" rx="0.5"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M20.5 3.5L3 10.8l6.4 2.8 2.8 6.4L20.5 3.5z"/><path d="M9.4 13.6L20.5 3.5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 20V9M7.5 13.5L12 9l4.5 4.5M4.5 4h15"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5M4.5 20h15"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z"/></symbol>
+  <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="0.5"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></symbol>
+</svg>
+
+<div class="wrap">
+
+<!-- ===================== 抬头 ===================== -->
+<header class="masthead">
+  <div class="kicker">FRAMEFILM <b>//</b> ARK THEME <b>//</b> DESIGN DRAFT <b>03</b></div>
+  <h1>终末地视觉语言 · 设计稿 03</h1>
+  <p>上一版虽然调成了白底墨字，但<b>造型语言没换</b> —— 满屏 1px 方框，确实生硬。这一版按官网真正的做法重做：
+     <strong>黄是「块」不是「线」</strong>（黄横幅 / 黄方块按钮 / 黄竖标 / 黄三角子弹）、<strong>数据用黑 chip</strong>、
+     <strong>形状要杂</strong>（圆 + 药丸 + 方块 + 横幅混用）、<strong>技术装饰</strong>（▌段头 / 标尺刻度 / HUD 圆环 / CMYK 色标 / 网点底纹）。
+     不是给老界面换皮，是换成官网那套构图与节奏。</p>
+  <div class="meta">
+    SOURCE &nbsp;endfield.hypergryph.com（主界面 / 干员情报 / 世界观资料 / 版本日历 逐屏取样）<br>
+    SCOPE &nbsp;&nbsp;tools/ForFilm（Web）&nbsp;·&nbsp; <b>仅 ARK 生效</b>：ARK 连接后自动过渡，其余设备保持原样<br>
+    SECTIONS &nbsp;01 语言拆解 · 02 令牌 · 03 元素库 · 04 页面稿（手机/桌面）· 05 加载屏 · 06 落地 · 07 来源
+  </div>
+</header>
+
+<!-- ===================== 01 语言拆解 ===================== -->
+<section>
+  <h2 class="sec">01 官网的"精致"拆成可以照做的零件</h2>
+  <p>我把官网几个屏逐个拆开，找出它区别于"普通后台"的具体手法。下面每条都能直接落成组件。</p>
+  <table>
+    <tr><th>官网手法</th><th>在哪看到</th><th>本稿落地</th></tr>
+    <tr><td><b>黄横幅</b>（整条黄 + 黑字 + 三角标）</td><td>LORE / GAMEPLAY 的黄色分隔带</td><td><code>.band</code> 页内分区带</td></tr>
+    <tr><td><b>黄方块按钮</b>（黄方块 + 标签）</td><td>「更多视频」「前往游戏」</td><td><code>.btn-block</code> 主操作</td></tr>
+    <tr><td><b>黄竖标</b>（竖条 + 竖排黑字）</td><td>GAMEPLAY 卡片右侧竖黄条</td><td><code>.vstrip</code> 预览框 / NEW 模块</td></tr>
+    <tr><td><b>黑 chip</b>（黑底白字小标签）</td><td>版本日期 09.02、版本PV 标签</td><td><code>.chip-k</code> 数值 / 状态 / 编号</td></tr>
+    <tr><td><b>▲ 黄三角子弹</b></td><td>阵营 / 种族 标签前的三角</td><td><code>.triy</code> 列表与键值行前缀</td></tr>
+    <tr><td><b>键值药丸</b>（黑标签 + 白药丸值）</td><td>阵营｜罗德岛、种族｜萨卡兹</td><td><code>.kv</code> 设备信息（机型/面板/固件）</td></tr>
+    <tr><td><b>圆元素</b>（圆头像带环、圆按钮）</td><td>干员列表圆形头像、翻页圆按钮</td><td><code>.dev__sig</code> 信号环 / <code>.cbtn</code> 圆按钮</td></tr>
+    <tr><td><b>▌ 段头</b>（黑块 + 等宽大写 + 中文标题）</td><td>▌GAMEPLAY 玩法介绍、▌INFORMATION 影像资料</td><td><code>.sechead</code></td></tr>
+    <tr><td><b>标尺刻度</b>（细密刻度线 + 黑块读数）</td><td>版本日历时间轴、顶部刻度</td><td><code>.ruler</code> / <code>.xfer__bar</code> / <code>.tl</code></td></tr>
+    <tr><td><b>HUD 圆环</b>（缺口大圆 + 细弧）</td><td>帝江号页面的环形 HUD</td><td><code>.viewer__hud</code> 预览框角上的环</td></tr>
+    <tr><td><b>CMYK 色标</b></td><td>▌GAMEPLAY 旁四色小格</td><td><code>.cmyk</code>（降为灰阶 + 黄）</td></tr>
+    <tr><td><b>[ REC ]</b>（红点 + 方括号）</td><td>干员页右上角</td><td><code>.rec</code> 页头状态</td></tr>
+    <tr><td><b>◆ 菱形罗盘标</b></td><td>干员名前的菱形</td><td><code>.hero .dia</code></td></tr>
+    <tr><td><b>[ 方括号标题 ]</b></td><td>[ 提弗洛斯 ]</td><td><code>.hero h2</code></td></tr>
+    <tr><td><b>巨型压缩字</b></td><td>// ENDFIELD 大字</td><td><code>.giant</code>（桌面页眉）</td></tr>
+    <tr><td><b>底纹</b>（网点 / 细斜纹 / 等距竖线）</td><td>浅灰区块与日历底板</td><td><code>.film::after</code> 网点、<code>.panel--fill</code> 灰底</td></tr>
+    <tr><td><b>黑色方块导航项</b></td><td>官网左栏激活项 = 黑方块白图标</td><td><code>.desk__navitem.on</code> / 模块图标块</td></tr>
+  </table>
+  <div class="note y"><b>关键转向：</b>别再"每块内容都套 1px 方框"。官网的层次靠
+     <b>灰底软块 / 黄横带 / 黑 chip / 圆与药丸</b> 交替——线框只在少数地方出现。</div>
+</section>
+
+<!-- ===================== 02 令牌 ===================== -->
+<section>
+  <h2 class="sec">02 设计令牌</h2>
+  <h3 class="lead">色板 · 白底墨字，黄按"块"使用</h3>
+  <div class="tokgrid">
+    <div class="tok"><div class="chip" style="background:#FFFFFF"></div><h4>bg</h4><p>#FFFFFF</p></div>
+    <div class="tok"><div class="chip" style="background:#F7F7F7"></div><h4>bg-2 灰底软块</h4><p>#F7F7F7</p></div>
+    <div class="tok"><div class="chip" style="background:#EFEFEF"></div><h4>bg-3</h4><p>#EFEFEF</p></div>
+    <div class="tok"><div class="chip" style="background:#E8E8E8"></div><h4>line</h4><p>#E8E8E8</p></div>
+    <div class="tok"><div class="chip" style="background:#D9D9D9"></div><h4>line-2 / inactive</h4><p>#D9D9D9</p></div>
+    <div class="tok"><div class="chip" style="background:#9E9E9E"></div><h4>ink-3</h4><p>#9E9E9E</p></div>
+    <div class="tok"><div class="chip" style="background:#191919"></div><h4>ink</h4><p>#191919</p></div>
+    <div class="tok"><div class="chip" style="background:#FFFA00"></div><h4>yellow（成块用）</h4><p>#FFFA00</p></div>
+    <div class="tok"><div class="chip" style="background:#D93A2B"></div><h4>rec / 危险</h4><p>#D93A2B</p></div>
+    <div class="tok"><div class="chip" style="background:#141414"></div><h4>loader bg</h4><p>#141414</p></div>
+  </div>
+  <div class="note"><b>黄的使用规则：</b>普通是「点缀」——但<b>一处必须成块</b>（横幅 / 方块按钮 / 竖标）。
+     一屏里黄块 ≤ 2 处，其余黄只做三角子弹与激活标记。这样才不会既"寡淡"又"吵"。</div>
+
+  <h3 class="lead">形状 · 圆、药丸、方块、横幅混用</h3>
+  <div class="tokgrid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">
+    <div class="tok"><div class="chip" style="background:#F7F7F7;border:0;border-radius:6px"></div><h4>panel r-md 6px</h4><p>灰底软块 / 面板</p></div>
+    <div class="tok"><div class="chip" style="background:#F7F7F7;border:0;border-radius:3px"></div><h4>input r-sm 3px</h4><p>输入框 / 缩略图</p></div>
+    <div class="tok"><div class="chip" style="background:#191919;border:0;border-radius:999px"></div><h4>pill</h4><p>值药丸 / chip</p></div>
+    <div class="tok"><div class="chip" style="background:#191919;border:0;border-radius:50%;width:52px;height:52px;margin-left:auto;margin-right:auto"></div><h4>circle</h4><p>圆按钮 / 信号环</p></div>
+    <div class="tok"><div class="chip" style="background:#FFFA00;border:0;border-radius:0"></div><h4>block</h4><p>黄方块按钮 / 横幅</p></div>
+  </div>
+
+  <h3 class="lead">字体</h3>
+  <div class="tokgrid" style="grid-template-columns:1fr">
+    <div class="tok" style="padding:18px">
+      <div style="font:700 28px/1.1 'Chakra Petch',sans-serif;color:#191919">设备连接 <span style="color:#9E9E9E">// DEVICE LINK</span></div>
+      <div style="font:500 11px/1.6 'JetBrains Mono',monospace;letter-spacing:.16em;color:#6B6B6B;text-transform:uppercase;margin-top:12px">▲ MODEL FRAMEFILM ARK &nbsp;·&nbsp; PANEL 720×480 &nbsp;·&nbsp; 8 BPP</div>
+      <div style="font:400 14px/1.7 'Barlow','Noto Sans SC',sans-serif;color:#3A3A3A;margin-top:12px">选择后自动转换为 6 色 film 并预览。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 03 元素库 ===================== -->
+<section>
+  <h2 class="sec">03 元素库（官网造型语言）</h2>
+  <div class="elgrid ark">
+
+    <div class="el">
+      <div class="box">
+        <div class="sechead"><span class="bar"></span><span class="lbl">LINK</span><span class="rule"></span><span class="cmyk"><i></i><i></i><i></i><i></i></span></div>
+        <div class="hero"><svg class="dia"><use href="#ef-dia"/></svg><h2>设备连接</h2><span class="rec"><b></b>[REC]</span></div>
+        <div class="ruler"></div>
+      </div>
+      <h4>▌ 段头 + [ 方括号标题 ] + REC + 标尺</h4>
+      <p>页头的四件套：<b>▌黑块段头</b>（等宽大写）+ <b>◆菱形标 + [标题]</b> + <b>[REC] 红点</b> + <b>刻度标尺</b>。比「大标题 + // 灰标签」精致得多。</p>
+    </div>
+
+    <div class="el">
+      <div class="box">
+        <div class="band"><svg class="triy"><use href="#ef-tri-y"/></svg><span>ARKNIGHTS · ENDFIELD</span><span class="r">LINK</span></div>
+        <div class="kv" style="margin-top:2px">
+          <div class="kv__r"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="k">状态</span><span class="v v--on">已连接</span></div>
+          <div class="kv__r"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="k">机型</span><span class="v">FrameFilm Ark</span></div>
+        </div>
+      </div>
+      <h4>黄横幅 + 键值药丸</h4>
+      <p>黄横幅是官网最强的识别件（整条黄 + 黑字 + 三角标）。键值行复刻「阵营｜罗德岛」：<b>▲ + 黑标签 + 白药丸值</b>。</p>
+    </div>
+
+    <div class="el">
+      <div class="box">
+        <button class="btn-block" type="button"><span class="sq"><svg class="ic"><use href="#i-scan"/></svg></span><span class="tx">蓝牙扫描设备</span></button>
+        <div class="acts">
+          <button class="cbtn" type="button"><svg class="ic"><use href="#i-usb"/></svg></button>
+          <button class="cbtn cbtn--k" type="button"><svg class="ic"><use href="#i-send"/></svg></button>
+          <span class="chip-k">−52 dBm</span>
+        </div>
+      </div>
+      <h4>黄方块按钮 + 圆按钮 + 黑 chip</h4>
+      <p>官网「更多视频」的<b>黄方块 + 标签</b>结构；圆形按钮做次级操作；数值一律黑 chip。</p>
+    </div>
+
+    <div class="el">
+      <div class="box">
+        <div class="viewer" style="padding:10px">
+          <div class="viewer__hud"></div>
+          <div class="viewer__strip"><span>PREVIEW</span></div>
+          <div class="viewer__inner">
+            <div class="film" style="height:104px">
+              <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+            </div>
+          </div>
+          <div class="viewer__foot" style="margin-bottom:0">
+            <span class="m">OUT <b>55-IDX</b></span><span class="m">8 BPP</span><span class="m">720×480</span>
+          </div>
+        </div>
+      </div>
+      <h4>取景框：黄竖标 + HUD 环 + 四角</h4>
+      <p>黄竖标（GAMEPLAY 那条竖黄带）做标签，右上角 HUD 圆环、四角描边、底部等宽读数 —— 一块预览就有 4 层信息。</p>
+    </div>
+
+    <div class="el">
+      <div class="box">
+        <div class="xfer">
+          <div class="xfer__head">
+            <span class="chip-k">SENDING</span><span class="chip-o">frame.film</span><span class="xfer__pct">78%</span>
+          </div>
+          <div class="xfer__bar"><span class="xfer__ticks"></span><i style="width:78%"></i><u style="left:78%"></u></div>
+          <div class="xfer__foot"><span>241 KB</span><span>345 KB</span></div>
+        </div>
+      </div>
+      <h4>标尺进度</h4>
+      <p>用<b>刻度线 + 墨线 + 黄色游标</b>取代连续进度条，读数配黑 chip —— 和官网版本日历的时间轴同一族语汇。</p>
+    </div>
+
+    <div class="el">
+      <div class="box">
+        <div class="mods">
+          <div class="mod"><span class="no">01</span><span class="sq"><svg class="ic"><use href="#i-photo"/></svg></span><span class="nm">拾光</span><span class="sub">从手机相册挑选</span></div>
+          <div class="mod"><span class="vstrip"><span>NEW</span></span><span class="no">02</span><span class="sq"><svg class="ic"><use href="#i-camera"/></svg></span><span class="nm">定影</span></div>
+        </div>
+      </div>
+      <h4>模块入口（灰底软块）</h4>
+      <p>不再是四个描边框：改成<b>灰底软块 + 黑方块图标</b>，角上等宽编号；「新」用<b>黄竖标</b>而不是斜纹，更精致。</p>
+    </div>
+
+    <div class="el">
+      <div class="box">
+        <div class="devs">
+          <div class="dev on"><span class="dev__sig"><i></i></span><span class="dev__nm">FrameFilm Ark<small>A4:C1:38:9F:2B:04</small></span><span class="chip-k">−52</span></div>
+          <div class="dev"><span class="dev__sig"><i></i></span><span class="dev__nm">FrameFilm Pro<small>A4:C1:38:71:0E:9C</small></span><span class="chip-o">−71</span></div>
+        </div>
+      </div>
+      <h4>设备行（灰底 + 圆信号环）</h4>
+      <p>圆环信号灯（选中转墨色）+ 名称 + 黑 chip 数值。选中态用<b>墨色内描边</b>，比整块高亮更克制。</p>
+    </div>
+
+    <div class="el">
+      <div class="box">
+        <div class="sechead"><span class="bar"></span><span class="lbl">SLEEP TIMELINE</span><span class="rule"></span><span class="num">1h</span></div>
+        <div class="tl">
+          <div class="tl__line"></div>
+          <div class="tl__mk" style="left:0"><span class="chip-o">10m</span><span class="tl__pt"></span></div>
+          <div class="tl__mk on" style="left:34%"><span class="chip-y">1h</span><span class="tl__pt"></span></div>
+          <div class="tl__mk" style="left:100%"><span class="chip-o">48h</span><span class="tl__pt"></span></div>
+        </div>
+      </div>
+      <h4>时间轴（版本日历同款）</h4>
+      <p>「唤醒时长」这类连续量改用<b>时间轴 + 黑/黄 chip 刻度</b>，比一根滑杆有信息量，也更像官网。</p>
+    </div>
+
+    <div class="el">
+      <div class="box">
+        <div class="chipbar">
+          <span class="chipx on">本地轮播</span><span class="chipx">WiFi 轮播</span><span class="chipx">关闭</span>
+        </div>
+        <div class="switch-row"><span class="k"><b>休眠开关</b><small>3 分钟内自动休眠</small></span><span class="toggle on"><i></i></span></div>
+      </div>
+      <h4>药丸 chip + 圆轨开关</h4>
+      <p>互斥选择用药丸（选中填墨）；开关是圆轨 + 黄把手 —— 圆角元素用来中和方块的硬。</p>
+    </div>
+
+    <div class="el">
+      <div class="box" style="gap:14px">
+        <div style="display:flex;align-items:center;gap:14px">
+          <svg style="width:46px;height:50px;color:#191919"><use href="#ef-logo"/></svg>
+          <div style="width:1px;align-self:stretch;background:#D9D9D9"></div>
+          <div><div style="font:700 16px/1 'Chakra Petch',sans-serif;letter-spacing:.2em;color:#191919">FRAMEFILM</div>
+               <div style="font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.3em;color:#9E9E9E;margin-top:8px">// ARK EDITION</div></div>
+        </div>
+        <div class="cmyk" style="gap:3px"><i style="width:16px;height:5px"></i><i style="width:16px;height:5px"></i><i style="width:16px;height:5px"></i><i style="width:16px;height:5px"></i></div>
+      </div>
+      <h4>Logo 锁定 + CMYK 色标</h4>
+      <p><b>黑白单色</b> Logo（官网 header 即 #191919）；下面压一条 CMYK 色标 —— 印刷工业的小签名。</p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ===================== 04 页面稿 ===================== -->
+<section>
+  <h2 class="sec">04 页面稿 · 手机 / 桌面 双端</h2>
+  <p>同一套语言铺到两端：手机是顶栏 + 分段内容 + 底栏；桌面脱壳成左侧黑方块激活导航 + 多栏卡片流。
+     断点与栅格仍与现有皮肤一致（900px）。</p>
+
+  <h3 class="lead">A · 手机端（&lt; 900px）</h3>
+  <div class="shots" style="margin-top:22px">
+
+    <!-- 01 设备连接 -->
+    <div class="shot">
+      <div class="shot-cap"><b>01 · 设备连接</b><span>LINK</span></div>
+      <div class="phone ark">
+        <div class="screen">
+          <div class="p-head">
+            <div class="brand"><svg class="mk"><use href="#ef-logo"/></svg><span class="nm">FRAMEFILM</span><span class="tag">ARK</span></div>
+            <span class="sp"></span>
+            <div class="batt"><svg class="b-svg" viewBox="0 0 28 14"><rect x="0.5" y="0.5" width="24" height="13"/><rect class="cap" x="25" y="4" width="2.5" height="6"/><rect class="fill" x="2" y="2" width="19" height="10"/></svg><span>86%</span></div>
+          </div>
+          <div class="p-headline"></div>
+
+          <div class="p-body">
+            <div class="p-hero">
+              <div class="sechead"><span class="bar"></span><span class="lbl">LINK</span><span class="rule"></span><span class="cmyk"><i></i><i></i><i></i><i></i></span></div>
+              <div class="hero"><svg class="dia"><use href="#ef-dia"/></svg><h2>设备连接</h2><span class="rec"><b></b>[REC]</span></div>
+              <div class="ruler"></div>
+            </div>
+
+            <div class="band"><svg class="triy"><use href="#ef-tri-y"/></svg><span>ARKNIGHTS · ENDFIELD</span><span class="r">CH 0x42</span></div>
+
+            <div class="panel">
+              <div class="kv">
+                <div class="kv__r"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="k">状态</span><span class="v v--on">已连接 · RSSI −52</span></div>
+                <div class="kv__r"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="k">机型</span><span class="v">FrameFilm Ark</span></div>
+                <div class="kv__r"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="k">面板</span><span class="v">720 × 480 · 8 BPP</span></div>
+              </div>
+              <div class="ruler" style="margin:14px 0 12px"></div>
+              <div class="acts">
+                <button class="btn-block"><span class="sq"><svg class="ic"><use href="#i-scan"/></svg></span><span class="tx">重新扫描</span></button>
+                <button class="cbtn"><svg class="ic"><use href="#i-usb"/></svg></button>
+              </div>
+            </div>
+
+            <div class="sechead" style="margin:20px 0 10px"><span class="bar"></span><span class="lbl">NEARBY</span><span class="rule"></span><span class="num">3</span></div>
+            <div class="devs">
+              <div class="dev on"><span class="dev__sig"><i></i></span><span class="dev__nm">FrameFilm Ark<small>A4:C1:38:9F:2B:04</small></span><span class="chip-k">−52</span></div>
+              <div class="dev"><span class="dev__sig"><i></i></span><span class="dev__nm">FrameFilm Pro<small>A4:C1:38:71:0E:9C</small></span><span class="chip-o">−71</span></div>
+              <div class="dev"><span class="dev__sig"><i></i></span><span class="dev__nm">FrameFilm Dock<small>A4:C1:38:55:AC:11</small></span><span class="chip-o">−80</span></div>
+            </div>
+          </div>
+
+          <nav class="p-nav">
+            <a class="nav-item active"><svg class="ic"><use href="#i-bluetooth"/></svg><span>蓝牙</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-photo"/></svg><span>Frame</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-sliders"/></svg><span>Film</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-gear"/></svg><span>设置</span></a>
+          </nav>
+        </div>
+      </div>
+    </div>
+
+    <!-- 02 Frame -->
+    <div class="shot">
+      <div class="shot-cap"><b>02 · Frame 入口</b><span>CAPTURE</span></div>
+      <div class="phone ark">
+        <div class="screen">
+          <div class="p-head">
+            <div class="brand"><svg class="mk"><use href="#ef-logo"/></svg><span class="nm">FRAMEFILM</span><span class="tag">ARK</span></div>
+            <span class="sp"></span>
+            <div class="batt"><svg class="b-svg" viewBox="0 0 28 14"><rect x="0.5" y="0.5" width="24" height="13"/><rect class="cap" x="25" y="4" width="2.5" height="6"/><rect class="fill" x="2" y="2" width="13" height="10"/></svg><span>64%</span></div>
+          </div>
+          <div class="p-headline"></div>
+
+          <div class="p-body">
+            <div class="p-hero">
+              <div class="sechead"><span class="bar"></span><span class="lbl">CAPTURE</span><span class="rule"></span><span class="cmyk"><i></i><i></i><i></i><i></i></span></div>
+              <div class="hero"><svg class="dia"><use href="#ef-dia"/></svg><h2>Frame</h2></div>
+              <div class="ruler"></div>
+            </div>
+
+            <div class="mods">
+              <div class="mod"><span class="no">01</span><span class="sq"><svg class="ic"><use href="#i-photo"/></svg></span><span class="nm">拾光</span><span class="sub">从手机相册挑选</span></div>
+              <div class="mod"><span class="no">02</span><span class="sq"><svg class="ic"><use href="#i-camera"/></svg></span><span class="nm">定影</span><span class="sub">拍一张直接上屏</span></div>
+              <div class="mod"><span class="no">03</span><span class="sq"><svg class="ic"><use href="#i-quote"/></svg></span><span class="nm">一言</span><span class="sub">名言金句每日换</span></div>
+              <div class="mod"><span class="vstrip"><span>NEW</span></span><span class="no">04</span><span class="sq"><svg class="ic"><use href="#i-image"/></svg></span><span class="nm">批量上传</span><span class="sub">一组照片一次传完</span></div>
+            </div>
+
+            <div class="sechead" style="margin:20px 0 10px"><span class="bar"></span><span class="lbl">RECENT</span><span class="rule"></span><span class="num">4</span></div>
+            <div class="list">
+              <div class="li on"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="info"><b>frame_0412.film</b><small>720×480 · 345 KB</small></span><span class="chip-k">显示中</span></div>
+              <div class="li"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="info"><b>quote_daily.film</b><small>720×480 · 342 KB</small></span><span class="chip-o">—</span></div>
+            </div>
+          </div>
+
+          <nav class="p-nav">
+            <a class="nav-item"><svg class="ic"><use href="#i-bluetooth"/></svg><span>蓝牙</span></a>
+            <a class="nav-item active"><svg class="ic"><use href="#i-photo"/></svg><span>Frame</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-sliders"/></svg><span>Film</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-gear"/></svg><span>设置</span></a>
+          </nav>
+        </div>
+      </div>
+    </div>
+
+    <!-- 03 拾光 -->
+    <div class="shot">
+      <div class="shot-cap"><b>03 · 内容子页 · 拾光</b><span>ALBUM</span></div>
+      <div class="phone ark">
+        <div class="screen">
+          <div class="p-head">
+            <div class="brand"><svg class="mk"><use href="#ef-logo"/></svg><span class="nm">FRAMEFILM</span><span class="tag">ARK</span></div>
+            <span class="sp"></span>
+            <div class="batt"><svg class="b-svg" viewBox="0 0 28 14"><rect x="0.5" y="0.5" width="24" height="13"/><rect class="cap" x="25" y="4" width="2.5" height="6"/><rect class="fill" x="2" y="2" width="13" height="10"/></svg><span>64%</span></div>
+          </div>
+          <div class="p-headline"></div>
+
+          <div class="p-body">
+            <div class="detail-bar">
+              <span class="back"><svg class="ic"><use href="#i-chevron"/></svg>返回</span>
+              <span class="dn">ALBUM // 拾光</span>
+            </div>
+
+            <button class="btn-block" style="margin-bottom:16px"><span class="sq"><svg class="ic"><use href="#i-photo"/></svg></span><span class="tx">从相册选择照片</span></button>
+
+            <div class="sechead"><span class="bar"></span><span class="lbl">PREVIEW</span><span class="rule"></span><span class="num">55-IDX</span></div>
+            <div class="viewer">
+              <div class="viewer__hud"></div>
+              <div class="viewer__strip"><span>PREVIEW</span></div>
+              <div class="viewer__inner">
+                <div class="film" style="height:150px">
+                  <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+                </div>
+              </div>
+              <div class="viewer__foot">
+                <span class="m">MODE <b>ColorFast 55</b></span><span class="m">DITHER <b>ON</b></span><span class="m">8 BPP</span>
+              </div>
+            </div>
+
+            <div class="sechead" style="margin:20px 0 12px"><span class="bar"></span><span class="lbl">TRANSMIT</span><span class="rule"></span></div>
+            <div class="xfer">
+              <div class="xfer__head">
+                <span class="chip-k">SENDING</span><span class="chip-o">frame.film</span><span class="xfer__pct">78%</span>
+              </div>
+              <div class="xfer__bar"><i style="width:78%"></i><u style="left:78%"></u></div>
+              <div class="xfer__foot"><span>241 KB</span><span>345 KB</span></div>
+            </div>
+            <button class="secondary-button" style="margin-top:16px"><svg class="ic"><use href="#i-send"/></svg>重新发送</button>
+          </div>
+
+          <nav class="p-nav">
+            <a class="nav-item"><svg class="ic"><use href="#i-bluetooth"/></svg><span>蓝牙</span></a>
+            <a class="nav-item active"><svg class="ic"><use href="#i-photo"/></svg><span>Frame</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-sliders"/></svg><span>Film</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-gear"/></svg><span>设置</span></a>
+          </nav>
+        </div>
+      </div>
+    </div>
+
+    <!-- 04 Film -->
+    <div class="shot">
+      <div class="shot-cap"><b>04 · Film 转换</b><span>PIPELINE</span></div>
+      <div class="phone ark">
+        <div class="screen">
+          <div class="p-head">
+            <div class="brand"><svg class="mk"><use href="#ef-logo"/></svg><span class="nm">FRAMEFILM</span><span class="tag">ARK</span></div>
+            <span class="sp"></span>
+            <div class="batt"><svg class="b-svg" viewBox="0 0 28 14"><rect x="0.5" y="0.5" width="24" height="13"/><rect class="cap" x="25" y="4" width="2.5" height="6"/><rect class="fill" x="2" y="2" width="19" height="10"/></svg><span>86%</span></div>
+          </div>
+          <div class="p-headline"></div>
+
+          <div class="p-body">
+            <div class="p-hero">
+              <div class="sechead"><span class="bar"></span><span class="lbl">PIPELINE</span><span class="rule"></span><span class="cmyk"><i></i><i></i><i></i><i></i></span></div>
+              <div class="hero"><svg class="dia"><use href="#ef-dia"/></svg><h2>Film</h2></div>
+              <div class="ruler"></div>
+            </div>
+
+            <div class="panel panel--fill" style="margin-bottom:14px">
+              <div class="sechead"><span class="bar"></span><span class="lbl">SOURCE</span><span class="rule"></span></div>
+              <button class="btn-block" style="margin-bottom:14px"><span class="sq"><svg class="ic"><use href="#i-upload"/></svg></span><span class="tx">点击选择图片…</span></button>
+              <div class="select" style="margin-bottom:14px"><span>ColorFast 55 色 · 通行证版</span><svg class="ic-f cv"><use href="#i-chevron"/></svg></div>
+              <div class="slider"><label>对比度</label><span class="track"><u style="width:52%"></u><b style="left:52%"></b></span><span class="val">1.2</span></div>
+              <div class="slider"><label>饱和度</label><span class="track"><u style="width:44%"></u><b style="left:44%"></b></span><span class="val">0.9</span></div>
+            </div>
+
+            <div class="sechead"><span class="bar"></span><span class="lbl">PREVIEW</span><span class="rule"></span><span class="num">720×480</span></div>
+            <div class="viewer">
+              <div class="viewer__hud"></div>
+              <div class="viewer__strip"><span>PREVIEW</span></div>
+              <div class="viewer__inner">
+                <div class="film" style="height:128px">
+                  <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+                </div>
+              </div>
+              <div class="viewer__foot"><span class="m">OUT <b>55-IDX</b></span><span class="m">8 BPP</span><span class="m">720×480</span></div>
+            </div>
+
+            <div class="acts" style="margin-top:16px">
+              <button class="cbtn"><svg class="ic"><use href="#i-download"/></svg></button>
+              <button class="btn-block"><span class="sq"><svg class="ic"><use href="#i-send"/></svg></span><span class="tx">发送到设备</span></button>
+            </div>
+          </div>
+
+          <nav class="p-nav">
+            <a class="nav-item"><svg class="ic"><use href="#i-bluetooth"/></svg><span>蓝牙</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-photo"/></svg><span>Frame</span></a>
+            <a class="nav-item active"><svg class="ic"><use href="#i-sliders"/></svg><span>Film</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-gear"/></svg><span>设置</span></a>
+          </nav>
+        </div>
+      </div>
+    </div>
+
+    <!-- 05 设置 -->
+    <div class="shot">
+      <div class="shot-cap"><b>05 · 设置</b><span>SYSTEM</span></div>
+      <div class="phone ark">
+        <div class="screen">
+          <div class="p-head">
+            <div class="brand"><svg class="mk"><use href="#ef-logo"/></svg><span class="nm">FRAMEFILM</span><span class="tag">ARK</span></div>
+            <span class="sp"></span>
+            <div class="batt"><svg class="b-svg" viewBox="0 0 28 14"><rect x="0.5" y="0.5" width="24" height="13"/><rect class="cap" x="25" y="4" width="2.5" height="6"/><rect class="fill" x="2" y="2" width="19" height="10"/></svg><span>86%</span></div>
+          </div>
+          <div class="p-headline"></div>
+
+          <div class="p-body">
+            <div class="p-hero">
+              <div class="sechead"><span class="bar"></span><span class="lbl">SYSTEM</span><span class="rule"></span><span class="cmyk"><i></i><i></i><i></i><i></i></span></div>
+              <div class="hero"><svg class="dia"><use href="#ef-dia"/></svg><h2>设置</h2></div>
+              <div class="ruler"></div>
+            </div>
+
+            <div class="sechead"><span class="bar"></span><span class="lbl">FILM FILES</span><span class="rule"></span><span class="num">2</span></div>
+            <div class="list" style="margin-bottom:14px">
+              <div class="li on"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="info"><b>frame_0412.film</b><small>345 KB</small></span><span class="chip-k">显示中</span></div>
+              <div class="li"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="info"><b>quote_daily.film</b><small>342 KB</small></span><span class="chip-o">—</span></div>
+            </div>
+            <div class="chipbar" style="margin-bottom:20px">
+              <span class="chipx">本地轮播</span><span class="chipx on">选中显示</span><span class="chipx">关闭</span>
+            </div>
+
+            <div class="sechead"><span class="bar"></span><span class="lbl">SLEEP</span><span class="rule"></span><span class="num">1h</span></div>
+            <div class="panel panel--fill" style="margin-bottom:20px">
+              <div class="switch-row"><span class="k"><b>休眠开关</b><small>3 分钟内自动休眠</small></span><span class="toggle on"><i></i></span></div>
+              <div class="switch-row"><span class="k"><b>自动唤醒</b><small>到点自动亮屏</small></span><span class="toggle"><i></i></span></div>
+              <div class="ruler" style="margin:14px 0 4px"></div>
+              <div class="tl">
+                <div class="tl__line"></div>
+                <div class="tl__mk" style="left:0"><span class="chip-o">10m</span><span class="tl__pt"></span></div>
+                <div class="tl__mk on" style="left:34%"><span class="chip-y">1h</span><span class="tl__pt"></span></div>
+                <div class="tl__mk" style="left:100%"><span class="chip-o">48h</span><span class="tl__pt"></span></div>
+              </div>
+            </div>
+
+            <div class="band"><svg class="triy"><use href="#ef-tri-y"/></svg><span>REMOTE · ARK ONLY</span><span class="r">0x4E</span></div>
+            <div class="chipbar">
+              <span class="chipx">上</span><span class="chipx">下</span><span class="chipx on">确认</span><span class="chipx">返回</span><span class="chipx">休眠</span>
+            </div>
+          </div>
+
+          <nav class="p-nav">
+            <a class="nav-item"><svg class="ic"><use href="#i-bluetooth"/></svg><span>蓝牙</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-photo"/></svg><span>Frame</span></a>
+            <a class="nav-item"><svg class="ic"><use href="#i-sliders"/></svg><span>Film</span></a>
+            <a class="nav-item active"><svg class="ic"><use href="#i-gear"/></svg><span>设置</span></a>
+          </nav>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <h3 class="lead" style="margin-top:52px">B · 桌面端（≥ 900px）</h3>
+  <p>脱壳：左侧导航（激活项 = <b>黑方块 + 黄图标</b>，同官网左栏）+ 右侧多栏内容；页眉用官网那条<b>巨型压缩字</b>压阵。</p>
+
+  <!-- 桌面 01 -->
+  <div class="desk ark" style="margin-top:22px">
+    <div class="desk__bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="url">forfilm.local / frame</span><span class="w"></span></div>
+    <div class="desk__body">
+      <aside class="desk__nav">
+        <div class="desk__brand"><svg class="lg"><use href="#ef-logo"/></svg>
+          <div><div class="t1">FRAMEFILM</div><div class="t2">// ARK EDITION</div></div>
+        </div>
+        <div class="desk__navitem"><svg class="ic"><use href="#i-bluetooth"/></svg>蓝牙</div>
+        <div class="desk__navitem on"><svg class="ic"><use href="#i-photo"/></svg>Frame</div>
+        <div class="desk__navitem"><svg class="ic"><use href="#i-sliders"/></svg>Film</div>
+        <div class="desk__navitem"><svg class="ic"><use href="#i-gear"/></svg>设置</div>
+      </aside>
+
+      <main class="desk__main">
+        <div class="desk__head">
+          <svg class="dia"><use href="#ef-dia"/></svg><h3>Frame</h3><span class="lbl">CAPTURE</span>
+          <span class="batt"><svg class="b-svg" viewBox="0 0 28 14"><rect x="0.5" y="0.5" width="24" height="13"/><rect class="cap" x="25" y="4" width="2.5" height="6"/><rect class="fill" x="2" y="2" width="19" height="10"/></svg>86%</span>
+        </div>
+        <div class="ruler"></div>
+        <div class="giant"><b>//</b> FRAMEFILM</div>
+
+        <div class="desk__cols">
+          <div class="mods desk__span">
+            <div class="mod"><span class="no">01</span><span class="sq"><svg class="ic"><use href="#i-photo"/></svg></span><span class="nm">拾光</span><span class="sub">从手机相册挑选</span></div>
+            <div class="mod"><span class="no">02</span><span class="sq"><svg class="ic"><use href="#i-camera"/></svg></span><span class="nm">定影</span><span class="sub">拍一张直接上屏</span></div>
+            <div class="mod"><span class="no">03</span><span class="sq"><svg class="ic"><use href="#i-quote"/></svg></span><span class="nm">一言</span><span class="sub">名言金句每日换</span></div>
+            <div class="mod"><span class="vstrip"><span>NEW</span></span><span class="no">04</span><span class="sq"><svg class="ic"><use href="#i-image"/></svg></span><span class="nm">批量上传</span><span class="sub">一组照片一次传完</span></div>
+          </div>
+
+          <div class="panel">
+            <div class="sechead"><span class="bar"></span><span class="lbl">RECENT</span><span class="rule"></span><span class="num">4</span></div>
+            <div class="list">
+              <div class="li on"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="info"><b>frame_0412.film</b><small>345 KB</small></span><span class="chip-k">显示中</span></div>
+              <div class="li"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="info"><b>quote_daily.film</b><small>342 KB</small></span><span class="chip-o">—</span></div>
+              <div class="li"><svg class="triy"><use href="#ef-tri-y"/></svg><span class="info"><b>batch_0003.film</b><small>344 KB</small></span><span class="chip-o">—</span></div>
+            </div>
+          </div>
+
+          <div class="band"><svg class="triy"><use href="#ef-tri-y"/></svg><span>PLAYBACK MODE</span><span class="r">LOCAL</span></div>
+          <div class="panel panel--fill">
+            <div class="switch-row"><span class="k"><b>本地轮播</b><small>设备端按顺序换图</small></span><span class="toggle on"><i></i></span></div>
+            <div class="switch-row"><span class="k"><b>WiFi 轮播</b><small>由服务端下发</small></span><span class="toggle"><i></i></span></div>
+            <div class="chipbar" style="margin-top:12px">
+              <span class="chipx on">30 分钟</span><span class="chipx">1 小时</span><span class="chipx">6 小时</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- 桌面 02 -->
+  <div class="desk ark">
+    <div class="desk__bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="url">forfilm.local / film</span><span class="w"></span></div>
+    <div class="desk__body">
+      <aside class="desk__nav">
+        <div class="desk__brand"><svg class="lg"><use href="#ef-logo"/></svg>
+          <div><div class="t1">FRAMEFILM</div><div class="t2">// ARK EDITION</div></div>
+        </div>
+        <div class="desk__navitem"><svg class="ic"><use href="#i-bluetooth"/></svg>蓝牙</div>
+        <div class="desk__navitem"><svg class="ic"><use href="#i-photo"/></svg>Frame</div>
+        <div class="desk__navitem on"><svg class="ic"><use href="#i-sliders"/></svg>Film</div>
+        <div class="desk__navitem"><svg class="ic"><use href="#i-gear"/></svg>设置</div>
+      </aside>
+
+      <main class="desk__main">
+        <div class="desk__head">
+          <svg class="dia"><use href="#ef-dia"/></svg><h3>Film</h3><span class="lbl">PIPELINE</span>
+          <span class="batt"><svg class="b-svg" viewBox="0 0 28 14"><rect x="0.5" y="0.5" width="24" height="13"/><rect class="cap" x="25" y="4" width="2.5" height="6"/><rect class="fill" x="2" y="2" width="19" height="10"/></svg>86%</span>
+        </div>
+        <div class="ruler"></div>
+        <div class="giant"><b>//</b> PIPELINE</div>
+
+        <div class="desk__split">
+          <div class="band desk__span" style="column-span:all"><svg class="triy"><use href="#ef-tri-y"/></svg><span>SOURCE · ALGORITHM · OUTPUT</span><span class="r">7 STEPS</span></div>
+
+          <div class="panel panel--fill">
+            <div class="sechead"><span class="bar"></span><span class="lbl">SOURCE</span><span class="rule"></span></div>
+            <button class="btn-block" style="margin-bottom:14px"><span class="sq"><svg class="ic"><use href="#i-upload"/></svg></span><span class="tx">点击选择图片…</span></button>
+            <div class="select" style="margin-bottom:14px"><span>ColorFast 55 色 · 通行证版</span><svg class="ic-f cv"><use href="#i-chevron"/></svg></div>
+            <div class="slider"><label>对比度</label><span class="track"><u style="width:52%"></u><b style="left:52%"></b></span><span class="val">1.2</span></div>
+            <div class="slider"><label>饱和度</label><span class="track"><u style="width:44%"></u><b style="left:44%"></b></span><span class="val">0.9</span></div>
+          </div>
+
+          <div class="r">
+            <div class="sechead"><span class="bar"></span><span class="lbl">PREVIEW</span><span class="rule"></span><span class="num">720×480</span></div>
+            <div class="viewer">
+              <div class="viewer__hud"></div>
+              <div class="viewer__strip"><span>PREVIEW</span></div>
+              <div class="viewer__inner">
+                <div class="film" style="height:236px">
+                  <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+                </div>
+              </div>
+              <div class="viewer__foot"><span class="m">OUT <b>55-IDX</b></span><span class="m">8 BPP</span><span class="m">720×480</span></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="sechead"><span class="bar"></span><span class="lbl">OUTPUT</span><span class="rule"></span></div>
+            <div class="field" style="margin-bottom:10px"><label>文件名 / Filename</label><input class="input" value="output.film"></div>
+            <div class="acts">
+              <button class="cbtn"><svg class="ic"><use href="#i-download"/></svg></button>
+              <button class="btn-block"><span class="sq"><svg class="ic"><use href="#i-send"/></svg></span><span class="tx">发送到设备</span></button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <h3 class="lead">桌面版式规则（结构同现有皮肤）</h3>
+  <table>
+    <tr><th>范围</th><th>≥ 900px</th></tr>
+    <tr><td>整体</td><td>脱壳，<code>grid-template-columns:210px minmax(0,1fr)</code>，gap 30px，居中 max-width 1240px</td></tr>
+    <tr><td>左导航</td><td>行式条目；激活 = <b>黑底 + 黄图标</b>（同官网左栏）；hover = 灰底</td></tr>
+    <tr><td>页眉</td><td>◆ 标 + 32px 标题 + <code>▌</code> 段标签 + 电量；下面是标尺与<b>巨型压缩字</b></td></tr>
+    <tr><td>卡片流</td><td><code>column-count:2</code>；黄横幅 / 模块行用 <code>column-span:all</code> 跨栏</td></tr>
+    <tr><td>设备连接页</td><td>单列 <code>max-width:720px</code></td></tr>
+    <tr><td>Film / Frame 二级页</td><td>grid 两列：左参数 / 右预览（预览独占右栏）</td></tr>
+  </table>
+</section>
+
+<!-- ===================== 05 加载屏 ===================== -->
+<section>
+  <h2 class="sec">05 加载屏 · 连接 ARK 后的过渡</h2>
+  <p>默认打开 ForFilm 是<b>现有界面</b>；<b>连上 ARK 才播这一屏</b>，随后转入白底皮肤。左侧竖条与百分比读数之间留 56px，不粘连。</p>
+
+  <div class="shots" style="margin-top:22px">
+    <div class="shot">
+      <div class="shot-cap"><b>06 · 加载屏</b><span>LOADING / SWITCH</span></div>
+      <div class="phone ark">
+        <div class="loader" id="loaderDemo">
+          <div class="loader__bg"></div>
+          <div class="loader__bar"><i></i></div>
+          <div class="loader__center">
+            <svg class="lg"><use href="#ef-logo"/></svg>
+            <div class="nm">FRAMEFILM</div>
+            <div class="sub">// ARK EDITION</div>
+            <div class="dv"></div>
+            <div class="loader__slogrow"><svg class="tris"><use href="#ef-tris"/></svg><span>OVER THE FRONTIER / INTO THE FRONT</span></div>
+          </div>
+          <div class="loader__pct">
+            <span class="mk"></span><span class="tick"></span>
+            <span class="num"><b>0</b><i>%</i></span>
+            <span class="cap">LOADING…</span>
+          </div>
+        </div>
+      </div>
+      <div class="ark" style="margin-top:12px">
+        <button class="secondary-button" style="margin:0" onclick="replayLoader()">重播加载动画</button>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:340px">
+      <h3 class="lead" style="margin-top:0">切换流程</h3>
+      <table>
+        <tr><th>步骤</th><th>行为</th></tr>
+        <tr><td>① 默认</td><td>打开 ForFilm = <b>现有「贴纸玩具」界面</b>，无变化</td></tr>
+        <tr><td>② 判定</td><td>BLE 广播名 <code>FRAMEFILMARK</code> → 判定 ARK（复用 <code>js/utils.js</code>）</td></tr>
+        <tr><td>③ 遮屏</td><td>叠加加载屏，同时给 <code>&lt;body&gt;</code> 加 <code>.theme-ark</code></td></tr>
+        <tr><td>④ 推进</td><td>进度三段加权：主题资源 → 设备信息(0x42) → 首帧渲染</td></tr>
+        <tr><td>⑤ 擦除</td><td>终末地黄自左向右铺满（0.6s），再延迟 1.4s 淡出</td></tr>
+        <tr><td>⑥ 落屏</td><td>露出白底墨字界面</td></tr>
+        <tr><td>断开</td><td>反向擦除 → 移除 <code>.theme-ark</code> → 回「贴纸玩具」</td></tr>
+      </table>
+      <div class="note">规格逐条对映官网 <code>__00-Loading_*</code>：竖条 <code>20px</code>、读数 <code>left:50px/bottom:26px</code>（本稿 <code>76/30</code>）、数字 <code>70px</code>、短棒 <code>8×30 r4</code>、黄幕 <code>scaleX 0→1 .6s cubic-bezier(1,0,.7,1)</code>。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 06 落地 ===================== -->
+<section>
+  <h2 class="sec">06 落地策略</h2>
+  <table>
+    <tr><th>问题</th><th>做法</th></tr>
+    <tr><td>适用范围</td><td><b>仅 ARK</b>（<code>FRAMEFILMARK</code>）；Pro / Max / STD / Dock 完全不变</td></tr>
+    <tr><td>默认不变</td><td>打开仍是现有界面；<b>连上 ARK 才播加载屏并切换</b>，断开回退</td></tr>
+    <tr><td>响应式</td><td>沿用现有 <b>900px 断点与栅格</b>，只换视觉、不动结构</td></tr>
+    <tr><td>如何启用</td><td>新增 <code>css/ark-theme.css</code>，规则挂 <code>.theme-ark</code>；连接成功给 <code>&lt;body&gt;</code> 加类，<b>不改现有 style.css</b></td></tr>
+    <tr><td>改动范围</td><td>纯 CSS 覆盖 + 加载屏组件 + 少量类名钩子；<b>不动 JS 业务逻辑与 BLE 常量</b></td></tr>
+    <tr><td>新增图形</td><td>黄三角子弹 / 菱形标 / CMYK 色标 / HUD 环 / 标尺 —— 全部 CSS + 内联 SVG 实现，无额外图片依赖</td></tr>
+    <tr><td>字体</td><td>Chakra Petch / Barlow / JetBrains Mono，仅 ARK 连接后按需加载，计入进度</td></tr>
+  </table>
+</section>
+
+<!-- ===================== 07 来源 ===================== -->
+<section>
+  <h2 class="sec">07 视觉元素来源</h2>
+  <div class="band" style="padding:14px 16px;margin-bottom:18px">
+    <svg class="triy" style="width:14px;height:12px"><use href="#ef-tri-y"/></svg>
+    <span style="font-size:13px;letter-spacing:.24em">ARKNIGHTS · ENDFIELD</span>
+    <span class="r" style="font-size:10px">ENDfIELD.HYPERGRYPH.COM</span>
+  </div>
+  <table>
+    <tr><th>元素</th><th>来源（官网实测）</th><th>用法</th></tr>
+    <tr><td>白底墨字</td><td><code>Header_pcHeaderContainer</code>：<code>bg #fff / color #191919</code>，未激活 <code>#D9D9D9</code></td><td>整屏基准</td></tr>
+    <tr><td>ENDFIELD Logo</td><td><code>Header_logo</code>（<code>color:#191919</code> 单色）</td><td>黑白单色，顶栏 / 加载屏</td></tr>
+    <tr><td>三角 UI 符号</td><td><code>Header_tri</code></td><td>黄底黑描边三角子弹 ▲</td></tr>
+    <tr><td>黄横幅 / 黄方块按钮</td><td>LORE 分隔带、GAMEPLAY 竖条、「更多视频」按钮</td><td><code>.band</code> / <code>.btn-block</code> / <code>.vstrip</code></td></tr>
+    <tr><td>黑 chip / 时间轴</td><td>版本日历日期块（09.02）与刻度轴</td><td><code>.chip-k</code> / <code>.tl</code></td></tr>
+    <tr><td>▌段头 / CMYK 色标</td><td>▌GAMEPLAY 玩法介绍、▌INFORMATION 影像资料</td><td><code>.sechead</code> / <code>.cmyk</code></td></tr>
+    <tr><td>HUD 圆环</td><td>帝江号页面环形 HUD</td><td><code>.viewer__hud</code></td></tr>
+    <tr><td>取景角标</td><td><code>block-bg.svg</code></td><td>预览框四角</td></tr>
+    <tr><td>加载屏</td><td><code>__00-Loading_*</code>（左缘 20px 竖条 + 70px 百分比）</td><td>§05 过渡</td></tr>
+  </table>
+  <div class="note y"><b>版权提示：</b>Logo 与三角标为鹰角网络《明日方舟：终末地》美术资产。官方授权周边可直接用；
+    非授权项目公开分发前请替换为"仅参考其几何风格"的自绘标记，版式与配色语言不受影响。</div>
+</section>
+
+</div>
+
+<script>
+/* 加载屏演示：进度推进 → 黄幕擦除 → 淡出。滚入视口自动播一次，可点「重播」。 */
+(function () {
+  var loader = document.getElementById('loaderDemo');
+  if (!loader) return;
+  var bar = loader.querySelector('.loader__bar i');
+  var num = loader.querySelector('.loader__pct .num b');
+  var started = false;
+
+  function run() {
+    loader.classList.remove('is-leaving');
+    bar.style.transition = 'none';
+    bar.style.height = '0%';
+    void bar.offsetHeight;
+    bar.style.transition = 'height .28s linear';
+    num.textContent = '0';
+    var t0 = performance.now(), DUR = 2200;
+    function step(now) {
+      var p = Math.min(1, (now - t0) / DUR);
+      var v = Math.round(p * 100);
+      bar.style.height = v + '%';
+      num.textContent = String(v);
+      if (p < 1) requestAnimationFrame(step);
+      else setTimeout(function () { loader.classList.add('is-leaving'); }, 500);
+    }
+    requestAnimationFrame(step);
+  }
+
+  window.replayLoader = run;
+
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (entries, obs) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting && !started) { started = true; run(); obs.disconnect(); }
+      });
+    }, { threshold: 0.5 }).observe(loader);
+  } else { run(); }
+})();
+</script>
+</body>
+</html>
