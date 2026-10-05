@@ -139,16 +139,11 @@ static void led_apply_scale(uint32_t scale);
  */
 void hal_led_init(void)
 {
-#if FRAMEFILM_MAX == 1
-    // Max版本无LED，跳过初始化
-    return;
-#else
     m_rgb = configure_led();
     m_led.initialized = true;
 
     hal_led_set_color(m_led.color);
     hal_led_set_brightness(m_led.brightness);
-#endif
 }
 
 /**

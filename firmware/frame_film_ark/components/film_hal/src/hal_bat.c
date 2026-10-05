@@ -101,10 +101,6 @@ static int hal_bat_voltage_to_level(int voltage);
 
 void hal_bat_init(void)
 {
-#if FRAMEFILM_MAX == 1
-    // Max版本无电池检测，跳过初始化
-    return;
-#else
     //-------------ADC使能引脚配置---------------//
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << BAT_ADC_EN_PIN),
@@ -137,7 +133,6 @@ void hal_bat_init(void)
 
     // 读取一次电池电压
     hal_bat_get_level();
-#endif
 }
 
 int hal_bat_get_level(void)

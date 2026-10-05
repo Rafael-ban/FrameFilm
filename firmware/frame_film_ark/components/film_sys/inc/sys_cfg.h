@@ -14,22 +14,11 @@ extern "C" {
  * MACROS
  */
 // SYS CONFIG
-// 机型三选一
-// #define FRAMEFILM_STD        1          // 基础版
-#define FRAMEFILM_PRO        1          // Pro 版（默认）
-// #define FRAMEFILM_MAX        1          // Max 版
-#ifndef FRAMEFILM_STD
-#define FRAMEFILM_STD        0
-#endif
-#ifndef FRAMEFILM_PRO
-#define FRAMEFILM_PRO        0
-#endif
-#ifndef FRAMEFILM_MAX
-#define FRAMEFILM_MAX        0
-#endif
-#if (FRAMEFILM_STD + FRAMEFILM_PRO + FRAMEFILM_MAX) != 1
-#error "机型配置错误：只能选择一个机型"
-#endif
+// 本固件为**单机型**（FRAMEFILMARK / 通行证版）：
+// 屏幕固定 E6 3.70" 720×480、输入固定三按键（上6/下4/确认5，低有效）、
+// 有电池检测 / SD 卡检测 / WS2812 LED、唤醒脚 GPIO5（低电平）。
+// 老的三机型（STD/PRO/MAX）与屏幕切换分支已删除，代码里不再出现 FRAMEFILM_*_MODEL 宏。
+// 需要多机型请用 firmware/frame_film/（保留了三机型支持的那套）。
 
 // App 切换交互模式三选一
 #define SYS_APP_SWITCH_NONE            0   // 关闭按键切换（BLE 远程切换仍有效，纯相框）
@@ -46,21 +35,9 @@ extern "C" {
 // 运行期还会再按面板能力判定（需 MonoFast，即 3.7" 屏）；两者都满足 UI 层才真正可用。
 #define SYS_UI_ENABLE                  1
 
-#if FRAMEFILM_STD == 1
-#define SYS_DEVICE_NAME                "FRAMEFILM"
-#define SYS_MANUFACTURER_NAME          "FRAMEFILM"
-#define SYS_INPUT_HAS_NAV_ENTER        1   // 旋转编码器：A/B 导航 + 按键确认
-#endif
-#if FRAMEFILM_PRO == 1
-#define SYS_DEVICE_NAME                "FRAMEFILMPRO"
-#define SYS_MANUFACTURER_NAME          "FRAMEFILMPRO"
+#define SYS_DEVICE_NAME                "FRAMEFILMARK"
+#define SYS_MANUFACTURER_NAME          "FRAMEFILMARK"
 #define SYS_INPUT_HAS_NAV_ENTER        1   // 三按键：上/下/确认
-#endif
-#if FRAMEFILM_MAX == 1
-#define SYS_DEVICE_NAME                "FRAMEFILMMAX"
-#define SYS_MANUFACTURER_NAME          "FRAMEFILMMAX"
-#define SYS_INPUT_HAS_NAV_ENTER        1   // 三按键：上/下/确认
-#endif
 
 #define SYS_MODEL_NUMBER               "M1.0"
 #define SYS_SERIAL_NUMBER              "FILM000001"             //SN号

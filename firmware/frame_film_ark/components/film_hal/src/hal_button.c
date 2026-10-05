@@ -29,7 +29,6 @@
  * INCLUDES
  */
 #include "sys_log.h"
-#if FRAMEFILM_PRO == 1 || FRAMEFILM_MAX == 1
 #include <string.h>
 #include "iot_button.h"
 #include "driver/gpio.h"
@@ -41,27 +40,17 @@
  */
 #define BUTTON_TAG                        "HAL_BUTTON"
 
-#if FRAMEFILM_PRO == 1
 #define BUTTON_PIN_UP                     (6)    // 上/右按键
 #define BUTTON_PIN_DOWN                   (4)    // 下/左按键
 #define BUTTON_PIN_CONFIRM                (5)    // 确认按键
 #define BUTTON_ACTIVE_LEVEL               (0)    // 按键激活电平为低电平
-#endif
-
-#if FRAMEFILM_MAX == 1
-#define BUTTON_PIN_UP                     (12)   // 上/右按键
-#define BUTTON_PIN_DOWN                   (14)   // 下/左按键
-#define BUTTON_PIN_CONFIRM                (13)   // 确认按键
-#define BUTTON_ACTIVE_LEVEL               (1)    // 按键激活电平为高电平
-#endif
 
 #define BUTTON_MAX_CALLBACKS              (5)
 
 #define BUTTON_SHORT_PRESS_TIME_MS        (50)   // 50ms 短按（上/下键的单击结算窗口）
 #define BUTTON_LONG_PRESS_TIME_MS         (1000) // 2s 长按
 /* 确认键的双击配对窗口。按钮库把 short_press_time 当窗口用（见 confirm_cfg 的注释），
-   必须明显大于人手的双击间隔，否则双击会被判成两次单击。
-   STD 那边是 hal_encoder.c 里等价的 ENCODER_DOUBLE_CLICK_MS，两者取同一量级。 */
+   必须明显大于人手的双击间隔，否则双击会被判成两次单击。 */
 #define BUTTON_DOUBLE_CLICK_WINDOW_MS     (350)
 
 /*********************************************************************
@@ -330,4 +319,3 @@ int hal_input_unregister_cb(input_press_type_t type, input_callback_t cb)
     }
     return -3;
 }
-#endif

@@ -30,7 +30,6 @@
  * INCLUDES
  */
 #include "hal_epd.h"
-#if EPD_SELECT_E6_3_70_720_480 == 1
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -1429,4 +1428,3 @@ uint32_t hal_epd_get_capabilities(void)
 {
     return (uint32_t)(EPD_CAP_4BPP | EPD_CAP_8BPP | EPD_CAP_MONOFAST);
 }
-#endif /* EPD_SELECT_E6_3_70_720_480 */
