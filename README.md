@@ -102,7 +102,7 @@ FrameFilm/
 │   │   │   └── film_hal/      # 硬件抽象层
 │   │   ├── main/              # 主程序
 │   │   └── sdkconfig_*        # 各机型配置 (std/pro/max)
-│   ├── frame_film_ark/        # 通行证版（单机型；app 框架主线）
+│   ├── frame_film_ark/        # 通行证版（单机型；含 app 框架）
 │   └── frame_film_dock/       # 充电底座（单机型）
 │
 ├── hardware/                   # 硬件设计
@@ -129,7 +129,7 @@ FrameFilm/
 
 固件分三个工程，**只有 `frame_film` 需要先做机型配置**（替换 sdkconfig + 修改机型宏 + 选屏）；`frame_film_ark`（通行证版，单机型）与 `frame_film_dock`（底座，单机型）直接编译烧录。
 
-> app 框架与 UI 层（LVGL UI 层 + app 层）以 `frame_film_ark` 为主线。
+> app 框架与 UI 层（LVGL UI 层 + app 层）**仅 `frame_film_ark` 有**；`frame_film` 是经典固件（无 app 层 / UI 层）。
 
 以下为 **`frame_film`（三机型）** 的配置步骤：
 

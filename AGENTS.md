@@ -9,7 +9,7 @@ FrameFilm 项目 AI 开发指南。
 - ESP-IDF v5.5.2 (C) · 微信小程序 (ES5) · Web 工具 (ES6)
 - GPL-3.0 · Git 中文 commit: `type(scope): 描述`
 - 三套固件：`firmware/frame_film/`（冰箱贴**三机型**，旧机型维护线）、`firmware/frame_film_ark/`（通行证版，**单机型**，见下方「FrameFilm Ark」）、`firmware/frame_film_dock/`（底座，见下方「Dock 底座」）
-- **app 框架 / UI 层（`film_app` + `film_ui`）的主线是 `frame_film_ark`**；`frame_film` 里有一份同构代码，但不再跟进 app 框架的新功能
+- **app 框架 / UI 层（`film_app` + `film_ui`）只存在于 `frame_film_ark`**：`frame_film` 是经典固件，没有这两个组件，也不实现 app 通道 BLE 命令（`0x45~0x4E`）
 
 ## 三机型（仅 `frame_film`）
 
@@ -60,7 +60,7 @@ FrameFilm 项目 AI 开发指南。
 
 - **已删除**（相对 `frame_film`）：其余屏幕驱动 `hal_epd_{360,364,368,709}.c`、STD 专用的 `hal_encoder.c`（无旋转编码器）、`sdkconfig_{std,pro,max}` 与 `sdkconfig.old`
 - 输入仍走 `film_hal` 的按键实现（`hal_input.h` 抽象 + iot_button）；`FRAMEFILM_*` 宏在 ark 里**不存在**，不要往这边带机型分支
-- 目录结构与组件划分和 `frame_film` 同构（`film_sys` / `film_hal` / `film_service` / `film_ui` / `film_app`），跨端常量改动两边都要落
+- 组件比 `frame_film` **多 `film_ui`（LVGL UI 层）与 `film_app`（app 层）**——app 框架只在这里；`film_sys` / `film_hal` / `film_service` 三层与 `frame_film` 同构（少了编码器与其余屏驱动）。跨端常量改动两边都要落
 
 ## Dock 底座（独立固件）
 
@@ -141,7 +141,7 @@ film_service → film_hal → film_sys → ESP-IDF
 
 ## 关键文件
 
-> **路径口径**：下表以 `firmware/frame_film/`（三机型线）为基准；`firmware/frame_film_ark/`（通行证版，单机型）**目录结构同构、组件与文件名一致**（差异见其章节：无编码器、只留 `hal_epd_370.c`、无机型/屏幕宏）。**凡路径含 `film_app` / `film_ui` 的条目（app 框架与 UI 层）以 `frame_film_ark/` 为主线**；机型/屏幕宏相关条目仅 `frame_film` 适用；协议与常量类改动两套固件都要落。
+> **路径口径**：下表路径以 `firmware/frame_film/`（三机型线）为基准；`firmware/frame_film_ark/`（通行证版，单机型）的 `film_sys` / `film_hal` / `film_service` 与其同构、文件名一致，但**多出 `film_ui` 与 `film_app` 两个组件（app 框架只在 ark）**，且已无编码器、只留 `hal_epd_370.c`、无机型/屏幕宏。**凡路径含 `film_app` / `film_ui` 的条目只存在于 `frame_film_ark/`**；机型/屏幕宏相关条目仅 `frame_film` 适用；协议与常量类改动两套固件都要落。
 
 | 要改什么 | 核心文件 |
 |---|---|
@@ -175,7 +175,7 @@ film_service → film_hal → film_sys → ESP-IDF
 
 ## 常见陷阱（不要做）
 
-> 以下条目多来自 `frame_film`（三机型）时期的经验，`frame_film_ark`（单机型）同样适用；凡提到 STD/PRO/MAX 分支的地方，在 ark 里只有按键这一套（上6/下4/确认5，低有效），也没有编码器。
+> 以下条目多来自分叉前 frame_film 的经验；`frame_film_ark`（单机型）同样适用，但**凡涉及 app 层 / UI 层（`film_app` / `film_ui`）的条目只适用 ark** —— `frame_film` 没有 app 框架（无 UI 页、无 app 切换、无 `0x45~0x4E` 命令），例如任务线程模型、休眠卡、开机行为、遥控、`film_app` 目录分层这些条目对它都不适用。凡提到 STD/PRO/MAX 分支的地方，在 ark 里只有按键这一套（上6/下4/确认5，低有效），也没有编码器。
 
 1. **不要只在 service 层调 esp_wifi_init 等 ESP-IDF driver** — 必须通过 HAL
 2. **不要只改一个机型的宏分支** — 机型差异代码需覆盖 `FRAMEFILM_STD/PRO/MAX`（EPD 驱动、输入设备、SD 等按宏隔离）。**此条仅 `frame_film` 适用**：`frame_film_ark` 是刻意的单机型设计，不要往它里面引入机型宏或 `#if` 分支
@@ -185,7 +185,7 @@ film_service → film_hal → film_sys → ESP-IDF
 6. **不要在 service 层直接操作 GPIO** — 所有硬件操作走 film_hal
 7. **不要机型宏与 sdkconfig 不匹配** — 编译前确认 `sys_cfg.h` 机型宏与 `sdkconfig_{std,pro,max}` 对应一致（**仅 `frame_film`**；`frame_film_ark` 只有一份 `sdkconfig`，无机型宏）
 8. **不要给 dock 随便加 USB IN 端点** — ESP32-S3 的 IN 端点上限是 5（含 EP0），dock 已用满：HID + 音频 mic + 音频反馈 + CDC 数据。新增 USB 功能前必须先释放等量 IN 端点（CDC 的「通知端点」就是因此省掉的）
-9. **不要假设各机型 `0x42` 回包一致** — dock 返回 `面板ID(1)+宽(2)+高(2)`（LEN=5），冰箱贴只返回 `宽(2)+高(2)`（LEN=4）；客户端需按 LEN 区分解析
+9. **不要按"机型"猜 `0x42` 回包长度** — 三套固件现在**统一**返回 `面板ID(1)+宽(2)+高(2)`（LEN=5，见各自 `SCREEN_RESOLUTION_GET` 实现），协议文档 §4.6.1 也是这个格式，客户端按 LEN=5 解析即可。（历史上冰箱贴曾只回 `宽(2)+高(2)`（LEN=4），遇到老固件才需要按 LEN 兜底）
 10. **不要在 app_task 里碰 `lv_*`** — LVGL 非线程安全，只在 `ui_task` 上下文调用；要向页面推数据走 `ui_core_post()`（下行）、要回写服务层走 `app_manager_post_ui_msg()`（上行），两者都在 `film_app`/`film_ui` 里
 11. **不要在 ui_task 里读写 `g_service_param` / 电池 / WiFi / SD** — 那些没有跨任务保证。设置页只上报 `[行号, 候选下标]`，由 `settings_on_event()` 在 app 任务侧校验、写参数、落盘，再把整页快照回投给页面
 12. **不要在唤醒条件还成立的时候进 deep sleep** — ext0 是**电平**触发（`hal_pwr.c`，STD/PRO = GPIO5 低有效、MAX = GPIO13 高有效）。长按是**按住期间**上报的，那一刻唤醒脚必然还满足条件 → 按着断电会当场醒回来（表现为"长按后闪一下就恢复"）。`app_sleep_run()` 入睡前要同时满足两件事，**缺一不可**：① `hal_pwr_wake_condition_met()` 为 false（等手指抬起）——它只会让入睡更晚、不会更早，是叠加项；② 距切页已过 **4s**（`SP_DRAW_WAIT_MS`）——`ui_core_page_enter()` 是异步的，**没有回调能告诉你"第一帧已上屏"**，只能按时间兜。这个值**不要**按"单帧 940ms"去推：上机实测 2s 不够（卡还没刷出来就断电，屏幕停在旧画面/半张卡），换页后第一次上屏的耗时明显大于稳态单帧。**EPD 挂在外设供电轨上，断电即停在半途**。别用按键库自己的状态顶替 ①：PRO/MAX 现在根本没发 press/release 事件，STD 的库虽有 `RE_ET_BTN_RELEASED` 但 HAL 的映射表把它丢了，而 HAL 里那份 `button_pressed` 在长按上报时就被置 false（手指还在键上）
@@ -196,6 +196,7 @@ film_service → film_hal → film_sys → ESP-IDF
 17. **不要在遥控（0x4E）链路上另写一份按键语义** — 固件把键值经 `ble_key_to_press()` 映射成与 HAL 同构的 `INPUT_PRESS_*` 入队，因此菜单导航/单击确认/双击退回/长按休眠全部自动一致；新增按键功能只改 `app_manager` 那一处，不要在 BLE 层复刻交互。回显只表示"已收到"，开机卡/休眠卡占屏期间按键照本机语义被丢弃；dock 不支持该通道（其按键是 PC 键盘 HID）
 18. **不要往 `film_app/` 根目录塞源码** — 分层已定：`inc/`（对外公共头，只有 `app_init.h` + `app_interface.h`）、`core/`（框架核心：调度/初始化/渲染/外壳/开机参数）、`pages/`（框架页面：开机画面/主菜单/系统设置/休眠卡，**系统设置属于框架而不是内容 app**）、`apps/<name>/`（内容 app，一个 app 一个文件夹，头文件与源文件同目录）。组件用的是**显式文件列表**（不是 GLOB），新增 `.c` 必须在 `CMakeLists.txt` 的 `srcs` 里登记，新增目录要加进 `INCLUDE_DIRS`，否则静默不编译/找不到头
 19. **不要在 `frame_film_ark` 里重新引入机型/屏幕切换** — 该固件刻意收敛为单机型（`FRAMEFILMARK`、固定 720×480、三按键），`FRAMEFILM_STD/PRO/MAX` 与全部 `EPD_SELECT_E6_*` 已删除；要多机型请改 `firmware/frame_film/`。**裁剪屏幕驱动时务必同时去掉驱动文件里那层 `#if EPD_SELECT_... == 1` 外壳** —— 宏不存在时该条件会静默为假，整个驱动被编译掉，只在链接期报"未定义引用"
+20. **不要用 `0x42` 的面板 ID 反推机型** — `0x02`（3.70" 720×480）既可能是 `frame_film` 的 Pro、也可能是通行证版 Ark，两者同屏同驱动，面板参数无法区分。客户端机型一律以 **BLE 广播名**为准（`FRAMEFILMARK` → Ark），面板参数只用来校正尺寸/像素排布，**不要覆盖**由名字判定的机型（见 `tools/ForFilm/js/utils.js` 的 `applyScreenParams`）。注意把「机型身份」与「能力可用性」分开：身份看广播名；**能力看它实际依赖什么** —— 46/55 色（8bpp 索引色 ColorFast/ColorQual）**当前只对 Ark 开放**（只有 ark 的 EPD 驱动实现了 8bpp 播放，`frame_film` 收到会按 4bpp 解出乱码；等其移植 film 2.0 后再放开成"仅按屏幕判定"，见 `tools/ForFilm/js/utils.js` 的 `is8bppAvailable()`），而 SZ 增强因需同屏标定、输出 v1 4bpp，按机型（Pro/Ark）开放
 
 ## BLE 协议速览
 

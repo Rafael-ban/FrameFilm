@@ -2,7 +2,7 @@
 
 > 状态：**设计中**（本文档用于累积讨论结论，随迭代更新）
 > 目标：为 3.7" 屏适配新特性引入 **app 层**，统一承载图片 / 模板 / 时钟 / 动图等应用能力。
-> 关联固件：`firmware/frame_film_ark`（通行证版，**单机型**；app 框架主线）；`firmware/frame_film`（冰箱贴三机型，旧机型维护线，app 框架不再跟进新功能）。
+> 关联固件：`firmware/frame_film_ark`（通行证版，**单机型**；**app 框架与 UI 层仅此一处**）；`firmware/frame_film`（冰箱贴三机型，经典固件，**没有 `film_app` / `film_ui` 组件，也不实现 app 通道 BLE 命令 `0x45~0x4E`**）。
 
 ---
 
@@ -27,7 +27,7 @@
    - app 层加在 service 之上，不触碰 `film_hal` / `film_sys`，与机型宏隔离零耦合。
    - 独立固件会破坏 AGENTS.md 的跨端一致性（BLE 常量 / 颜色编码 / 协议文档），双份维护。
    - 同一份 app 代码运行在所有机型，靠能力位（而非编译宏）适配 3.7 屏新特性并优雅降级。
-   - **现状（已修订）**：app 框架现已拆出**单机型固件 `frame_film_ark`（通行证版）**承载主线，`frame_film` 保留同构代码但不再跟进 app 框架新功能；跨端一致性仍按 AGENTS.md 要求在三端同步。
+   - **现状（已修订）**：app 框架与 UI 层现已归入**单机型固件 `frame_film_ark`（通行证版）**；`frame_film`（三机型）是经典固件，**没有 `film_app` / `film_ui` 这两个组件**，也不实现 app 通道 BLE 命令（`0x45~0x4E`）。跨端一致性仍按 AGENTS.md 要求在三端同步。
 
 2. **app 切换是 3.7 屏专属能力**。
    - 非 3.7 屏固件保持现状（单一图片墙，无切换入口）。
@@ -437,14 +437,14 @@ uint32_t hal_epd_get_capabilities(void);
 
 #### 保留
 - `service_film_init(void)`
-- `service_film_display(uint32_t file_id)` —— 加载并渲染单帧/整张静态图（BLE `0x07` [service_ble.c](file:///e:/project/FrameFilm/firmware/frame_film/components/film_service/src/service_ble.c) 与保存后自动加载 [service_file.c](file:///e:/project/FrameFilm/firmware/frame_film/components/film_service/src/service_file.c) 仍调用）
-- 当前显示文件 id / 装载完成查询已从 service_film 移除，改由 service_file 提供：`service_file_get_current_id(void)`、`service_file_get_load_complete(void)`（BLE `0x08` 现调用 `service_file_get_current_id()`，见 [service_ble.c](file:///e:/project/FrameFilm/firmware/frame_film/components/film_service/src/service_ble.c#L482-L485)）
+- `service_film_display(uint32_t file_id)` —— 加载并渲染单帧/整张静态图（BLE `0x07` [service_ble.c](../../firmware/frame_film_ark/components/film_service/src/service_ble.c) 与保存后自动加载 [service_file.c](../../firmware/frame_film_ark/components/film_service/src/service_file.c) 仍调用）
+- 当前显示文件 id / 装载完成查询已从 service_film 移除，改由 service_file 提供：`service_file_get_current_id(void)`、`service_file_get_load_complete(void)`（BLE `0x08` 现调用 `service_file_get_current_id()`，见 [service_ble.c](../../firmware/frame_film_ark/components/film_service/src/service_ble.c#L548-L551)）
 
 #### 删除（业务上移到 app 层）
 - `service_film_next / prev / clear / set_play_mode`
 - 内部事件 `MSG_FILM_NEXT / MSG_FILM_PREV / MSG_FILM_CLEAR / MSG_FILM_AUTO_PLAY`
-- `film_task_handle` 里的硬绑输入回调（[service_film.c L124-127](file:///e:/project/aitest/FrameFilm-main/firmware/frame_film/components/film_service/src/service_film.c#L124-L127)）：改为 app_manager 统一注册输入并路由。
-- `film_init_event` 里 `FILM_PLAY_MODE_WIFI` 的"等 WiFi → 下载"逻辑（[L187-213](file:///e:/project/aitest/FrameFilm-main/firmware/frame_film/components/film_service/src/service_film.c#L187-L213)）：开机决策上移 app_manager。
+- `film_task_handle` 里的硬绑输入回调（改造前在 `service_film.c`，直接注册 `INPUT_PRESS_*`）：已删除，改由 app_manager 统一注册输入并路由。
+- `film_init_event` 里 `FILM_PLAY_MODE_WIFI` 的"等 WiFi → 下载"逻辑（改造前在 `service_film.c`）：已删除，开机决策上移到 app_manager。
 
 #### 新增（按帧索引渲染，支撑动图）
 ```c
@@ -465,7 +465,7 @@ uint32_t service_film_get_frame_count(uint32_t file_id);   // 读取头 offset 0
 | `0x02` | ColorQual（3 相） | `hal_epd_display_8bpp_mode(buf, 1)` |
 | `0x03` | ColorFast（2 相） | `hal_epd_display_8bpp_mode(buf, 0)` |
 
-> **关键：固件** `epd_spectra_display_color(index8, mode)`（[hal_epd_370.c L505](file:///e:/project/aitest/FrameFilm-main/firmware/frame_film/components/film_hal/src/hal_epd_370.c#L505)）**已实现 `mode` 分派**（`0`=ColorFast 2 相，`1`=ColorQual 3 相）。公开接口 `hal_epd_display_8bpp_mode` 向 service 层暴露 `mode`：
+> **关键：固件** `epd_spectra_display_color(index8, mode)`（[hal_epd_370.c#L1016](../../firmware/frame_film_ark/components/film_hal/src/hal_epd_370.c#L1016)）**已实现 `mode` 分派**（`0`=ColorFast 2 相，`1`=ColorQual 3 相）。公开接口 `hal_epd_display_8bpp_mode` 向 service 层暴露 `mode`：
 > ```c
 > // hal_epd.h 新增：带 mode 的 8bpp 显示（mode 0=ColorFast, 1=ColorQual）
 > void hal_epd_display_8bpp_mode(const unsigned char *index8Data, uint8_t mode);
@@ -488,7 +488,7 @@ uint32_t service_film_get_frame_count(uint32_t file_id);   // 读取头 offset 0
 void   service_file_set_dir(const char *dir);   // 切换目录后清空列表并触发 refresh
 const char *service_file_get_dir(void);
 ```
-内部所有用 `FILM_DIR` 拼接路径处（[L228](file:///e:/project/aitest/FrameFilm-main/firmware/frame_film/components/film_service/src/service_file.c#L228)、[L384](file:///e:/project/aitest/FrameFilm-main/firmware/frame_film/components/film_service/src/service_file.c#L384)、[L419](file:///e:/project/aitest/FrameFilm-main/firmware/frame_film/components/film_service/src/service_file.c#L419)、[L550](file:///e:/project/aitest/FrameFilm-main/firmware/frame_film/components/film_service/src/service_file.c#L550)、[L781](file:///e:/project/aitest/FrameFilm-main/firmware/frame_film/components/film_service/src/service_file.c#L781)）改为读运行时目录。
+内部所有用 `FILM_DIR` 直接拼路径的地方**已改为读运行时目录**：运行时目录由 `service_file_set_dir()` 写入 `m_file_active_dir`（初值见 [service_file.c#L168](../../firmware/frame_film_ark/components/film_service/src/service_file.c#L168)），保存时按帧数分流图片/动图（见 [service_file.c#L738](../../firmware/frame_film_ark/components/film_service/src/service_file.c#L738)）。
 
 #### 新增：宽松校验（替代固定大小过滤）
 把 `file_list_refresh_event` / `MSG_FILE_SAVE_START` 里的 `st.st_size == FILE_EPD_IMGAGE_SIZE` 改为：
@@ -506,7 +506,7 @@ if (ext && strcmp(ext, FILM_FILE_EXT) == 0 && st.st_size >= FILM_HEADER_SIZE)
 
 ### 13.3 配套改动
 
-1. **入口接线**：`film_app_init()` 放入 `film_sys_init()`（[sys_init.c#L73-L80](file:///e:/project/aitest/FrameFilm-main/firmware/frame_film/components/film_sys/src/sys_init.c#L73-L80)）内，在 `film_service_init()` 之后调用；`main.c` 的 `app_main()` 仍只调 `film_sys_init()`，保持单一完整入口。
+1. **入口接线**：`film_app_init()` 放入 `film_sys_init()`（[sys_init.c#L84](../../firmware/frame_film_ark/components/film_sys/src/sys_init.c#L84)）内，在 `film_service_init()` 之后调用；`main.c` 的 `app_main()` 仍只调 `film_sys_init()`，保持单一完整入口。
 2. **输入回调解绑**：`service_film.c` 中硬绑的 `INPUT_PRESS_*` 删除，改由 app_manager 注册并路由。
 3. **时钟 app 时间源（已确认）**：时间源 = WiFi 校时 + 蓝牙校时 + **本地 ESP32 RTC** 兜底（断电保留时间）。加轻量时间抽象（SNTP + RTC）；`hal_epd_clock_demo` 是阻塞演示，生产 app 改为非阻塞 `on_tick` 局部更新。
 4. **跨端一致性**：新增 BLE 命令（`0x3E` 起）同步 `ble-utils.js` / `frame.js` / `blecmd_protocol.md`；v2 颜色编码同步 `hal_epd.h` / `film-utils.js` / `convert.js`。

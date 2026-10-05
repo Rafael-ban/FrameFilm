@@ -500,5 +500,5 @@ hal_epd_init()       → 初始化 SE0368-C 电子纸 (SPI2 半双工三线)
 | Flash / PSRAM | 4MB / Quad SPI |
 | 构建 | 直接 `idf.py build`，仓库内**只有一份 `sdkconfig`**（无 `sdkconfig_{std,pro,max}` 模板） |
 
-> **app 框架主线**：app 层（`film_app`）与 LVGL UI 层（`film_ui`）的新功能以 **`frame_film_ark`** 为主线维护；`frame_film` 中的同构代码保留，但不再跟进 app 框架的新特性。`hal_input.h` 的输入抽象与按键实现仍然保留（无编码器）。
+> **app 框架主线**：app 层（`film_app`）与 LVGL UI 层（`film_ui`）**只存在于 `frame_film_ark`**；`frame_film`（三机型）是经典固件，**没有这两个组件**，也不实现 app 通道 BLE 命令（`0x45~0x4E`）。`hal_input.h` 的输入抽象与按键实现仍然保留（无编码器）。
 

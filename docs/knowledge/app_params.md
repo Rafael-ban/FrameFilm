@@ -2,7 +2,7 @@
 
 > 状态：**设计已定稿**（关键决策见 §10；仅余 `0x20`/`0x21` 处置待定，不阻塞主体实施）
 > 关联文档：[app_layer.md](./app_layer.md)（app 框架）、[ble_commands.md](./ble_commands.md)、`docs/blecmd/blecmd_protocol.md`
-> 关联固件：`firmware/frame_film_ark`（通行证版，**单机型**；app 框架主线）；`firmware/frame_film`（冰箱贴三机型，旧机型维护线，不再跟进 app 框架）
+> 关联固件：`firmware/frame_film_ark`（通行证版，**单机型**；**app 框架与 UI 层仅此一处**，`0x45~0x4E` app 通道命令也仅它实现）；`firmware/frame_film`（冰箱贴三机型，经典固件，**没有 `film_app` / `film_ui` 组件，不实现 app 通道命令**）
 
 ---
 

@@ -12,7 +12,7 @@
 
 三个工程均基于 ESP-IDF 构建，采用相同的三层分层架构。
 
-> **app 框架与 UI 层（`film_app` 的 app 层 + `film_ui` 的 LVGL UI 层）的主线是 `frame_film_ark`**；`frame_film` 里有一份同构代码，但不再跟进 app 框架的新功能。
+> **app 框架与 UI 层（`film_app` + `film_ui`）只存在于 `frame_film_ark`**；`frame_film` 是经典固件，没有这两个组件，也不实现 app 通道 BLE 命令（`0x45~0x4E`）。
 
 ## 硬件平台
 
@@ -23,7 +23,7 @@
 
 ## 目录结构
 
-每个固件工程内部结构一致：
+三个工程的三层结构一致；`frame_film_ark` 另有 `film_ui`（LVGL UI 层）与 `film_app`（app 层）两个组件：
 
 ```
 frame_film/
@@ -31,7 +31,9 @@ frame_film/
 ├── components/
 │   ├── film_sys/         # 系统层：配置、日志、错误码、系统初始化
 │   ├── film_hal/         # 硬件抽象层：EPD、输入、SD、LED、电池、电源
-│   └── film_service/     # 服务层：BLE、文件传输、film 播放、OTA、WiFi、参数
+│   ├── film_service/     # 服务层：BLE、文件传输、film 播放、OTA、WiFi、参数
+│   ├── film_ui/          # LVGL UI 层（仅 frame_film_ark）
+│   └── film_app/         # app 层：开机画面/主菜单/内容 app/系统设置（仅 frame_film_ark）
 ├── partitions.csv        # 分区表（NVS + 双 OTA）
 ├── CMakeLists.txt
 ├── sdkconfig             # 当前生效的 SDK 配置
@@ -102,7 +104,7 @@ film_service → film_hal → film_sys → ESP-IDF
 - OTA 固件升级
 - WiFi 配网与图片下载
 - 低功耗管理与电池电量监测
-- LVGL UI 层与 app 框架（开机画面 / 主菜单 / 图片 / 模板 / 时钟 / 动图 / 通行证 / 系统设置）—— 以 `frame_film_ark` 为主线
+- LVGL UI 层与 app 框架（开机画面 / 主菜单 / 图片 / 模板 / 时钟 / 动图 / 通行证 / 系统设置）—— 仅 `frame_film_ark`
 
 ## 构建说明
 

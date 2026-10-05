@@ -3,14 +3,14 @@
 > 状态：**设计中**（本文档用于累积讨论结论，随迭代更新）
 > 目标：在 app 层内引入**第二个显示层**（LVGL UI 层），与既有"直接显示层"并存；app 声明自己运行在哪一层。
 > 关联文档：[app_layer.md](./app_layer.md)（app 框架）、[app_params.md](./app_params.md)（参数与持久化）
-> 关联固件：`firmware/frame_film_ark`（通行证版，**单机型**；UI 层 / app 框架主线）；`firmware/frame_film`（冰箱贴三机型，旧机型维护线，不再跟进）；LVGL 9.6.0
+> 关联固件：`firmware/frame_film_ark`（通行证版，**单机型**；**UI 层 / app 框架仅此一处**）；`firmware/frame_film`（冰箱贴三机型，经典固件，**没有 `film_ui` / `film_app` 组件**）；LVGL 9.6.0
 
 ---
 
 ## 1. 背景与目标
 
 现有 app 层只有一条显示路径：app 自己把整帧数据交给 `hal_epd_display_film()` / `hal_epd_display_mono()`。
-时钟 app 就是手写 5×7 点阵逐像素绘制（[app_clock.c](../../firmware/frame_film/components/film_app/apps/clock/app_clock.c)），能跑但难以扩展。
+时钟 app 就是手写 5×7 点阵逐像素绘制（[app_clock.c](../../firmware/frame_film_ark/components/film_app/apps/clock/app_clock.c)），能跑但难以扩展。
 
 本次引入 **LVGL** 作为"UI 框架层"，让这类需要排版/文本/控件的 app 用声明式方式构建页面：
 
@@ -30,7 +30,7 @@
 
 ### 2.1 mono 单帧的面板开销是"固定全屏"的
 
-`epd_spectra_mono_write()`（[hal_epd_370.c#L1342-L1362](../../firmware/frame_film/components/film_hal/src/hal_epd_370.c#L1342-L1362)）对每个像素编码
+`epd_spectra_mono_write()`（[hal_epd_370.c#L1342-L1362](../../firmware/frame_film_ark/components/film_hal/src/hal_epd_370.c#L1342-L1362)）对每个像素编码
 `(上一帧, 当前帧)` 的 4bit 跳变码，循环 `EPD_HEIGHT(480)` 行、每行 `EPD_INPUT_LINE(360)` 字节：
 
 ```
@@ -136,7 +136,7 @@ components/film_app/
 
 ### 5.1 app 侧：声明运行在哪一层
 
-[app_interface.h](../../firmware/frame_film/components/film_app/inc/app_interface.h) 追加两个字段，
+[app_interface.h](../../firmware/frame_film_ark/components/film_app/inc/app_interface.h) 追加两个字段，
 **不引入 lvgl 头**（用前向声明维持解耦）：
 
 ```c
@@ -419,7 +419,7 @@ app_task                                ui_task
 
 面板在 mono 与彩色之间切换时**必须重建 mono 会话**——因为彩色路径开头的
 `hal_epd_display_init()`（硬复位）与结尾的 `hal_epd_pwroff()`（DSLP 深睡）都会让
-`m_mono_inited = false`（见 [hal_epd_370.c](../../firmware/frame_film/components/film_hal/src/hal_epd_370.c)）。
+`m_mono_inited = false`（见 [hal_epd_370.c](../../firmware/frame_film_ark/components/film_hal/src/hal_epd_370.c)）。
 
 | 场景 | 面板动作 | 是否闪 |
 |---|---|---|
@@ -669,7 +669,7 @@ static void clock_timer_cb(lv_timer_t *t)
 
 ### 10.4 时间源缺口（需一并处理）
 
-当前 [app_clock.c](../../firmware/frame_film/components/film_app/apps/clock/app_clock.c) 直接用 `time()/localtime_r()`，
+当前 [app_clock.c](../../firmware/frame_film_ark/components/film_app/apps/clock/app_clock.c) 直接用 `time()/localtime_r()`，
 而 [app_layer.md](./app_layer.md) §13.3 计划的"**WiFi(SNTP) + 蓝牙 + 本地 RTC 兜底**时间抽象"
 **至今未实现**。改造时应补上，否则设备重启后时间是随机的：
 
@@ -701,7 +701,7 @@ static void clock_timer_cb(lv_timer_t *t)
 
 | 项 | 说明 | 处置 |
 |---|---|---|
-| **SPI 40MHz 稳定性** | 本次直接从 10MHz 提到 40MHz | 出现花屏/丢帧 → 回退 20MHz（[hal_epd_370.c](../../firmware/frame_film/components/film_hal/src/hal_epd_370.c) 的 `clock_speed_hz`）|
+| **SPI 40MHz 稳定性** | 本次直接从 10MHz 提到 40MHz | 出现花屏/丢帧 → 回退 20MHz（[hal_epd_370.c](../../firmware/frame_film_ark/components/film_hal/src/hal_epd_370.c) 的 `clock_speed_hz`）|
 | **旋转方向** | 90° 顺时针 / 逆时针取决于装配方向 | ✅ 已上机确认 `UI_ROTATE_90_CW = 1` 正确 |
 | **mono 极性** | 已从 `lv_draw_sw_blend_to_i1.c` 源码推导出"I1 白=1"，与 `.film` 相反 | ✅ 已上机确认 `UI_I1_BIT_BLACK = 0` 正确 |
 | **I1 作为 display 格式** | LVGL 有 `lv_draw_sw_blend_to_i1.c`，且 `lv_display_set_color_format` 无格式限制 | ✅ 已上机跑通（见 §6 的调色板前缀陷阱）|
