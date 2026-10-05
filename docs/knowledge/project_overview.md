@@ -11,30 +11,34 @@ FrameFilm（帧影）是一款开源彩色电子纸冰箱贴，基于 ESP32-S3�
 - **许可证**: GPL-3.0
 - **平台**: 嵌入式固件 + Web工具 + 微信小程序
 
-## 两个版本
+## 三条固件线
 
-| | 基础版 (frame_film) | Pro 版 (frame_film_pro) |
-|---|---|---|
-| 固件目录 | `firmware/frame_film/` | `firmware/frame_film_pro/` |
-| 屏幕 | WFT 3.6" 600×400 | SE0368-C 3.68" 792×528 |
-| 交互 | 旋转编码器 | 三按键 |
-| WiFi | 不支持 | 支持 STA + HTTP 下载 |
-| Flash/PSRAM | 4MB / Quad SPI | 16MB / Octal SPI |
-| 电池 | 304040 | 244147 |
-| 磁吸 | 磁铁 | MagSafe |
+| | 冰箱贴三机型 (frame_film) | 通行证版 (frame_film_ark) | 底座 (frame_film_dock) |
+|---|---|---|---|
+| 固件目录 | `firmware/frame_film/` | `firmware/frame_film_ark/` | `firmware/frame_film_dock/` |
+| 定位 | 旧机型维护线 | **app 框架主线**（`film_app` + `film_ui`） | USB 复合设备（声卡 + HID + CDC） |
+| 机型 | 三机型 STD / PRO / MAX（机型宏 + 屏幕宏） | **单机型**，硬件固定 | 单机型 |
+| 屏幕 | E6 系列多款（`hal_epd.h` 的 `EPD_SELECT_E6_*`） | E6 3.70" 720×480（面板 `0x02`） | E6 3.64" 760×568（面板 `0x06`） |
+| BLE 名 | — | `FRAMEFILMARK` | `FRAMEFILMDOCK` |
+| 构建 | `cp sdkconfig_{std,pro,max} sdkconfig` 后 `idf.py build` | 直接 `idf.py build`（只有一份 `sdkconfig`） | 直接 `idf.py build` |
+
+> 冰箱贴固件（`frame_film` 与 `frame_film_ark`）的 **BLE 协议完全同源**：同一套命令值与回包格式。app 框架（app 层 + LVGL UI 层）的新功能以 `frame_film_ark` 为主线，`frame_film` 不再跟进。
 
 ## 目录结构速览
 
 ```
 FrameFilm/
 ├── firmware/                    # 固件
-│   ├── frame_film/              #   基础版 (ESP-IDF)
+│   ├── frame_film/              #   冰箱贴三机型 (ESP-IDF)
 │   │   ├── main/main.c          #     入口
 │   │   └── components/
 │   │       ├── film_sys/        #       系统层 (日志/NVS/配置)
 │   │       ├── film_hal/        #       硬件抽象层 (EPD/电池/LED/SD/编码器)
-│   │       └── film_service/    #       服务层 (BLE/文件/OTA/WiFi/参数)
-│   └── frame_film_pro/          #   Pro 版 (结构相同)
+│   │       ├── film_service/    #       服务层 (BLE/文件/OTA/WiFi/参数)
+│   │       ├── film_app/        #       app 层 (框架核心/页面/内容 app)
+│   │       └── film_ui/         #       LVGL UI 层
+│   ├── frame_film_ark/          #   通行证版 单机型 (app 框架主线，结构同上)
+│   └── frame_film_dock/         #   底座 单机型 (另含 USB 复合设备)
 ├── tools/                       # 客户端工具
 │   ├── wechart/miniprogram/     #   微信小程序 (BLE + WiFi配网)
 │   │   └── utils/
@@ -68,11 +72,14 @@ FrameFilm/
 
 ### 构建命令
 ```bash
-# 基础版
-cd firmware/frame_film && idf.py build flash monitor
+# 冰箱贴三机型：先按机型拷贝 sdkconfig，再构建
+cd firmware/frame_film && cp sdkconfig_std sdkconfig && idf.py build flash monitor
 
-# Pro 版
-cd firmware/frame_film_pro && idf.py build flash monitor
+# 通行证版（单机型，无需拷贝）
+cd firmware/frame_film_ark && idf.py build flash monitor
+
+# 底座（单机型）
+cd firmware/frame_film_dock && idf.py build flash monitor
 ```
 
 ## 关键技术概念

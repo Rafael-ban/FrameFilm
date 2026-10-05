@@ -6,10 +6,13 @@
 
 | 工程 | 用途 | 设备名 |
 |------|------|--------|
-| [`frame_film/`](frame_film/) | 冰箱贴本体固件（多机型） | `FRAMEFILM` / `FRAMEFILMPRO` / `FRAMEFILMMAX` |
+| [`frame_film/`](frame_film/) | 冰箱贴本体固件（**三机型**，旧机型维护线） | `FRAMEFILM` / `FRAMEFILMPRO` / `FRAMEFILMMAX` |
+| [`frame_film_ark/`](frame_film_ark/) | 通行证版固件（**单机型**，app 框架主线） | `FRAMEFILMARK` |
 | [`frame_film_dock/`](frame_film_dock/) | 充电底座固件（单机型） | `FRAMEFILMDOCK` |
 
-两个工程均基于 ESP-IDF 构建，采用相同的三层分层架构。
+三个工程均基于 ESP-IDF 构建，采用相同的三层分层架构。
+
+> **app 框架与 UI 层（`film_app` 的 app 层 + `film_ui` 的 LVGL UI 层）的主线是 `frame_film_ark`**；`frame_film` 里有一份同构代码，但不再跟进 app 框架的新功能。
 
 ## 硬件平台
 
@@ -32,10 +35,12 @@ frame_film/
 ├── partitions.csv        # 分区表（NVS + 双 OTA）
 ├── CMakeLists.txt
 ├── sdkconfig             # 当前生效的 SDK 配置
-└── sdkconfig_{std,pro,max}  # 各机型 SDK 配置
+└── sdkconfig_{std,pro,max}  # 各机型 SDK 配置（仅 frame_film；ark/dock 只有一份 sdkconfig）
 ```
 
-## 机型与屏幕（三机型，屏幕可自由选择）
+## 机型与屏幕（仅 `frame_film`：三机型，屏幕可自由选择）
+
+> 本节及其中的屏幕支持列表**只适用于 `frame_film/`**。`frame_film_ark/`（通行证版）是单机型固件，没有机型宏与屏幕切换，规格固定，见本节末尾。
 
 统一固件 `frame_film/` 的硬件由两处编译期配置共同决定：
 
@@ -62,6 +67,20 @@ frame_film/
 
 机型差异（输入设备、SD/电池/LED 引脚）用 `FRAMEFILM_STD/PRO/MAX` 宏隔离；屏幕差异用 `EPD_SELECT_E6_*` 宏隔离。
 
+### frame_film_ark（通行证版，单机型）
+
+| 项 | 固定值 |
+|----|--------|
+| 设备名 | `FRAMEFILMARK` |
+| 屏幕 | E6 3.70" 720×480（面板 ID `0x02`，驱动 `hal_epd_370.c`） |
+| 输入 | 三按键：上 GPIO6 / 下 GPIO4 / 确认 GPIO5（**低电平有效**） |
+| LED / 电池 / SD | 有 WS2812（呼吸灯：白=未连接、绿=已连、红=低电）、有电池检测、SD 有检测脚 |
+| 唤醒脚 | GPIO5（低电平） |
+| Flash / PSRAM | 4MB / Quad SPI |
+| sdkconfig | 只有一份 `sdkconfig`，无需 `cp` |
+
+相对 `frame_film` **已删除**：`FRAMEFILM_STD/PRO/MAX` 机型宏、全部 `EPD_SELECT_E6_*` 屏幕选择宏、其余屏幕驱动（`hal_epd_360.c` / `hal_epd_364.c` / `hal_epd_368.c` / `hal_epd_709.c`）、STD 专用编码器实现（`hal_encoder.c`）、`sdkconfig_{std,pro,max}`。
+
 ## 架构
 
 ```
@@ -83,22 +102,25 @@ film_service → film_hal → film_sys → ESP-IDF
 - OTA 固件升级
 - WiFi 配网与图片下载
 - 低功耗管理与电池电量监测
+- LVGL UI 层与 app 框架（开机画面 / 主菜单 / 图片 / 模板 / 时钟 / 动图 / 通行证 / 系统设置）—— 以 `frame_film_ark` 为主线
 
 ## 构建说明
 
 使用 ESP-IDF v5.5.2 进行开发和烧录（非 PlatformIO）。
 
 ```bash
+# frame_film（三机型：先选机型与屏幕）
 cd firmware/frame_film
 cp sdkconfig_std sdkconfig               # 按机型选 sdkconfig_{std,pro,max}
 # 编辑 components/film_sys/inc/sys_cfg.h，置对应机型宏为 1（三选一）
 # 编辑 components/film_hal/inc/hal_epd.h，在机型分支内选择目标屏幕（EPD_SELECT_E6_* 置 1）
 idf.py build flash monitor
-```
 
-底座固件同理：
+# frame_film_ark（通行证版，单机型：无配置步骤）
+cd firmware/frame_film_ark
+idf.py build flash monitor
 
-```bash
+# frame_film_dock（底座，单机型：无配置步骤）
 cd firmware/frame_film_dock
 idf.py build flash monitor
 ```

@@ -1,6 +1,8 @@
 # BLE 命令速查表
 
 > AI 开发快速参考 — 完整命令列表、数据格式、使用示例
+>
+> 协议在冰箱贴固件（`frame_film` 三机型 / `frame_film_ark` 单机型）**完全同源**；app 框架相关通道以 `frame_film_ark` 为主线；底座 `frame_film_dock` 另有专属通道。
 
 ## 数据包格式
 

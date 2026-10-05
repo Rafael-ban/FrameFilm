@@ -95,13 +95,15 @@ FrameFilm/
 │   └── wifi/                  # WiFi 功能说明（Pro 版）
 │
 ├── firmware/                   # 设备固件 (ESP-IDF)
-│   └── frame_film/
-│       ├── components/
-│       │   ├── film_service/  # 服务层
-│       │   ├── film_sys/      # 系统层
-│       │   └── film_hal/      # 硬件抽象层
-│       ├── main/              # 主程序
-│       └── sdkconfig_*        # 各机型配置 (std/pro/max)
+│   ├── frame_film/            # 冰箱贴本体（三机型，可切换屏幕）
+│   │   ├── components/
+│   │   │   ├── film_service/  # 服务层
+│   │   │   ├── film_sys/      # 系统层
+│   │   │   └── film_hal/      # 硬件抽象层
+│   │   ├── main/              # 主程序
+│   │   └── sdkconfig_*        # 各机型配置 (std/pro/max)
+│   ├── frame_film_ark/        # 通行证版（单机型；app 框架主线）
+│   └── frame_film_dock/       # 充电底座（单机型）
 │
 ├── hardware/                   # 硬件设计
 │   ├── pcb/                   # PCB 电路原理图
@@ -125,7 +127,11 @@ FrameFilm/
 
 ### 固件开发
 
-固件为多机型统一源码，编译前需先完成机型配置（替换 sdkconfig + 修改设备类型宏），再编译烧录。
+固件分三个工程，**只有 `frame_film` 需要先做机型配置**（替换 sdkconfig + 修改机型宏 + 选屏）；`frame_film_ark`（通行证版，单机型）与 `frame_film_dock`（底座，单机型）直接编译烧录。
+
+> app 框架与 UI 层（LVGL UI 层 + app 层）以 `frame_film_ark` 为主线。
+
+以下为 **`frame_film`（三机型）** 的配置步骤：
 
 1. **环境要求**
    - ESP-IDF v5.3+
@@ -166,13 +172,23 @@ FrameFilm/
    idf.py flash monitor
    ```
 
+**通行证版 / 底座（单机型，无配置步骤）：**
+
+```bash
+cd firmware/frame_film_ark   # 通行证版 FRAMEFILMARK（3.70" 720×480，三按键）
+idf.py build flash monitor
+
+cd firmware/frame_film_dock  # 充电底座
+idf.py build flash monitor
+```
+
 #### 使用 VS Code ESP-IDF 插件
 
 项目已包含 `.vscode/settings.json`（IDF 路径已配置），按以下步骤即可编译烧录：
 
 1. 安装扩展：VS Code 扩展商店搜索 **Espressif IDF** 并安装
-2. 打开项目：文件 → 打开文件夹 → 选择 `firmware/frame_film`
-3. 配置机型：与命令行方式相同（替换 `sdkconfig` + 修改 `sys_cfg.h` 机型宏）
+2. 打开项目：文件 → 打开文件夹 → 选择 `firmware/frame_film`（通行证版选 `firmware/frame_film_ark`，底座选 `firmware/frame_film_dock`）
+3. 配置机型：与命令行方式相同（替换 `sdkconfig` + 修改 `sys_cfg.h` 机型宏）—— **仅 `frame_film` 需要；`frame_film_ark` / `frame_film_dock` 跳过此步**
 4. 选择目标芯片：底部状态栏点击芯片图标，选择 **esp32s3**
 5. 选择串口：底部状态栏点击 **COM 端口**，选择设备对应的串口
 6. 编译：点击底部状态栏的 **构建图标（火焰）**，或按 `Ctrl+E` 然后 `B`

@@ -3,7 +3,7 @@
 > 状态：**设计中**（本文档用于累积讨论结论，随迭代更新）
 > 目标：在 app 层内引入**第二个显示层**（LVGL UI 层），与既有"直接显示层"并存；app 声明自己运行在哪一层。
 > 关联文档：[app_layer.md](./app_layer.md)（app 框架）、[app_params.md](./app_params.md)（参数与持久化）
-> 关联固件：`firmware/frame_film`（单固件，三机型）；LVGL 9.6.0
+> 关联固件：`firmware/frame_film_ark`（通行证版，**单机型**；UI 层 / app 框架主线）；`firmware/frame_film`（冰箱贴三机型，旧机型维护线，不再跟进）；LVGL 9.6.0
 
 ---
 
@@ -512,7 +512,8 @@ if(key == INPUT_PRESS_LONG && app_menu_available()) { app_menu_open(); return AP
 ### 9.1 必须修改的 Kconfig 项
 
 当前 LVGL 走 Kconfig（`CONFIG_LV_CONF_SKIP=y`，仓库内**无 `lv_conf.h`**），
-改动需落在 `sdkconfig` **以及** `sdkconfig_{std,pro,max}` 三份模板。
+改动需落在 `sdkconfig` **以及** `sdkconfig_{std,pro,max}` 三份模板
+（**仅 `frame_film` 适用**；`frame_film_ark` 只有一份 `sdkconfig`）。
 
 | 配置项 | 现值 | 目标 | 理由 |
 |---|---|---|---|
@@ -583,7 +584,7 @@ CONFIG_SPIRAM_RODATA=y               # 只读数据也放 PSRAM
 > **为什么"以前不紧张"**：LVGL 此前未被任何代码引用，链接器把 12.85MB 的
 > `liblvgl__lvgl.a` 整个丢弃，镜像小得多；接入 UI 层后镜像骤增，PSRAM 就被镜像吃光了。
 
-**处置：已关闭这两个选项**（`sdkconfig` 与三份机型模板同步）。
+**处置：已关闭这两个选项**（`sdkconfig` 与三份机型模板同步；**仅 `frame_film` 适用**，`frame_film_ark` 只有一份 `sdkconfig`）。
 代价是代码/只读数据改从 flash 经 cache 执行，性能略降；
 收益是**释放约 1.7MB PSRAM**，345KB 的 8bpp film 与 86KB 的 UI 缓冲都能从容放下。
 对冰箱贴这类应用性能不敏感，这个取舍是明确的。
@@ -718,7 +719,7 @@ static void clock_timer_cb(lv_timer_t *t)
 ## 13. 实施步骤
 
 1. **SPI 提速**：`hal_epd_370.c` 的 `clock_speed_hz` → 40MHz。✅ 已完成
-2. **LVGL 配置落地**：按 §9.1 改 `sdkconfig`，并同步 `sdkconfig_{std,pro,max}`（原本三份模板**没有任何 LV_ 配置**，已整体补入）；`sys_cfg.h` 加 `SYS_UI_ENABLE`。✅ 已完成
+2. **LVGL 配置落地**：按 §9.1 改 `sdkconfig`，并同步 `sdkconfig_{std,pro,max}`（原本三份模板**没有任何 LV_ 配置**，已整体补入；**仅 `frame_film` 适用**，`frame_film_ark` 只有一份 `sdkconfig`）；`sys_cfg.h` 加 `SYS_UI_ENABLE`。✅ 已完成
 3. **`film_ui` 骨架**：`ui_conf.h` / `ui_core.h` / `ui_ops.h` / `ui_display.h` + `ui_core.c`（lv_init、display、tick、队列、任务、状态机、pause/resume 握手）。✅ 已完成
 4. **显示链路**：`ui_display.c` 的 `flush_cb` + `ui_i1_to_mono()`（转置 + 极性）。✅ 已完成
 5. **接口接线**：`app_interface.h` 加 `layer`/`ui_ops`；`film_app` CMake 加 `REQUIRES film_ui`。✅ 已完成

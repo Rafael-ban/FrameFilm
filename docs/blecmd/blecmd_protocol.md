@@ -4,6 +4,10 @@
 
 本文档定义 FrameFilm 设备与上位机之间的 BLE（蓝牙低功耗）通信协议。协议采用 GATT 方式进行数据传输，支持 FILM 文件传输、OTA 固件升级、设备控制、WiFi 网络配置等功能。
 
+> **同源说明**：两套冰箱贴固件 —— `firmware/frame_film/`（三机型）与 `firmware/frame_film_ark/`（通行证版，单机型）—— 的 BLE 协议**完全同源**：命令值、数据格式与回包结构一致。
+> app 框架相关通道（App 控制 / App 参数等）以 `frame_film_ark` 为主线维护。
+> 底座固件 `firmware/frame_film_dock/` 在其基础上另有专属通道（见 §3.8 键盘键值），差异以各节标注为准。
+
 ## 2. 协议框架
 
 ### 2.1 BLE GATT 通道
@@ -1287,7 +1291,7 @@ LEN   = 24
 
 ### 4.10 远程按键注入（0x4E，仅冰箱贴）
 
-> 通道概览见 §3.10。仅 `firmware/frame_film/` 实现（Dock 底座不支持）。
+> 通道概览见 §3.10。仅冰箱贴固件（`firmware/frame_film/` 与 `firmware/frame_film_ark/`）实现，Dock 底座不支持。
 
 #### 4.10.1 KEY_INJECT (0x4E) - 注入一次按键
 

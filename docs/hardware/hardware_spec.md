@@ -4,10 +4,13 @@
 
 FrameFilm（帧影）是一款电子胶片冰箱贴设备，核心功能是通过彩色电子纸显示屏展示照片。设备由 ESP32-S3 主控芯片驱动，支持 BLE 无线通信与手机小程序交互，使用可充电锂电池供电，具备深度睡眠低功耗管理能力。
 
-设备有两个硬件/固件版本：
+仓库现含三条固件线，**本文以下 §2 ~ §16 的机型 / 屏幕 / GPIO / 启动流程等规格，均仅适用于 `firmware/frame_film`**（冰箱贴三机型固件，旧机型维护线）：
 
-- **FrameFilm（基础版）**：使用 WFT 系列 3.6" 电子纸 (600×400)，旋转编码器交互
-- **FrameFilm Pro（Pro 版）**：使用 SE0368-C 3.68" 电子纸 (792×528)，三按键交互，支持温度补偿
+- **`firmware/frame_film/`（冰箱贴本体）**：单固件三机型，机型宏 `FRAMEFILM_STD` / `FRAMEFILM_PRO` / `FRAMEFILM_MAX`（`sys_cfg.h`），屏幕可在 `hal_epd.h` 内通过 `EPD_SELECT_E6_*` 宏切换。下面两款即该线的机型：
+  - **FrameFilm（基础版 / STD）**：使用 WFT 系列 3.6" 电子纸 (600×400)，旋转编码器交互
+  - **FrameFilm Pro（Pro 版）**：使用 SE0368-C 3.68" 电子纸 (792×528)，三按键交互，支持温度补偿
+- **`firmware/frame_film_ark/`（通行证版）**：从 `frame_film` 分叉而来的**单机型**固件，硬件固定、无屏幕切换，见 §17。
+- **`firmware/frame_film_dock/`（底座）**：单机型，屏幕 3.64" 760×568（面板 ID `0x06`），另含 USB 复合设备能力。
 
 ***
 
@@ -478,4 +481,24 @@ hal_epd_init()       → 初始化 SE0368-C 电子纸 (SPI2 半双工三线)
 | esp\_adc              | —      | ADC 驱动        |
 
 > 完整依赖信息见 `firmware/frame_film/dependencies.lock`
+
+***
+
+## 17. frame_film_ark（通行证版）固定规格
+
+`firmware/frame_film_ark/` 是从 `frame_film` 分叉出的**通行证版**固件：**单机型、屏幕固定**，**不含**机型宏（`FRAMEFILM_STD/PRO/MAX`）与屏幕选择宏（`EPD_SELECT_E6_*`），也没有其余屏幕驱动（`hal_epd_360/364/368/709.c`）与 STD 专用的 `hal_encoder.c`。
+
+| 项目 | 规格 |
+| ---- | ---- |
+| BLE 广播名 / 厂商名 | `FRAMEFILMARK`（`SYS_DEVICE_NAME` / `SYS_MANUFACTURER_NAME`） |
+| 屏幕 | E6 3.70" **720×480**（面板 ID `0x02`，驱动 `hal_epd_370.c`） |
+| 输入 | 三按键（上 GPIO6 / 下 GPIO4 / 确认 GPIO5，**低电平有效**） |
+| LED | WS2812（GPIO17），白 / 绿 / 红呼吸指示 |
+| 电池检测 | 有（ADC，电源管理同 `frame_film`） |
+| SD 卡 | 有检测脚 |
+| 唤醒 | GPIO5（低电平） |
+| Flash / PSRAM | 4MB / Quad SPI |
+| 构建 | 直接 `idf.py build`，仓库内**只有一份 `sdkconfig`**（无 `sdkconfig_{std,pro,max}` 模板） |
+
+> **app 框架主线**：app 层（`film_app`）与 LVGL UI 层（`film_ui`）的新功能以 **`frame_film_ark`** 为主线维护；`frame_film` 中的同构代码保留，但不再跟进 app 框架的新特性。`hal_input.h` 的输入抽象与按键实现仍然保留（无编码器）。
 

@@ -8,9 +8,12 @@ FrameFilm 项目 AI 开发指南。
 
 - ESP-IDF v5.5.2 (C) · 微信小程序 (ES5) · Web 工具 (ES6)
 - GPL-3.0 · Git 中文 commit: `type(scope): 描述`
-- 两套固件：`firmware/frame_film/`（冰箱贴三机型）、`firmware/frame_film_dock/`（底座，见下方「Dock 底座」）
+- 三套固件：`firmware/frame_film/`（冰箱贴**三机型**，旧机型维护线）、`firmware/frame_film_ark/`（通行证版，**单机型**，见下方「FrameFilm Ark」）、`firmware/frame_film_dock/`（底座，见下方「Dock 底座」）
+- **app 框架 / UI 层（`film_app` + `film_ui`）的主线是 `frame_film_ark`**；`frame_film` 里有一份同构代码，但不再跟进 app 框架的新功能
 
-## 三机型（单固件）
+## 三机型（仅 `frame_film`）
+
+> 本节与下属「屏幕」小节**只适用于 `firmware/frame_film/`**（旧机型维护线）。通行证版 `firmware/frame_film_ark/` 已收敛为单机型，没有机型宏与屏幕切换，见下方「FrameFilm Ark」。
 
 统一固件 `firmware/frame_film/`。硬件版本由两处编译期配置决定：**机型**（`sys_cfg.h`）+ **屏幕**（`hal_epd.h`）。
 
@@ -40,6 +43,24 @@ FrameFilm 项目 AI 开发指南。
 | `EPD_SELECT_E6_7_09_1600_1200` | E6 7.09" 双面板 | 1200×1600 | 0x05 | `hal_epd_709.c` |
 
 > 切换硬件版本 = 改 `sys_cfg.h` 机型宏（+ 对应 `sdkconfig`）+ 改 `hal_epd.h` 屏幕宏。`EPD_PANEL_ID` 随屏幕返回给连接端（BLE `0x42`），用于客户端匹配屏幕。
+
+## FrameFilm Ark（通行证版，单机型）
+
+`firmware/frame_film_ark/` 是从 `frame_film` 分叉的**通行证版（Arknights 通行证主题）**固件，也是 **app 框架 / UI 层的主线**。它已简化为**单机型**：无 `FRAMEFILM_STD/PRO/MAX` 机型宏、无 `EPD_SELECT_E6_*` 屏幕选择宏，硬件规格按编译期常量写死。
+
+| 项 | 固定值 |
+|---|---|
+| BLE 设备名 / 厂商名 | `FRAMEFILMARK` |
+| 屏幕 | E6 3.70" **720×480**，面板 ID `0x02`，驱动 `hal_epd_370.c` |
+| 输入 | 三按键：上 GPIO6 / 下 GPIO4 / 确认 GPIO5（**低有效**） |
+| LED / 电池 / SD | 有 WS2812（白=未连接、绿=已连、红=低电，呼吸）、有电池检测、SD 有检测脚 |
+| 唤醒脚 | GPIO5（低电平） |
+| Flash / PSRAM | 4MB / Quad SPI |
+| sdkconfig | 只有一份 `sdkconfig`，**不需要 `cp`**，直接 `idf.py build` |
+
+- **已删除**（相对 `frame_film`）：其余屏幕驱动 `hal_epd_{360,364,368,709}.c`、STD 专用的 `hal_encoder.c`（无旋转编码器）、`sdkconfig_{std,pro,max}` 与 `sdkconfig.old`
+- 输入仍走 `film_hal` 的按键实现（`hal_input.h` 抽象 + iot_button）；`FRAMEFILM_*` 宏在 ark 里**不存在**，不要往这边带机型分支
+- 目录结构与组件划分和 `frame_film` 同构（`film_sys` / `film_hal` / `film_service` / `film_ui` / `film_app`），跨端常量改动两边都要落
 
 ## Dock 底座（独立固件）
 
@@ -97,8 +118,8 @@ film_service → film_hal → film_sys → ESP-IDF
 
 | 内容 | C 固件 | 小程序 | Web |
 |------|--------|--------|-----|
-| BLE 命令常量 | `service_ble.h` | `ble-utils.js` | `frame.js` |
-| film 颜色编码 | `hal_epd.h` | `film-utils.js` | `convert.js` |
+| BLE 命令常量 | `service_ble.h`（`frame_film` 与 `frame_film_ark` **各一份，两处都要改**） | `ble-utils.js` | `frame.js` |
+| film 颜色编码 | `hal_epd.h`（同上，两套冰箱贴固件各一份） | `film-utils.js` | `convert.js` |
 
 ### 关键常量
 
@@ -119,6 +140,8 @@ film_service → film_hal → film_sys → ESP-IDF
 | 头保护 | `__NAME_H__` | — |
 
 ## 关键文件
+
+> **路径口径**：下表以 `firmware/frame_film/`（三机型线）为基准；`firmware/frame_film_ark/`（通行证版，单机型）**目录结构同构、组件与文件名一致**（差异见其章节：无编码器、只留 `hal_epd_370.c`、无机型/屏幕宏）。**凡路径含 `film_app` / `film_ui` 的条目（app 框架与 UI 层）以 `frame_film_ark/` 为主线**；机型/屏幕宏相关条目仅 `frame_film` 适用；协议与常量类改动两套固件都要落。
 
 | 要改什么 | 核心文件 |
 |---|---|
@@ -152,13 +175,15 @@ film_service → film_hal → film_sys → ESP-IDF
 
 ## 常见陷阱（不要做）
 
+> 以下条目多来自 `frame_film`（三机型）时期的经验，`frame_film_ark`（单机型）同样适用；凡提到 STD/PRO/MAX 分支的地方，在 ark 里只有按键这一套（上6/下4/确认5，低有效），也没有编码器。
+
 1. **不要只在 service 层调 esp_wifi_init 等 ESP-IDF driver** — 必须通过 HAL
-2. **不要只改一个机型的宏分支** — 机型差异代码需覆盖 `FRAMEFILM_STD/PRO/MAX`（EPD 驱动、输入设备、SD 等按宏隔离）
+2. **不要只改一个机型的宏分支** — 机型差异代码需覆盖 `FRAMEFILM_STD/PRO/MAX`（EPD 驱动、输入设备、SD 等按宏隔离）。**此条仅 `frame_film` 适用**：`frame_film_ark` 是刻意的单机型设计，不要往它里面引入机型宏或 `#if` 分支
 3. **不要改 BLE 命令值** — 值一旦定义就固定，新增命令从 `0x3E` 起
 4. **不要假设字符串编码** — BLE 传输一律 ASCII + `\0` 结尾
 5. **不要忘记更新 blecmd_protocol.md** — 协议文档必须与实际实现一致
 6. **不要在 service 层直接操作 GPIO** — 所有硬件操作走 film_hal
-7. **不要机型宏与 sdkconfig 不匹配** — 编译前确认 `sys_cfg.h` 机型宏与 `sdkconfig_{std,pro,max}` 对应一致
+7. **不要机型宏与 sdkconfig 不匹配** — 编译前确认 `sys_cfg.h` 机型宏与 `sdkconfig_{std,pro,max}` 对应一致（**仅 `frame_film`**；`frame_film_ark` 只有一份 `sdkconfig`，无机型宏）
 8. **不要给 dock 随便加 USB IN 端点** — ESP32-S3 的 IN 端点上限是 5（含 EP0），dock 已用满：HID + 音频 mic + 音频反馈 + CDC 数据。新增 USB 功能前必须先释放等量 IN 端点（CDC 的「通知端点」就是因此省掉的）
 9. **不要假设各机型 `0x42` 回包一致** — dock 返回 `面板ID(1)+宽(2)+高(2)`（LEN=5），冰箱贴只返回 `宽(2)+高(2)`（LEN=4）；客户端需按 LEN 区分解析
 10. **不要在 app_task 里碰 `lv_*`** — LVGL 非线程安全，只在 `ui_task` 上下文调用；要向页面推数据走 `ui_core_post()`（下行）、要回写服务层走 `app_manager_post_ui_msg()`（上行），两者都在 `film_app`/`film_ui` 里
@@ -170,6 +195,7 @@ film_service → film_hal → film_sys → ESP-IDF
 16. **不要把"开机行为"塞进 `ServiceParam_Def_t`** — BOOT PAGE / START APP 只描述"上电时 app 层怎么走"，与 service 层无关；改 `ServiceParam_Def_t` 布局会触发**整体重置**，连带清掉 WiFi 配网与时区。已放 app 层保留槽位 `app7`（`SERVICE_PARAM_APP_ID_BOOT_CFG`，见 `app_boot_cfg`），用现成的 app blob 持久化。同理，往 `app_start_t` **尾部追加**时别忘了同步设置页候选表（下标即存盘值）
 17. **不要在遥控（0x4E）链路上另写一份按键语义** — 固件把键值经 `ble_key_to_press()` 映射成与 HAL 同构的 `INPUT_PRESS_*` 入队，因此菜单导航/单击确认/双击退回/长按休眠全部自动一致；新增按键功能只改 `app_manager` 那一处，不要在 BLE 层复刻交互。回显只表示"已收到"，开机卡/休眠卡占屏期间按键照本机语义被丢弃；dock 不支持该通道（其按键是 PC 键盘 HID）
 18. **不要往 `film_app/` 根目录塞源码** — 分层已定：`inc/`（对外公共头，只有 `app_init.h` + `app_interface.h`）、`core/`（框架核心：调度/初始化/渲染/外壳/开机参数）、`pages/`（框架页面：开机画面/主菜单/系统设置/休眠卡，**系统设置属于框架而不是内容 app**）、`apps/<name>/`（内容 app，一个 app 一个文件夹，头文件与源文件同目录）。组件用的是**显式文件列表**（不是 GLOB），新增 `.c` 必须在 `CMakeLists.txt` 的 `srcs` 里登记，新增目录要加进 `INCLUDE_DIRS`，否则静默不编译/找不到头
+19. **不要在 `frame_film_ark` 里重新引入机型/屏幕切换** — 该固件刻意收敛为单机型（`FRAMEFILMARK`、固定 720×480、三按键），`FRAMEFILM_STD/PRO/MAX` 与全部 `EPD_SELECT_E6_*` 已删除；要多机型请改 `firmware/frame_film/`。**裁剪屏幕驱动时务必同时去掉驱动文件里那层 `#if EPD_SELECT_... == 1` 外壳** —— 宏不存在时该条件会静默为假，整个驱动被编译掉，只在链接期报"未定义引用"
 
 ## BLE 协议速览
 
@@ -198,7 +224,7 @@ film_service → film_hal → film_sys → ESP-IDF
 1. `inc/service_xxx.h` + `src/service_xxx.c`
 2. `service_init.c` 调用 init
 3. 如需 BLE 控制 → `service_ble.c` 添加命令
-4. 确认机型差异分支（EPD/输入等用 `FRAMEFILM_*` 宏）
+4. 确认机型差异分支：**仅 `frame_film`**（EPD/输入等用 `FRAMEFILM_*` 宏）；`frame_film_ark` 没有机型宏
 
 ### 新增内容 app（film_app/apps/）
 1. 建目录 `apps/<name>/`，放 `app_<name>.{h,c}`（头文件与源文件同目录）
@@ -211,12 +237,19 @@ film_service → film_hal → film_sys → ESP-IDF
 ## 构建命令
 
 ```bash
+# ── frame_film（三机型：需先选机型与屏幕）──
 cd firmware/frame_film
 cp sdkconfig_std sdkconfig                 # 按机型选 sdkconfig_{std,pro,max}
 # 编辑 components/film_sys/inc/sys_cfg.h，置对应机型宏为 1（三选一）
 # 编辑 components/film_hal/inc/hal_epd.h，在机型分支内选屏幕（EPD_SELECT_E6_* 置 1）
 idf.py build flash monitor
+
+# ── frame_film_ark（通行证版，单机型：无配置步骤）──
+cd firmware/frame_film_ark
+idf.py build flash monitor
 ```
+
+> `frame_film_ark` 与 `frame_film_dock` 都只有一份 `sdkconfig`：**不需要 `cp`，也不需要改机型/屏幕宏**。
 
 ## 文档索引
 

@@ -2,6 +2,8 @@
 
 > 固件三层架构 + 双版本差异 + 组件依赖关系
 
+> **适用范围**：本文描述的机型差异（"基础版 / Pro 版"即 `frame_film` 的 STD / PRO 机型）**仅适用于 `firmware/frame_film`**（冰箱贴三机型，旧机型维护线）。新固件 `frame_film_ark`（通行证版）为**单机型**、屏幕固定，无此类差异；app 框架（`film_app`）与 UI 层（`film_ui`）主线在 `frame_film_ark`，`frame_film` 不再跟进。
+
 ## 固件分层架构
 
 ```
