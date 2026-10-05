@@ -29,7 +29,6 @@ typedef enum {
     INPUT_PRESS_UP,     // 编码器+
     INPUT_PRESS_DOWN,   // 编码器-
     INPUT_PRESS_PRESSED,
-    INPUT_PRESS_DOUBLE, // 确认键双击（app_manager 用它"退出 app"）
     INPUT_PRESS_MAX,
 } input_press_type_t;
 

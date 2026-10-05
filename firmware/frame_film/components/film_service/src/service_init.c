@@ -34,7 +34,6 @@
 #include "service_monitor.h"
 #include "service_file.h"
 #include "service_film.h"
-#include "service_time.h"
 #include "service_wifi.h"
 
 
@@ -78,8 +77,6 @@ void film_service_init(void)
 {
     // 初始化服务参数
     service_param_init();
-    // 初始化时间服务（把已保存的时区应用到 libc，必须在参数加载之后）
-    service_time_init();
     // 初始化WiFi服务
     service_wifi_init();
     // 初始化ble服务

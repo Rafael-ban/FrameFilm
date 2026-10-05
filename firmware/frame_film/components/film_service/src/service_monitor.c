@@ -55,19 +55,9 @@
 #define SYS_OS_NAME_MONITOR_TASK                 "monitor_task"
 
 // LED管理参数
-#define MONITOR_LED_UPDATE_INTERVAL_MS           (500)    // LED状态更新间隔 500ms（只决定"颜色多久复核一次"，呼吸节拍在 hal_led 里）
-// 呼吸亮度区间（0~100）。两端不取 0/100：不熄灭（最暗仍有底光）也不会太刺眼。
-// 换算成 WS2812 通道值 = 255 × 该值 / 100，当前 1~10 即 2~25。
-// 暗端发涩可以把 MIN 往上提：通道差 1 级在暗端的**相对**变化很大（2→3 是 50% 亮度），
-// MIN 提到 3 后单级变化降到 ~8%，代价是最暗不再那么暗。
-#define MONITOR_LED_BREATH_MIN                   (1)
-#define MONITOR_LED_BREATH_MAX                   (10)
-// 呼吸周期（毫秒）：只决定快慢，跟平滑度无关（抖动节拍固定 200Hz，在 hal_led 里）。
-// 觉得太快就调大这个值，不会变粗糙。
-#define MONITOR_LED_BREATH_PERIOD_MS             (3000)
-// "自动"模式（SERVICE_LED_MODE_AUTO）：这么久没有操作就熄灭。
-// 有操作（按键 / 蓝牙连接状态变化）即重新计时，见 monitor_encoder_activity_cb()。
-#define MONITOR_LED_AUTO_OFF_SEC                 (20)
+#define MONITOR_LED_UPDATE_INTERVAL_MS           (500)    // LED状态更新间隔 500ms
+#define MONITOR_LED_BLINK_ON_TICKS               (1)      // LED闪烁点亮tick数 (1 * 500ms = 500ms亮)
+#define MONITOR_LED_BLINK_OFF_TICKS              (3)      // LED闪烁熄灭tick数 (3 * 500ms = 1500ms灭)
 // 电池管理参数     
 #define MONITOR_BAT_CHECK_INTERVAL_MS            (30000)  // 电池检测间隔 30s
 #define MONITOR_BAT_LOW_THRESHOLD                (10)     // 低电量阈值 10%
@@ -87,7 +77,6 @@
 
 #define MONITOR_TIMER_BASE_INTERVAL_MS           (100)
 #define MONITOR_LED_TICK_COUNT                   (MONITOR_LED_UPDATE_INTERVAL_MS / MONITOR_TIMER_BASE_INTERVAL_MS)
-#define MONITOR_LED_AUTO_OFF_TICKS               (MONITOR_LED_AUTO_OFF_SEC * 1000 / MONITOR_LED_UPDATE_INTERVAL_MS)
 #define MONITOR_BAT_TICK_COUNT                   (MONITOR_BAT_CHECK_INTERVAL_MS / MONITOR_TIMER_BASE_INTERVAL_MS)
 #define MONITOR_SLEEP_TICK_COUNT                 (MONITOR_SLEEP_CHECK_INTERVAL_MS / MONITOR_TIMER_BASE_INTERVAL_MS)
 #define MONITOR_AUTO_SLEEP_TICK_COUNT            (MONITOR_AUTO_SLEEP_TIMEOUT_SEC * 1000 / MONITOR_SLEEP_CHECK_INTERVAL_MS)
@@ -99,11 +88,8 @@
 typedef struct
 {
     uint8_t ble_connected;
-    uint8_t ble_connected_prev;  // 用于把"连接状态变化"也算成一次操作
     uint8_t bat_level;
-    uint8_t led_on;              // LED 当前是否点着（关闭模式 / 自动熄灯都会置 0）
-    uint32_t led_color;          // 当前呼吸的颜色（0 = 未点着）
-    uint32_t led_idle_ticks;     // "自动"模式下距上次操作的节拍数
+    uint8_t led_state;
     uint32_t sleep_counter;
     uint8_t last_encoder_state;
     uint32_t tick_counter;
@@ -138,7 +124,6 @@ static void monitor_timer_callback(TimerHandle_t xTimer);
 static void monitor_led_manage_event(void);
 static void monitor_battery_manage_event(void);
 static void monitor_auto_sleep_manage_event(void);
-static void monitor_manual_sleep_event(void);
 static void monitor_enter_low_power(void);
 static void monitor_encoder_activity_cb(void);
 
@@ -151,6 +136,7 @@ void service_monitor_init(void)
 {
     memset(&m_monitor_state, 0, sizeof(monitor_state_t));
     m_monitor_state.bat_level = 100;
+    m_monitor_state.led_state = 0;
     m_monitor_state.tick_counter = 0;
 
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
@@ -187,22 +173,6 @@ void service_monitor_init(void)
     hal_input_register_cb(INPUT_PRESS_DOWN, monitor_encoder_activity_cb);
 }
 
-void service_monitor_request_sleep(void)
-{
-    monitor_msg_t msg;
-
-    if(m_monitor_msg_hdl == NULL)
-    {
-        /* monitor 任务还没起来（或创建失败）：不能静默 —— 调用方以为睡了，其实没睡 */
-        sys_loge(MONITOR_TAG, "sleep request dropped: monitor task not ready");
-        return;
-    }
-
-    msg.ID = MSG_ENTER_SLEEP;
-    monitor_msg_send(&msg, 0);
-    sys_logi(MONITOR_TAG, "manual sleep requested");
-}
-
 static void monitor_task_handle(void *pvParameters)
 {
     m_monitor_msg_hdl = xQueueCreate( MONITOR_MSG_QUEUE_LENGTH, MONITOR_MSG_QUEUE_ITEM_SIZE );
@@ -223,9 +193,6 @@ static void monitor_task_handle(void *pvParameters)
             break;
         case MSG_AUTO_SLEEP_MANAGER :
             monitor_auto_sleep_manage_event();
-            break;
-        case MSG_ENTER_SLEEP :
-            monitor_manual_sleep_event();
             break;
         default :
             break;
@@ -278,18 +245,10 @@ static void monitor_timer_callback(TimerHandle_t xTimer)
 
 static void monitor_led_manage_event(void)
 {
-    uint8_t mode = g_service_param.sys.led_mode;
     uint32_t led_color;
-    uint8_t want_on;
+    uint32_t blink_cycle = MONITOR_LED_BLINK_ON_TICKS + MONITOR_LED_BLINK_OFF_TICKS;
 
     m_monitor_state.ble_connected = service_ble_gatts_get_connect();
-
-    /* 连接状态变化也算一次"操作"：插上手机时灯要立刻亮起来报状态 */
-    if(m_monitor_state.ble_connected != m_monitor_state.ble_connected_prev)
-    {
-        m_monitor_state.ble_connected_prev = m_monitor_state.ble_connected;
-        m_monitor_state.led_idle_ticks = 0;
-    }
 
     if(m_monitor_state.bat_level < MONITOR_BAT_LOW_THRESHOLD)
     {
@@ -304,42 +263,16 @@ static void monitor_led_manage_event(void)
         led_color = LED_COLOR_WHITE;
     }
 
-    /* ---- 先判"该不该亮"（关闭模式 / 自动模式闲置超时） ---- */
-    want_on = 1;
-    if(mode == SERVICE_LED_MODE_OFF)
+    // 闪烁控制: led_state作为周期计数器
+    m_monitor_state.led_state = (m_monitor_state.led_state + 1) % blink_cycle;
+    if(m_monitor_state.led_state < MONITOR_LED_BLINK_ON_TICKS)
     {
-        want_on = 0;
+        hal_led_set_color(led_color);
+        hal_led_set_brightness(5);
     }
-    else if(mode == SERVICE_LED_MODE_AUTO
-            && m_monitor_state.led_idle_ticks >= MONITOR_LED_AUTO_OFF_TICKS)
+    else
     {
-        want_on = 0;
-    }
-
-    if(!want_on)
-    {
-        if(m_monitor_state.led_on)
-        {
-            hal_led_breath_stop();
-            hal_led_set_color(LED_COLOR_BLACK);
-            m_monitor_state.led_on = 0;
-            m_monitor_state.led_color = 0;
-        }
-    }
-    /* 这里只决定"亮什么色"，呼吸的明暗节拍由 hal_led 自己跑。
-       颜色没变就不重启：重启会把相位拉回 0，看着像闪了一下。 */
-    else if(!m_monitor_state.led_on || led_color != m_monitor_state.led_color)
-    {
-        m_monitor_state.led_on = 1;
-        m_monitor_state.led_color = led_color;
-        hal_led_breath_start(led_color, MONITOR_LED_BREATH_MIN, MONITOR_LED_BREATH_MAX,
-                             MONITOR_LED_BREATH_PERIOD_MS);
-    }
-
-    /* 自动模式：没操作就把闲置计数往前推（其它模式不需要计时） */
-    if(mode == SERVICE_LED_MODE_AUTO && m_monitor_state.led_idle_ticks < MONITOR_LED_AUTO_OFF_TICKS)
-    {
-        m_monitor_state.led_idle_ticks++;
+        hal_led_set_color(LED_COLOR_BLACK);
     }
 }
 
@@ -385,29 +318,6 @@ static void monitor_auto_sleep_manage_event(void)
     }
 }
 
-/**
- * @brief 手动休眠（主菜单长按）：直接进低功耗
- *
- * **不看休眠模式开关**：用户明确按下的动作就该执行，那个开关管的是自动休眠。
- * 定时唤醒仍按既有条件跟随参数（与自动休眠路径同一判据），
- * 休眠卡页脚那句 AUTO WAKE 用的也是这个条件，两边必须一致。
- */
-static void monitor_manual_sleep_event(void)
-{
-    if(g_service_param.sleep.sleep_auto && g_service_param.sleep.sleep_time > 0)
-    {
-        hal_pwr_set_timer_wakeup(g_service_param.sleep.sleep_time);
-        sys_logi(MONITOR_TAG, "manual sleep, timer wake in %d min",
-                 g_service_param.sleep.sleep_time);
-    }
-    else
-    {
-        sys_logi(MONITOR_TAG, "manual sleep, no timer wake");
-    }
-
-    monitor_enter_low_power();
-}
-
 static void monitor_enter_low_power(void)
 {
     xTimerStop(m_monitor_timer, 0);
@@ -426,5 +336,4 @@ static void monitor_enter_low_power(void)
 static void monitor_encoder_activity_cb(void)
 {
     m_monitor_state.sleep_counter = 0;
-    m_monitor_state.led_idle_ticks = 0;   // 有操作 → "自动"模式的熄灯计时重新开始
 }

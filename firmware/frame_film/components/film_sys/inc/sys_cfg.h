@@ -31,35 +31,17 @@ extern "C" {
 #error "机型配置错误：只能选择一个机型"
 #endif
 
-// App 切换交互模式三选一
-#define SYS_APP_SWITCH_NONE            0   // 关闭按键切换（BLE 远程切换仍有效，纯相框）
-#define SYS_APP_SWITCH_SIMPLE          1   // 简易：图片 <-> 最近推送的 app，上/下回图片，确认键互切
-#define SYS_APP_SWITCH_FULL            2   // 全功能：主菜单（上电落在主菜单，其余 app 双击退出回它；需 UI 层支持，否则自动降级为简易模式）
-#define SYS_APP_SWITCH_MODE            SYS_APP_SWITCH_FULL
-#if (SYS_APP_SWITCH_MODE != SYS_APP_SWITCH_NONE) && \
-    (SYS_APP_SWITCH_MODE != SYS_APP_SWITCH_SIMPLE) && \
-    (SYS_APP_SWITCH_MODE != SYS_APP_SWITCH_FULL)
-#error "App 切换模式配置错误：SYS_APP_SWITCH_MODE 只能取 NONE/SIMPLE/FULL"
-#endif
-
-// UI 框架层（LVGL）编译开关：0 = 整层裁掉（ui_core_* 退化为空实现，LVGL 不参与链接）
-// 运行期还会再按面板能力判定（需 MonoFast，即 3.7" 屏）；两者都满足 UI 层才真正可用。
-#define SYS_UI_ENABLE                  1
-
 #if FRAMEFILM_STD == 1
 #define SYS_DEVICE_NAME                "FRAMEFILM"
 #define SYS_MANUFACTURER_NAME          "FRAMEFILM"
-#define SYS_INPUT_HAS_NAV_ENTER        1   // 旋转编码器：A/B 导航 + 按键确认
 #endif
 #if FRAMEFILM_PRO == 1
 #define SYS_DEVICE_NAME                "FRAMEFILMPRO"
 #define SYS_MANUFACTURER_NAME          "FRAMEFILMPRO"
-#define SYS_INPUT_HAS_NAV_ENTER        1   // 三按键：上/下/确认
 #endif
 #if FRAMEFILM_MAX == 1
 #define SYS_DEVICE_NAME                "FRAMEFILMMAX"
 #define SYS_MANUFACTURER_NAME          "FRAMEFILMMAX"
-#define SYS_INPUT_HAS_NAV_ENTER        1   // 三按键：上/下/确认
 #endif
 
 #define SYS_MODEL_NUMBER               "M1.0"
@@ -72,11 +54,6 @@ extern "C" {
 
 #define SYS_M_NVS_NAMESPACE            "FRAMEFILM_NVS"
 #define SYS_M_NVS_KEY_NAME             "FILMKEY"
-
-// app 状态持久化（与整包 ServiceParam_Def_t 隔离，避免改一个 app 状态就重写整包）
-#define SYS_M_NVS_APP_NAMESPACE        "FRAMEFILM_APP"    // NVS namespace 上限 15 字符
-#define SYS_M_NVS_APP_KEY_CURRENT      "cur_app"          // 框架当前 app id
-#define SYS_M_NVS_APP_KEY_PREFIX       "app"              // app 状态 key 前缀：app0 ~ app5
 
 // spiffs
 #define BACE_PATH                      "/spiffs"

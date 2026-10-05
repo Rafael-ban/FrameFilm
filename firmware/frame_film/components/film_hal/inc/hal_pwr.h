@@ -82,20 +82,6 @@ extern void hal_pwr_set_timer_wakeup(uint32_t minutes);
  */
 extern bool hal_pwr_check_wakeup(void);
 
-/**
- * @brief 唤醒条件此刻是否已经成立
- *
- * ext0 是**电平**触发：若在调用 hal_pwr_enter_sleep() 的那一刻唤醒脚就已处于
- * 触发电平，条件当场成立、设备会立刻醒回来。典型场景是"长按唤醒键入睡" ——
- * 长按是在**按住期间**上报的，此刻手指还在键上，而那个脚正是唤醒脚。
- *
- * 所以入睡前必须查一次，等它归为 false 再断电。这里只回答"这一路 GPIO 的电平"，
- * 不关心是哪个按键：三机型的唤醒脚恰好都落在"确认"键上。
- *
- * @return true 已成立（此刻入睡会立刻醒）；false 未成立（可以入睡）
- */
-extern bool hal_pwr_wake_condition_met(void);
-
 
 #ifdef __cplusplus
 }
