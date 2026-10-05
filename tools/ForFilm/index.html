@@ -441,15 +441,12 @@
                         <option value="jarvis">Jarvis-Judice-Ninke</option>
                         <option value="gammaFloydSteinberg">Gamma 感知 FS（线性）</option>
                         <option value="bayer">Bayer 4×4 有序抖动</option>
-                        <option value="colorFast55">55 色 ColorFast（3.7 寸 8bpp）</option>
-                        <option value="colorQual">46 色 ColorQual（3.7 寸 8bpp）</option>
-                        <option value="szEnhanced" disabled>SZ 增强（Pro）</option>
-                        <option value="atkinsonSzCalib" disabled>Atkinson·SZ校色（Pro）</option>
+                        <option value="colorFast55">55 色 ColorFast（通行证版 · 3.7 寸 8bpp）</option>
+                        <option value="colorQual">46 色 ColorQual（通行证版 · 3.7 寸 8bpp）</option>
+                        <option value="szEnhanced" disabled>SZ 增强（Pro / 通行证版）</option>
+                        <option value="atkinsonSzCalib" disabled>Atkinson·SZ校色（Pro / 通行证版）</option>
                     </select>
                     <div class="field-hint" id="bpp8Hint" style="display:none;"></div>
-                    <button type="button" class="secondary-button block-button" id="paletteTestBtn" style="display:none;" onclick="generatePaletteTestPattern()">
-                        <svg class="ic" viewBox="0 0 24 24"><use href="#i-sliders"/></svg> 生成色板测试图（8×8 索引色块）
-                    </button>
                 </div>
                 <div id="ditherStrengthContainer" class="slider-container">
                     <label for="ditherStrength">抖动强度</label>
@@ -618,8 +615,8 @@
                 <div id="keyboard-key-summary" class="keyboard-key-summary"></div>
             </div>
 
-            <!-- 蓝牙遥控（仅冰箱贴机型） -->
-            <div id="remote-section" class="card">
+            <!-- 蓝牙遥控（0x4E 按键注入）：仅通行证版（FRAMEFILMARK）支持，默认隐藏，连上 ARK 才显示 -->
+            <div id="remote-section" class="card" style="display:none;">
                 <div class="card__title">
                     <span class="ic-wrap ic-wrap--coral"><svg class="ic" viewBox="0 0 24 24"><use href="#i-board"/></svg></span>
                     蓝牙遥控
@@ -700,7 +697,8 @@
                     </div>
                 </div>
                 <div class="divider"></div>
-                <div class="action-item" id="time-sync-section">
+                <!-- 时间同步（0x4D）：仅通行证版（FRAMEFILMARK）支持，默认隐藏，连上 ARK 才显示 -->
+                <div class="action-item" id="time-sync-section" style="display:none;">
                     <div class="action-header">
                         <svg class="ic" viewBox="0 0 24 24"><use href="#i-clock"/></svg>
                         <span>时间同步</span>

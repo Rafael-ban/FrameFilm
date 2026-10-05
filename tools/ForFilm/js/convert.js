@@ -71,14 +71,15 @@ function syncAdjustSliders() {
     }
 }
 
-// 8bpp 索引色（ColorFast / ColorQual）只在 3.7" 720×480 屏上开放：该格式主体必须与
-// 驱动读取的 720*480 字节严格一致，其它分辨率下会越界读取，故不支持时禁用并回退
+// 8bpp 索引色（ColorFast 55 色 / ColorQual 46 色）当前**只对通行证版（ARK）开放**，
+// 判据见 is8bppAvailable()（屏幕 720×480 + 机型 FRAMEFILMARK）；
+// 不支持时禁用这两个选项并回退到 Floyd-Steinberg。
 function sync8bppAvailability() {
     var select = document.getElementById('ditherType');
     if (!select) {
         return;
     }
-    var supported = is8bppPanelSupported();
+    var supported = is8bppAvailable();
     Object.keys(CF_PROFILES).forEach(function(key) {
         var option = select.querySelector('option[value="' + key + '"]');
         if (option) {
@@ -93,13 +94,9 @@ function sync8bppAvailability() {
     var profile = CF_PROFILES[select.value];
     if (hint) {
         hint.textContent = profile
-            ? '输出 ' + profile.label + ' 单帧，仅 3.7 寸 720×480 屏可渲染'
+            ? '输出 ' + profile.label + ' 单帧，仅通行证版（Ark，3.7 寸 720×480）可渲染'
             : '';
         hint.style.display = profile ? '' : 'none';
-    }
-    var testBtn = document.getElementById('paletteTestBtn');
-    if (testBtn) {
-        testBtn.style.display = supported ? '' : 'none';
     }
 }
 
@@ -401,70 +398,6 @@ function resetImage() {
     ctx.clearRect(0, 0, getCanvasWidth(), getCanvasHeight());
     document.getElementById('imageResult').innerHTML = '';
     document.getElementById('fileName').value = 'output.film';
-}
-
-// 生成 3.7 寸 8bpp 色板测试图：8×8 个色块，块索引 = 行×8 + 列，
-// 并按该面板 180° 显示方向预先换算，使屏上自上而下、自左而右就是索引 0→63。
-// 用途：发到设备显示后，按实际颜色反推真实「索引 → 颜色」对照，用于校准 CF_PALETTE
-// （索引由固件拆成高/低两个 3bit 平面送面板，实际颜色由面板 LUT 决定）。
-function generatePaletteTestPattern() {
-    if (!is8bppPanelSupported()) {
-        showMessage('色板测试图仅支持 3.7 寸屏（720×480）', 'warning');
-        return;
-    }
-    if (!getActive8bppProfile()) {
-        document.getElementById('ditherType').value = 'colorFast55';
-        syncAdjustSliders();
-        sync8bppAvailability();
-    }
-
-    // 出图不能被对比度/饱和度/抖动改写，先复位这三个滑块
-    document.getElementById('contrast').value = 1;
-    document.getElementById('contrastValue').textContent = '1';
-    document.getElementById('saturation').value = 1;
-    document.getElementById('saturationValue').textContent = '1.0';
-    document.getElementById('ditherStrength').value = 1;
-    document.getElementById('ditherStrengthValue').textContent = '1.0';
-
-    var width = getCanvasWidth();
-    var height = getCanvasHeight();
-    var cellW = width / 8;
-    var cellH = height / 8;
-    var imageData = new ImageData(width, height);
-    var data = imageData.data;
-    var palette = getActive8bppProfile().palette;
-
-    for (var y = 0; y < height; y++) {
-        var row = Math.min(7, Math.floor((height - 1 - y) / cellH));
-        for (var x = 0; x < width; x++) {
-            var col = Math.min(7, Math.floor((width - 1 - x) / cellW));
-            var color = palette[row * 8 + col];
-            var o = (y * width + x) * 4;
-            data[o] = color[0];
-            data[o + 1] = color[1];
-            data[o + 2] = color[2];
-            data[o + 3] = 255;
-        }
-    }
-
-    // 接入现有预览/打包链路：作为 1:1 的"原图"，不做缩放重采样
-    var pattern = document.createElement('canvas');
-    pattern.width = width;
-    pattern.height = height;
-    pattern.getContext('2d').putImageData(imageData, 0, 0);
-
-    originalImage = pattern;
-    uploadedFileName = 'palette_test';
-    canvasRotation = 0;
-    scale = 1.0;
-    offsetX = 0;
-    offsetY = 0;
-    isDragging = false;
-    document.getElementById('fileName').value = 'palette_test.film';
-    document.getElementById('imageResult').innerHTML =
-        '<div class="info">色板测试图：屏上左上角为索引 0，向右递增、逐行到右下角索引 63（索引 = 行×8 + 列）。'
-        + '直接点"发送到设备"或"下载"即可。</div>';
-    updateImage();
 }
 
 function rotateCanvas() {
@@ -1992,8 +1925,9 @@ function ditherImage(imageData) {
             // 关闭抖动时退化为逐像素最近色量化，输出仍是 8bpp 索引色
             return cfQuantize(imageData, ditherStrength, isDitheringEnabled, CF_PROFILES[ditherType]);
         case 'szEnhanced':
-            if (currentDeviceType !== 'FRAMEFILMPRO') {
-                showMessage('SZ 增强仅支持 FrameFilm Pro', 'warning');
+            // 依赖 8bpp 的 3.7" 720×480 屏：三机型固件的 Pro 与通行证版（ARK）同屏同驱动
+            if (currentDeviceType !== 'FRAMEFILMPRO' && currentDeviceType !== 'FRAMEFILMARK') {
+                showMessage('SZ 增强仅支持 FrameFilm Pro / 通行证版', 'warning');
                 return floydSteinbergDither(imageData, ditherStrength);
             }
             if (!window.szEnhancedDither) return imageData;

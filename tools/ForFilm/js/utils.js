@@ -20,6 +20,13 @@ var DEVICE_CONFIGS = {
         displayName: 'FrameFilm Max',
         pixelLayout: 'row-major' // 行优先: (y * width) + x
     },
+    // 通行证版（Ark）：单机型固件，屏固定 E6 3.70" 720×480（与 PRO 同屏同驱动，但功能集不同）
+    FRAMEFILMARK: {
+        screenWidth: 720,
+        screenHeight: 480,
+        displayName: 'FrameFilm Ark',
+        pixelLayout: 'rotated-180' // 与同屏的 PRO 一致
+    },
     FRAMEFILMDOCK: {
         screenWidth: 760,
         screenHeight: 568,
@@ -41,12 +48,21 @@ function isPortraitDevice() {
     return cfg.screenHeight > cfg.screenWidth;
 }
 
-// 8bpp 索引色（ColorFast / ColorQual）仅 3.7" 720×480 E6 spectra 面板
-// （EPD_PANEL_ID 0x02）可渲染，且只有该分辨率下 8bpp 主体长度才与驱动读取长度一致
-// （其它分辨率会越界读取）
+// 屏幕条件：8bpp 索引色（ColorFast 55 色 / ColorQual 46 色）的像素主体必须与驱动读取的
+// 720*480 字节严格一致，其它分辨率下会越界读取，所以只有 3.7" 720×480 E6 spectra 面板
+// （EPD_PANEL_ID 0x02）能渲染。
 function is8bppPanelSupported() {
     var cfg = getDeviceConfig();
     return cfg.screenWidth === 720 && cfg.screenHeight === 480;
+}
+
+// 可用性 = 屏幕条件 + 机型条件。**目前只对通行证版（FRAMEFILMARK）开放**：
+// 只有 frame_film_ark 的 EPD 驱动实现了 8bpp 播放；frame_film（三机型）会按 v1 4bpp
+// 解读 8bpp 数据，屏上是乱码且不报错。
+// 等 frame_film 也移植 film 2.0 后，把本函数改成直接 `return is8bppPanelSupported();`
+// （纯按屏幕判定）即可放开。
+function is8bppAvailable() {
+    return currentDeviceType === 'FRAMEFILMARK' && is8bppPanelSupported();
 }
 
 function setDeviceType(type) {
@@ -87,11 +103,11 @@ function onDeviceTypeChanged() {
     if (typeof syncKeyboardAvailability === 'function') {
         syncKeyboardAvailability();
     }
-    // 时间同步（0x4D）仅冰箱贴固件支持
+    // 时间同步（0x4D）仅通行证版（ARK）支持
     if (typeof syncTimeSyncAvailability === 'function') {
         syncTimeSyncAvailability();
     }
-    // 蓝牙遥控（0x4E）仅冰箱贴固件支持
+    // 蓝牙遥控（0x4E）仅通行证版（ARK）支持
     if (typeof syncRemoteAvailability === 'function') {
         syncRemoteAvailability();
     }
@@ -113,7 +129,11 @@ function applyScreenParams(panelId, width, height) {
         console.warn('[ForFilm] 未知屏幕面板 ID: 0x' + panelId.toString(16));
         return false;
     }
-    setDeviceType(panel.deviceType);
+    // 面板 ID 不足以区分机型：0x02（3.70" 720×480）在 Pro 与通行证版（ARK）上是同一块屏。
+    // 名字已判定为 ARK 时以名字为准，只更新尺寸/排布，不覆盖机型。
+    if (currentDeviceType !== 'FRAMEFILMARK') {
+        setDeviceType(panel.deviceType);
+    }
     var cfg = getDeviceConfig();
     if (cfg) {
         cfg.screenWidth = width;
@@ -125,8 +145,9 @@ function applyScreenParams(panelId, width, height) {
     return true;
 }
 
-// SZ 增强（结构感知六色量化）只对 FrameFilm Pro 生效：
-// 非 Pro 机型禁用选项，若已选中则回退到 Floyd-Steinberg
+// SZ 增强（结构感知六色量化）依赖 8bpp 的 3.7" 720×480 屏：
+// 三机型固件的 Pro 与通行证版（ARK）同屏同驱动，都可用；其余机型禁用选项，
+// 若已选中则回退到 Floyd-Steinberg
 function syncSzEnhancedAvailability() {
     var select = document.getElementById('ditherType');
     if (!select) {
@@ -134,14 +155,14 @@ function syncSzEnhancedAvailability() {
     }
     var option = select.querySelector('option[value="szEnhanced"]');
     var option2 = select.querySelector('option[value="atkinsonSzCalib"]');
-    var isPro = currentDeviceType === 'FRAMEFILMPRO';
+    var supportsSz = (currentDeviceType === 'FRAMEFILMPRO' || currentDeviceType === 'FRAMEFILMARK');
     if (option) {
-        option.disabled = !isPro;
+        option.disabled = !supportsSz;
     }
     if (option2) {
-        option2.disabled = !isPro;
+        option2.disabled = !supportsSz;
     }
-    if ((select.value === 'szEnhanced' || select.value === 'atkinsonSzCalib') && !isPro) {
+    if ((select.value === 'szEnhanced' || select.value === 'atkinsonSzCalib') && !supportsSz) {
         select.value = 'floydSteinberg';
         // 恢复滑块显示（对比度/饱和度/抖动强度）
         if (typeof syncAdjustSliders === 'function') {

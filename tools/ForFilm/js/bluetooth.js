@@ -142,7 +142,10 @@ async function processQueue() {
 async function onDeviceConnected(deviceName) {
     // 根据设备名称检测设备类型（USB 无名称时，随后会由屏幕参数查询纠正）
     var upperName = (deviceName || '').toUpperCase();
-    if (upperName.indexOf('MAX') !== -1) {
+    if (upperName.indexOf('ARK') !== -1) {
+        // 通行证版（FRAMEFILMARK）：单机型，屏固定 720×480；与 PRO 同屏但功能集不同
+        setDeviceType('FRAMEFILMARK');
+    } else if (upperName.indexOf('MAX') !== -1) {
         setDeviceType('FRAMEFILMMAX');
     } else if (upperName.indexOf('PRO') !== -1) {
         setDeviceType('FRAMEFILMPRO');
@@ -906,11 +909,12 @@ async function onTimeSync() {
     }
 }
 
-// 时间同步（0x4D）只在冰箱贴固件里实现，Dock 底座的命令表是另一份，没有该命令
+// 时间同步（0x4D）只有通行证版（FRAMEFILMARK，app 框架主线）实现；
+// 三机型固件与 Dock 底座的命令表都没有该命令 → 默认隐藏，仅 ARK 连上后显示
 function syncTimeSyncAvailability() {
     const section = document.getElementById('time-sync-section');
     if (section) {
-        section.style.display = (currentDeviceType === 'FRAMEFILMDOCK') ? 'none' : '';
+        section.style.display = (currentDeviceType === 'FRAMEFILMARK') ? '' : 'none';
     }
 }
 
@@ -991,11 +995,12 @@ async function onRemoteKeyPress(key) {
     }
 }
 
-// 遥控仅冰箱贴固件支持：Dock 底座的按键是 PC 键盘（USB HID），不做本机导航
+// 遥控（0x4E 按键注入）只有通行证版（FRAMEFILMARK）可用：
+// Dock 的按键是 PC 键盘（USB HID）、三机型固件没有该命令 → 默认隐藏，仅 ARK 连上后显示
 function syncRemoteAvailability() {
     const section = document.getElementById('remote-section');
     if (section) {
-        section.style.display = (currentDeviceType === 'FRAMEFILMDOCK') ? 'none' : '';
+        section.style.display = (currentDeviceType === 'FRAMEFILMARK') ? '' : 'none';
     }
 }
 
