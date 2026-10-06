@@ -121,6 +121,7 @@ static void file_load_event(uint32_t file_id);
 static void file_load_next_event(void);
 static void file_sd_check_event(void);
 static void file_free_buffer(void);
+static void file_invalidate_buffer(void);
 static void file_relocate_by_frame_count(void);
 static void file_publish_list_event(void);
 static int  file_mkdir_parents(const char *filepath);
@@ -410,6 +411,11 @@ static void file_task_handle(void *pvParameters)
                         // 全部保存处理完成后上浮事件（刷新列表已就绪，动图重置到第一个 / 图片刷新显示）
                         // payload: u8 auto_load，0 表示静默保存，app 层据此决定是否自动显示
                         uint8_t auto_load = m_file_state.save_auto_load ? 1 : 0;
+
+                        /* 卡上内容已变（可能是同名覆盖）：作废 PSRAM 里那份缓冲，
+                           否则随后"显示新文件"会复用旧图（见 file_invalidate_buffer） */
+                        file_invalidate_buffer();
+
                         sys_event_publish(SYS_EVT_FILE_SAVED, &auto_load, sizeof(auto_load));
                     }
                 }
@@ -791,6 +797,24 @@ static void file_free_buffer(void)
     }
 }
 
+/**
+ * @brief 把"已加载进 PSRAM"的状态置为无效（卡上的内容被改动过）
+ *
+ * 保存/覆盖/删除都会让 PSRAM 里那份缓冲不再对应当前列表：
+ *  - 覆盖同名文件：缓冲里是**同一个 file_id 的旧内容**，而显示路径的快速判断
+ *    只看 `current_id` + `load_complete`，会误判成"已加载"而复用旧图
+ *    （表现：重传同名文件后，画面还是上一版，直到重新进 app/重启）；
+ *  - 删除文件：后续 file_id 整体前移，缓存的 current_id 已经指向别的文件。
+ *
+ * 置 NONE 后，下一次显示会重新从卡里读。current_file_id 不动：它还要给
+ * BLE 查询"当前是第几张"用，且上面的快速判断已经不再依赖它。
+ */
+static void file_invalidate_buffer(void)
+{
+    m_file_state.load_complete = FILE_LOAD_STATE_NONE;
+    m_file_state.failed_file_id = FILE_ID_NONE;
+}
+
 static void file_load_event(uint32_t file_id)
 {
     if(!m_file_state.sd_mounted)
@@ -1113,6 +1137,9 @@ int service_file_delete(uint32_t file_id)
     if(remove(filepath) == 0)
     {
         sys_logi(FILE_TAG, "Deleted file: %s", filepath);
+        /* 删除后 file_id 整体前移：缓存的 current_id 已指向别的文件，
+           不作废缓冲会拿旧内容顶替新下标（见 file_invalidate_buffer） */
+        file_invalidate_buffer();
         service_file_refresh_list();
         return 0;
     }
