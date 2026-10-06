@@ -607,6 +607,7 @@ static uint8_t m_spectra_state = 0;     // 48色状态机：0 native/qual, 1 cle
 static bool m_mono_inited = false;      // 黑白快刷会话是否已初始化（跨调用保持上一帧）
 static uint8_t m_mono_prev[EPD_MONO_BYTES];  // 黑白快刷上一帧（bit-reversed 存储）
 static bool m_panel_powered = false;         // 面板 DC/DC 是否上电（PON 后、POF 前）；硬复位/深睡会清掉
+static bool m_mono_session = false;          // 黑白快刷会话：打开时帧间保持上电（见 hal_epd_mono_session_begin）
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -1275,9 +1276,16 @@ void hal_epd_sleep(void)
     sys_logi(EPD_TAG, "EPD sleep");
 }
 
+void hal_epd_mono_session_begin(void)
+{
+    m_mono_session = true;
+}
+
 void hal_epd_mono_session_end(void)
 {
-    /* 结束"保持上电"的黑白快刷会话：把播放期间省下的那一次 POF 补上。
+    m_mono_session = false;
+
+    /* 结束"保持上电"的黑白快刷会话：把播放期间省下的那一趟 PON/POF 补上。
        已经在断电态时是空操作，可重复调用。 */
     epd_spectra_power_off();
 }
@@ -1416,9 +1424,10 @@ static void epd_spectra_mono_display(const uint8_t *mono_bitmap, bool is_clear)
     epd_spectra_wave(is_clear ? mono_clear : mono_fast);
     epd_spectra_mono_write(mono_bitmap);
 
-    /* 不断电：黑白快刷会在播放期间保持面板上电，省掉每帧约 100ms 的 PON/POF；
-       收尾（停止播放/切页/休眠）由 hal_epd_mono_session_end() 补一次 POF */
-    epd_spectra_refresh(true, false);
+    /* 会话打开时帧间**保持上电**（省掉每帧约 100ms 的 PON/POF），只在会话结束时 POF 一次；
+       一次性绘制（UI 页/图片）不打开会话，画完即断电，面板不会一直带电。
+       见 hal_epd_mono_session_begin/end。 */
+    epd_spectra_refresh(true, !m_mono_session);
 
     m_spectra_state = 2;
 }

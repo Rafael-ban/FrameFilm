@@ -489,6 +489,10 @@ static void film_task_handle(void *pvParameters)
                 film_display_event(msg.file_id);
                 break;
             case MSG_FILM_RENDER:
+                /* 按帧推屏 = 连续逐帧刷新的会话：打开黑白快刷会话，
+                   帧间不再各付一趟 PON/POF（每帧省约 200ms）。
+                   收尾由 MSG_FILM_MONO_END 关会话并断电。 */
+                hal_epd_mono_session_begin();
                 film_render_frame_event(msg.file_id, msg.frame_idx);
                 if(m_render_pending > 0)
                 {

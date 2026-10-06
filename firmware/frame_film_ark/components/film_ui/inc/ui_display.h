@@ -53,6 +53,14 @@ void ui_display_set_output(int enable);
  */
 void ui_display_invalidate_all(void);
 
+/**
+ * @brief 最近一次真正推屏的时刻（esp_timer µs）；0 表示本页还没推过
+ *
+ * 供 ui_task 判断"UI 已经空闲多久"，据此关掉黑白快刷会话给面板断电
+ * （会话期间帧间保持上电，见 hal_epd_mono_session_begin）。
+ */
+int64_t ui_display_last_flush_us(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -106,8 +106,9 @@ void app_render_display_full(const unsigned char *filmData)
     /* MonoFast 单独处理，不能走 hal_epd_display_init()/hal_epd_pwroff()：
      * 前者会硬复位面板（控制器里缓存的上一帧是差分基准），后者内部是 DSLP 深睡，
      * 两者都会让下一次 mono 刷新退化成整屏刷新（翻封面/时钟每帧整屏闪）。
-     * 该路径的 spectra 会话与电源（PON/REF/POF）由 hal_epd_display_mono 自行管理，
-     * 面板不会一直带电。 */
+     * 这里是一次性绘制（画一张就完），不打开黑白快刷会话，故 hal_epd_display_mono
+     * 会自己走完 PON/REF/POF，面板不会留在带电态。
+     * 连续逐帧刷新（动图播放）才用 hal_epd_mono_session_begin/end 省掉帧间的 PON/POF。 */
     if(format == 0x01)
     {
         if(caps & EPD_CAP_MONOFAST)
@@ -173,7 +174,7 @@ void app_render_display_mono(const unsigned char *mono_bitmap)
     }
 
     /* 同 display_full 的 MonoFast 分支：不能复位/深睡，否则时钟每秒一帧都会整屏闪。
-       spectra 会话与电源由 hal_epd_display_mono 自行管理。 */
+       一次性绘制不打开黑白快刷会话，电源由 hal_epd_display_mono 自己走完 PON/REF/POF。 */
     hal_epd_display_mono(mono_bitmap);
 }
 
