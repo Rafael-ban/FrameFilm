@@ -94,6 +94,12 @@ extern "C"{
 // 注：dock 固件没有 app 层（按键是 PC 键盘），未实现此号。
 #define BLE_FILM_TRANS_CH_CTRL_KEY_INJECT                  (0x4E) // 远程按键注入
 
+// Ark 临时直传：凭据仅在本次 RAM 会话使用，不改持久化 WiFi 配网。
+#define BLE_FILM_TRANS_CH_DIRECT_START                     (0x50)
+#define BLE_FILM_TRANS_CH_DIRECT_STATUS                    (0x51)
+#define BLE_FILM_TRANS_CH_DIRECT_CANCEL                    (0x52)
+#define BLE_DIRECT_START_DATA_MAX                         (192)
+
 /* KEY_INJECT 的键值。与 input_press_type_t 无关：协议层不依赖 HAL 枚举，
  * 映射在 app 层完成（见 app_manager 的按键注入分支）。
  * 覆盖本机全部按键语义：上下选择 / 确认单击 / 确认双击（退回）/ 确认长按（休眠）。 */

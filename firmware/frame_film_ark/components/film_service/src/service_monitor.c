@@ -30,6 +30,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
@@ -41,6 +42,7 @@
 #include "service_ble_gatts.h"
 #include "service_monitor.h"
 #include "service_param.h"
+#include "service_wifi.h"
 
 /*********************************************************************
  * MACROS
@@ -108,6 +110,7 @@ static TaskHandle_t m_monitor_task_hdl = NULL;
 static QueueHandle_t m_monitor_msg_hdl = NULL;
 static TimerHandle_t m_monitor_timer = NULL;
 static monitor_state_t m_monitor_state;
+static atomic_bool m_sleep_pending = false;
 
 /*********************************************************************
  * GLOBAL VARIABLES
@@ -187,6 +190,11 @@ void service_monitor_request_sleep(void)
     msg.ID = MSG_ENTER_SLEEP;
     monitor_msg_send(&msg, 0);
     sys_logi(MONITOR_TAG, "manual sleep requested");
+}
+
+bool service_monitor_sleep_pending(void)
+{
+    return atomic_load(&m_sleep_pending);
 }
 
 static void monitor_task_handle(void *pvParameters)
@@ -320,6 +328,16 @@ static void monitor_battery_manage_event(void)
 
 static void monitor_auto_sleep_manage_event(void)
 {
+    if(m_sleep_pending)
+    {
+        if(!service_wifi_direct_busy()) monitor_enter_low_power();
+        return;
+    }
+    if(service_wifi_direct_busy())
+    {
+        m_monitor_state.sleep_counter = 0;
+        return;
+    }
     if(!g_service_param.sleep.sleep_mode)
     {
         m_monitor_state.sleep_counter = 0;
@@ -373,6 +391,14 @@ static void monitor_manual_sleep_event(void)
 
 static void monitor_enter_low_power(void)
 {
+    m_sleep_pending = true;
+    if(service_wifi_direct_busy())
+    {
+        service_wifi_direct_cancel();
+        return;
+    }
+    /* 网络写入和会话恢复完成后才允许卸载 SD、切断外设供电。 */
+    service_wifi_deinit();
     xTimerStop(m_monitor_timer, 0);
 
     service_ble_gatt_server_uninit();

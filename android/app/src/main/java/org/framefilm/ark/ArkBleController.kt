@@ -19,7 +19,7 @@ import android.os.Handler
 import android.os.Looper
 import java.util.UUID
 
-/** Small, read-only Ark BLE probe. All public calls and listener callbacks run on main. */
+/** Ark BLE command transport. All public calls and listener callbacks run on main. */
 @Suppress("DEPRECATION") // API 29-32 GATT write/callback compatibility.
 class ArkBleController(context: Context, private val listener: Listener) {
     interface Listener {
@@ -41,7 +41,14 @@ class ArkBleController(context: Context, private val listener: Listener) {
     private var gatt: BluetoothGatt? = null
     private var characteristic: BluetoothGattCharacteristic? = null
     private var generation = 0
-    private var waitingForPanel = false
+    private var mtu = 23
+    private var ready = false
+    private class Pending(val channel: Int, val callback: (Result<ByteArray>) -> Unit) {
+        var writeDone = false
+        var response: ByteArray? = null
+    }
+    private var pending: Pending? = null
+    private var writeOnly: ((Result<Unit>) -> Unit)? = null
     private var timeout: Runnable? = null
 
     private fun onMain(block: () -> Unit) {
@@ -56,14 +63,14 @@ class ArkBleController(context: Context, private val listener: Listener) {
             appContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         }
 
-    private fun armTimeout(ms: Long, message: String, action: () -> Unit = {}) {
+    private fun armTimeout(ms: Long, message: String, report: Boolean = true, action: () -> Unit = {}) {
         timeout?.let(main::removeCallbacks)
         val token = generation
         timeout = Runnable {
             if (token == generation) {
                 timeout = null
                 action()
-                listener.onError(message)
+                if (report) listener.onError(message)
             }
         }.also { main.postDelayed(it, ms) }
     }
@@ -171,21 +178,47 @@ class ArkBleController(context: Context, private val listener: Listener) {
                     if (token != generation || g !== gatt || descriptor.uuid != cccdUuid) return@onMain
                     clearTimeout()
                     if (status != BluetoothGatt.GATT_SUCCESS) fail("Ark 通知配置失败 ($status)")
-                    else {
-                        listener.onState("Ark GATT 已就绪")
-                        listener.onReady()
+                    else if (try { !g.requestMtu(200) } catch (_: SecurityException) { true }) readyWithMtu()
+                    else armTimeout(6_000, "MTU 协商超时", false) { readyWithMtu() }
+                }
+
+                override fun onMtuChanged(g: BluetoothGatt, negotiated: Int, status: Int) = onMain {
+                    if (token != generation || g !== gatt) return@onMain
+                    mtu = if (status == BluetoothGatt.GATT_SUCCESS) negotiated else 23
+                    // A late MTU callback may arrive after fallback readiness while a command is pending.
+                    if (!ready) readyWithMtu()
+                }
+
+                override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) = onMain {
+                    if (token != generation || g !== gatt || ch.uuid != characteristicUuid) return@onMain
+                    val callback = writeOnly
+                    if (callback != null) {
+                        writeOnly = null
+                        clearTimeout()
+                        if (status == BluetoothGatt.GATT_SUCCESS) callback(Result.success(Unit))
+                        else callback(Result.failure(IllegalStateException("BLE 写入失败 ($status)")))
+                        return@onMain
+                    }
+                    val request = pending ?: return@onMain
+                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                        pending = null
+                        clearTimeout()
+                        request.callback(Result.failure(IllegalStateException("BLE 写入失败 ($status)")))
+                    } else {
+                        request.writeDone = true
+                        completePending(request)
                     }
                 }
 
                 override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray) {
-                    onMain { if (token == generation && g === gatt && ch.uuid == characteristicUuid) acceptPanel(value) }
+                    onMain { if (token == generation && g === gatt && ch.uuid == characteristicUuid) acceptResponse(value) }
                 }
 
                 @Deprecated("Pre-Android 13 callback")
                 override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
                     if (Build.VERSION.SDK_INT < 33) {
                         val value = ch.value?.clone() ?: return
-                        onMain { if (token == generation && g === gatt && ch.uuid == characteristicUuid) acceptPanel(value) }
+                        onMain { if (token == generation && g === gatt && ch.uuid == characteristicUuid) acceptResponse(value) }
                     }
                 }
             }
@@ -195,45 +228,123 @@ class ArkBleController(context: Context, private val listener: Listener) {
         } catch (_: SecurityException) { fail("蓝牙连接权限不可用") }
     }
 
+    private fun readyWithMtu() {
+        if (ready) return
+        clearTimeout()
+        ready = true
+        listener.onState("Ark GATT 已就绪，MTU $mtu")
+        listener.onReady()
+    }
+
+    val isReady: Boolean get() = ready
+    val isBusy: Boolean get() = pending != null || writeOnly != null
+    val negotiatedMtu: Int get() = mtu
+
     @SuppressLint("MissingPermission")
-    fun readPanel() = onMain {
-        if (!hasPermissions()) { listener.onError("需要附近设备蓝牙权限"); return@onMain }
+    fun command(channel: Int, payload: ByteArray = byteArrayOf(), waitMs: Long = 5_000,
+                callback: (Result<ByteArray>) -> Unit) = onMain {
         val g = gatt
         val ch = characteristic
-        if (g == null || ch == null) { listener.onError("请先连接 Ark 并等待 GATT 就绪"); return@onMain }
-        if (waitingForPanel) { listener.onError("屏幕参数查询仍在进行"); return@onMain }
-        val packet = byteArrayOf(0x55, 0x42, 0x00, 0x97.toByte())
-        waitingForPanel = true
+        val error = when {
+            !hasPermissions() -> "需要附近设备蓝牙权限"
+            !ready || g == null || ch == null -> "请先连接 Ark 并等待 GATT 就绪"
+            pending != null || writeOnly != null -> "上一条 BLE 命令仍在等待响应"
+            channel !in 0..255 || payload.size > 192 -> "BLE 命令长度无效"
+            payload.size + 4 > mtu - 3 -> "BLE MTU $mtu 不足以发送 ${payload.size + 4} 字节；请重新连接"
+            else -> null
+        }
+        if (error != null) { callback(Result.failure(IllegalStateException(error))); return@onMain }
+        val packet = ByteArray(payload.size + 4)
+        packet[0] = 0x55
+        packet[1] = channel.toByte()
+        packet[2] = payload.size.toByte()
+        payload.copyInto(packet, 3)
+        packet[packet.lastIndex] = (packet.dropLast(1).sumOf { it.toInt() and 0xff } and 0xff).toByte()
+        val request = Pending(channel, callback)
+        pending = request
         val started = try {
             if (Build.VERSION.SDK_INT >= 33) {
-                g.writeCharacteristic(ch, packet, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
+                g!!.writeCharacteristic(ch!!, packet, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
             } else {
-                ch.value = packet
+                ch!!.value = packet
                 ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                g.writeCharacteristic(ch)
+                g!!.writeCharacteristic(ch)
             }
         } catch (_: SecurityException) { false }
         if (!started) {
-            waitingForPanel = false
-            listener.onError("屏幕参数查询发送失败")
+            pending = null
+            callback(Result.failure(IllegalStateException("BLE 命令 0x${channel.toString(16)} 发送失败")))
         } else {
-            listener.onState("读取屏幕参数中")
-            armTimeout(5_000, "屏幕参数响应超时") { waitingForPanel = false }
+            armTimeout(waitMs, "BLE 命令响应超时", false) {
+                if (pending === request) {
+                    pending = null
+                    callback(Result.failure(IllegalStateException("BLE 0x${channel.toString(16)} 响应超时")))
+                }
+            }
         }
     }
 
-    private fun acceptPanel(data: ByteArray) {
-        if (!waitingForPanel || data.size != 9 || data[0].toInt() and 0xff != 0x55 ||
-            data[1].toInt() and 0xff != 0x42 || data[2].toInt() and 0xff != 5) return
-        val sum = data.dropLast(1).sumOf { it.toInt() and 0xff } and 0xff
-        if (sum != (data[8].toInt() and 0xff)) return
-        waitingForPanel = false
-        clearTimeout()
-        val panelId = data[3].toInt() and 0xff
-        val width = ((data[4].toInt() and 0xff) shl 8) or (data[5].toInt() and 0xff)
-        val height = ((data[6].toInt() and 0xff) shl 8) or (data[7].toInt() and 0xff)
+    fun sendNoReply(channel: Int, payload: ByteArray, callback: (Result<Unit>) -> Unit) = onMain {
+        // 0x4B has no application response; wait for the GATT write completion.
+        if (!ready || pending != null || writeOnly != null) {
+            callback(Result.failure(IllegalStateException("BLE 尚未就绪或命令忙")))
+            return@onMain
+        }
+        val g = gatt ?: return@onMain callback(Result.failure(IllegalStateException("BLE 已断开")))
+        val ch = characteristic ?: return@onMain callback(Result.failure(IllegalStateException("BLE 已断开")))
+        if (payload.size + 4 > mtu - 3) {
+            callback(Result.failure(IllegalStateException("BLE MTU 不足")))
+            return@onMain
+        }
+        val packet = byteArrayOf(0x55, channel.toByte(), payload.size.toByte()) + payload
+        val framed = packet + byteArrayOf((packet.sumOf { it.toInt() and 0xff } and 0xff).toByte())
+        writeOnly = callback
+        val started = try {
+            if (Build.VERSION.SDK_INT >= 33) g.writeCharacteristic(ch, framed, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
+            else { ch.value = framed; ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT; g.writeCharacteristic(ch) }
+        } catch (_: SecurityException) { false }
+        if (!started) {
+            writeOnly = null
+            callback(Result.failure(IllegalStateException("BLE 写入未启动")))
+        } else armTimeout(5_000, "BLE 写入超时", false) {
+            if (writeOnly === callback) {
+                writeOnly = null
+                callback(Result.failure(IllegalStateException("BLE 写入超时")))
+            }
+        }
+    }
+
+    fun readPanel() = command(0x42) { result ->
+        val data = result.getOrElse { listener.onError(it.message ?: "屏幕参数读取失败"); return@command }
+        if (data.size != 5) { listener.onError("屏幕参数响应长度错误"); return@command }
+        val panelId = data[0].toInt() and 0xff
+        val width = ((data[1].toInt() and 0xff) shl 8) or (data[2].toInt() and 0xff)
+        val height = ((data[3].toInt() and 0xff) shl 8) or (data[4].toInt() and 0xff)
         listener.onPanel(panelId, width, height)
     }
+
+    private fun acceptResponse(data: ByteArray) {
+        if (data.size < 4 || data[0].toInt() and 0xff != 0x55) return
+        val length = data[2].toInt() and 0xff
+        // Existing 0x31 getter sends one uninitialized trailing byte after a valid frame.
+        if (length + 4 != data.size && !(requestChannel(data) == 0x31 && length == 1 && data.size == 6)) return
+        val validSum = data.copyOfRange(0, length + 3).sumOf { it.toInt() and 0xff } and 0xff
+        if (validSum != (data[length + 3].toInt() and 0xff)) return
+        val request = pending ?: return
+        if (data[1].toInt() and 0xff != request.channel) return
+        request.response = data.copyOfRange(3, 3 + length)
+        completePending(request)
+    }
+
+    private fun completePending(request: Pending) {
+        if (pending !== request || !request.writeDone) return
+        val response = request.response ?: return
+        pending = null
+        clearTimeout()
+        request.callback(Result.success(response))
+    }
+
+    private fun requestChannel(data: ByteArray): Int = data[1].toInt() and 0xff
 
     private fun fail(message: String) {
         closeGatt()
@@ -244,12 +355,19 @@ class ArkBleController(context: Context, private val listener: Listener) {
     private fun closeGatt() {
         generation++
         clearTimeout()
-        waitingForPanel = false
+        ready = false
+        mtu = 23
+        val interrupted = pending
+        pending = null
+        val interruptedWrite = writeOnly
+        writeOnly = null
         characteristic = null
         val old = gatt
         gatt = null
         try { old?.disconnect() } catch (_: SecurityException) { }
         old?.close()
+        interrupted?.callback?.invoke(Result.failure(IllegalStateException("Ark 蓝牙已断开")))
+        interruptedWrite?.invoke(Result.failure(IllegalStateException("Ark 蓝牙已断开")))
     }
 
     fun close() = onMain {

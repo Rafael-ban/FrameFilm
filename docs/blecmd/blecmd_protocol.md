@@ -255,6 +255,16 @@
 - 与 APP_SWITCH（0x4B）走同一条上行事件总线（`SYS_EVT_BLE_APP_CMD`），由 app 调度器按通道号路由。
 - **方向约定（坑）**：固件把 `0x02` 映射成 `INPUT_PRESS_UP`，但 HAL 的 `UP`/`DOWN` **引脚命名与实体按键相反**（硬件"上"键接在 `BUTTON_PIN_DOWN` 上），于是设备实体键方向正常、而照协议值下发会**上下反向**。ForFilm 遥控面板因此在发送前把上/下对调（见 `bluetooth.js` 的 `onRemoteKeyPress`），保证与实体键行为一致。
 
+### 3.11 Ark 临时 WiFi 直传通道 (0x50 ~ 0x52)
+
+仅 `frame_film_ark` 与 Android 直传客户端使用，经典固件和 Dock 不支持。
+
+| 通道 | 命令 | 请求 DATA | 同通道响应 DATA |
+|------|------|-----------|----------------|
+| 0x50 | DIRECT_START | `SSID\0PASSWORD\0URL\0` | 1B：0 接受 / 1 忙 / 2 参数错误 / 3 资源不足 |
+| 0x51 | DIRECT_STATUS | 空 | 11B：state、progress、error、received(u32 BE)、total(u32 BE) |
+| 0x52 | DIRECT_CANCEL | 空 | 1B：0 已接受取消请求（幂等） |
+
 ## 4. 命令详解
 
 ### 4.1 通用规则
@@ -1346,6 +1356,28 @@ SUM  = (0x55 + 0x4E + 0x01 + 0x02) & 0xFF = 0xA6
 
 ---
 
+### 4.11 Ark 临时 WiFi 直传
+
+手机创建 2.4GHz Wi-Fi Direct GO，并在其 IPv4 地址上提供临时 HTTP 文件服务。Ark 作为普通 WiFi STA 加入，BLE 负责会话控制与状态查询，文件内容通过 WiFi 下载；不要求路由器，不与小米互传私有协议互通。
+
+`DIRECT_START` 的三个字段为 ASCII，各自以 NUL 结尾，不带版本字节或额外尾部数据。SSID 为 1–32 字节，密码最多 63 字节，URL 使用 `http://`，URL 的文件名应为有效且唯一的 `.film` 名称。DATA 总长不得超过 **192 字节**。当前固件的 GATT 特征最大长度为 200，客户端请求 ATT MTU 200，并检查整帧 `DATA长度+4 <= MTU-3`；不足时应报错，不能截断发送。
+
+开始前应排除其他 BLE 文件、OTA、WiFi 下载会话。接受开始仅表示任务已建立。直传期间固件拒绝冲突的文件写入、删除、OTA、重置、重启、格式化、网络配置与下载命令，并返回同通道 1B `1`（忙）；只读查询仍可用。自动休眠在会话中暂缓，手动休眠先请求取消，等待清理后再入睡。BLE 断开也会请求取消。
+
+`DIRECT_STATUS` 固定返回 11 字节，多字节值为**大端**，不可直接复制 C 结构体：
+
+| 偏移 | 长度 | 含义 |
+|------|------|------|
+| 0 | 1 | state：0 IDLE / 1 CONNECTING / 2 DOWNLOADING / 3 RESTORING / 4 DONE / 5 ERROR / 6 CANCELLED |
+| 1 | 1 | progress：0–100，下载百分比；100 不等于会话结束 |
+| 2 | 1 | error：0 无 / 1 连接 / 2 HTTP / 3 保存 / 4 取消 / 5 恢复 / 6 资源 |
+| 3 | 4 | received：已交给文件保存流程的字节数 |
+| 7 | 4 | total：HTTP Content-Length，尚未获得时为 0 |
+
+临时网络凭据只存 RAM，不修改已保存的 WiFi 开关、SSID、密码和 API 地址。文件复用现有 SD 保存事务：中断撤销未提交文件，完成后提交并通知图片播放。成功提交之后仍有 RESTORING 阶段，用于恢复之前的 WiFi 配置和连接状态；恢复失败为 ERROR/error=5。只有 DONE 才表示本次保存及网络恢复成功。终态保留到下一次开始，客户端可约每 800 ms 查询一次。
+
+`DIRECT_CANCEL` 的确认包仅表示已请求取消。客户端应继续查询至 DONE/ERROR/CANCELLED，之后关闭手机 HTTP 服务并释放 GO。已完成提交的文件不因迟到的取消而删除。连接与恢复各最多等待 25 s，HTTP 单次操作超时 5 s、下载循环总限时 120 s；既有 SD 文件任务若卡死，同步保存接口仍可能等待，不能把这些网络超时当作整个会话的绝对上限。
+
 ## 5. 校验和计算
 
 校验和采用 **简单求和法**（Sum Check），计算公式：
@@ -1506,6 +1538,7 @@ int parse_response(uint8_t* in_buf, int in_len, uint8_t* out_ch, uint8_t* out_da
 
 | 版本 | 日期 | 描述 |
 |------|------|------|
+| 1.11 | 2026-10-07 | 新增 Ark 临时 WiFi 直传 0x50–0x52：RAM 网络会话、下载进度、取消与恢复；Android GO 提供临时 HTTP 文件服务 |
 | 1.10 | 2026-09-22 | 新增 §3.10 / §4.10 远程按键注入通道 (0x4E，仅通行证版 `frame_film_ark`)：1B 键值（确认/长按/上/下/双击），设备映射为 HAL 同构输入事件并回显该字节；app_id 表补 `0x06 通行证 pass`（`FULL` 模式注册项 6 → 7） |
 | 1.9 | 2026-09-20 | 新增 §3.9 时间同步通道 (0x4D)：4B 大端 Unix 秒（UTC）+ 2B 大端时区（距 UTC 分钟数，东为正），设备回显同样 6 字节；配套固件新增 `service_time` 模块，时区随 `tz_min` 落盘（`SERVICE_PARAM_VER` 升至 3），时间不落盘 |
 | 1.8 | 2026-09-17 | App 控制通道 APP_SWITCH / APP_CURRENT_GET 调整为 **0x4B / 0x4C**（0x43 / 0x44 归 Dock 底座键盘键值通道，避免撞号）；新增 §3.8 / §4.9 记录 Dock 键盘键值通道 (0x43 / 0x44，仅 Dock) |

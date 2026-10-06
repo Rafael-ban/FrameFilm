@@ -1,6 +1,8 @@
 #ifndef __SERVICE_MONITOR_H__
 #define __SERVICE_MONITOR_H__
 
+#include <stdbool.h>
+
 
 /*********************************************************************
  * INCLUDES
@@ -71,6 +73,8 @@ extern void service_monitor_init(void);
  * 否则唤醒源的电平条件当场成立、设备会立刻醒回来。
  */
 extern void service_monitor_request_sleep(void);
+/* 入睡已请求时不再接受新的临时文件传输。 */
+extern bool service_monitor_sleep_pending(void);
 
 #ifdef __cplusplus
 }

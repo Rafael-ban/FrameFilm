@@ -17,6 +17,7 @@ import android.widget.TextView
 class MainActivity : Activity() {
     private lateinit var ble: ArkBleController
     private lateinit var p2p: ArkP2pController
+    private var transfer: DirectTransferCoordinator? = null
     private lateinit var devicesView: LinearLayout
     private lateinit var bleStatus: TextView
     private lateinit var p2pStatus: TextView
@@ -94,7 +95,7 @@ class MainActivity : Activity() {
             })
         }
         label("Ark 连接诊断", 25f)
-        label("只读取屏幕参数，并在手机上创建临时 2.4GHz 直连组。")
+        label("蓝牙诊断、2.4GHz 直连组和已知 film 文件直传。")
         bleStatus = label("蓝牙：未连接")
         panelStatus = label("屏幕：未读取")
         button("扫描并连接 Ark") { withPermissions(blePermissions()) { ble.startScan() } }
@@ -105,6 +106,23 @@ class MainActivity : Activity() {
         p2pStatus = label("Wi-Fi Direct：未创建")
         button("创建 2.4GHz 直连组") { withPermissions(wifiPermissions()) { p2p.createGroup2Ghz() } }
         button("释放本次直连组") { p2p.close() }
+        button("WiFi 直传测试文件") {
+            withPermissions(blePermissions() + wifiPermissions()) {
+                if (transfer != null) { append("直传正在进行，请等待结束或取消"); return@withPermissions }
+                ble.close()
+                p2p.close { clean ->
+                    if (!clean) { append("旧直连组清理未确认，请重试"); return@close }
+                    transfer = DirectTransferCoordinator(this, object : DirectTransferCoordinator.Listener {
+                        override fun onProgress(message: String) { append(message) }
+                        override fun onFinished(success: Boolean, message: String, cleanupCompleted: Boolean) {
+                            append("${if (success) "通过" else "失败"}：$message；直连组清理=${if (cleanupCompleted) "完成" else "未确认"}")
+                            transfer = null
+                        }
+                    }).also { it.start() }
+                }
+            }
+        }
+        button("取消直传") { transfer?.cancel() }
         label("最近状态")
         logView = label("等待手动操作", 14f)
         setContentView(ScrollView(this).apply {
@@ -166,6 +184,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         destroyed = true
         pendingAction = null
+        transfer?.cancel()
         ble.close()
         p2p.close()
         super.onDestroy()

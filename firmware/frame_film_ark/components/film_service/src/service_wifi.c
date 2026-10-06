@@ -30,14 +30,14 @@
  */
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <inttypes.h>
 #include <sys/time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/portmacro.h"
 
-#include "esp_wifi.h"
-#include "esp_event.h"
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -47,6 +47,7 @@
 #include "sys_event.h"
 #include "sys_com.h"
 #include "hal_bat.h"
+#include "hal_wifi.h"
 #include "service_param.h"
 #include "service_file.h"
 #include "service_wifi.h"
@@ -70,16 +71,28 @@
 /*********************************************************************
  * LOCAL VARIABLES
  */
-static bool g_wifi_initialized = false;
-static bool g_wifi_connected = false;
-static bool g_wifi_netif_ready = false;
-
 static wifi_download_state_t g_download_state = WIFI_DOWNLOAD_IDLE;
 static uint8_t g_download_progress = 0;
 static int g_download_content_length = 0;
 static int g_download_received = 0;
 static char g_download_filename[256] = {0};
 static uint8_t *g_download_buffer = NULL;
+
+typedef struct {
+    char ssid[33];
+    char password[64];
+    char url[512];
+} wifi_direct_args_t;
+
+static portMUX_TYPE g_direct_lock = portMUX_INITIALIZER_UNLOCKED;
+static wifi_direct_status_t g_direct_status;
+static bool g_direct_busy;
+static bool g_direct_cancel;
+static bool g_heartbeat_active;
+static bool g_wifi_shutting_down;
+static bool g_wifi_deinit_running;
+static bool g_legacy_active;
+static TaskHandle_t g_heartbeat_task_hdl;
 
 /*********************************************************************
  * GLOBAL VARIABLES
@@ -89,10 +102,9 @@ static uint8_t *g_download_buffer = NULL;
 /*********************************************************************
  * LOCAL FUNCTIONS
  */
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data);
 static void wifi_download_task(void *pvParameters);
 static esp_err_t wifi_http_event_handler(esp_http_client_event_t *evt);
+static void wifi_direct_task(void *arg);
 
 
 /*********************************************************************
@@ -104,7 +116,16 @@ static esp_err_t wifi_http_event_handler(esp_http_client_event_t *evt);
  */
 void service_wifi_init(void)
 {
-    if(g_wifi_initialized)
+    if(service_wifi_direct_busy()) return;
+    portENTER_CRITICAL(&g_direct_lock);
+    if(g_wifi_deinit_running)
+    {
+        portEXIT_CRITICAL(&g_direct_lock);
+        return;
+    }
+    g_wifi_shutting_down = false;
+    portEXIT_CRITICAL(&g_direct_lock);
+    if(hal_wifi_initialized())
     {
         sys_logi(WIFI_SERVICE_TAG, "WiFi already initialized");
         return;
@@ -116,32 +137,7 @@ void service_wifi_init(void)
         return;
     }
 
-    if(!g_wifi_netif_ready)
-    {
-        ESP_ERROR_CHECK(esp_netif_init());
-        esp_event_loop_create_default();
-        esp_netif_create_default_wifi_sta();
-        g_wifi_netif_ready = true;
-    }
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        NULL));
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    g_wifi_initialized = true;
+    if(hal_wifi_init(false) != ESP_OK) return;
 
     sys_logi(WIFI_SERVICE_TAG, "WiFi initialized");
 
@@ -159,17 +155,37 @@ void service_wifi_init(void)
  */
 void service_wifi_deinit(void)
 {
-    if(!g_wifi_initialized)
+    portENTER_CRITICAL(&g_direct_lock);
+    g_wifi_shutting_down = true;
+    g_wifi_deinit_running = true;
+    if(g_legacy_active) g_download_state = WIFI_DOWNLOAD_ERROR;
+    portEXIT_CRITICAL(&g_direct_lock);
+    service_wifi_direct_cancel();
+    while(service_wifi_direct_busy()) vTaskDelay(pdMS_TO_TICKS(50));
+    for(;;)
     {
+        portENTER_CRITICAL(&g_direct_lock);
+        bool active = g_legacy_active ||
+                      (g_heartbeat_active && xTaskGetCurrentTaskHandle() != g_heartbeat_task_hdl);
+        portEXIT_CRITICAL(&g_direct_lock);
+        if(!active) break;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if(!hal_wifi_initialized())
+    {
+        portENTER_CRITICAL(&g_direct_lock);
+        g_wifi_deinit_running = false;
+        g_wifi_shutting_down = false;
+        portEXIT_CRITICAL(&g_direct_lock);
         return;
     }
 
-    esp_wifi_disconnect();
-    esp_wifi_stop();
-    esp_wifi_deinit();
+    hal_wifi_deinit();
 
-    g_wifi_connected = false;
-    g_wifi_initialized = false;
+    portENTER_CRITICAL(&g_direct_lock);
+    g_wifi_deinit_running = false;
+    g_wifi_shutting_down = false;
+    portEXIT_CRITICAL(&g_direct_lock);
 
     sys_logi(WIFI_SERVICE_TAG, "WiFi deinitialized");
 }
@@ -179,19 +195,14 @@ void service_wifi_deinit(void)
  */
 void service_wifi_connect(void)
 {
-    if(g_wifi_connected)
-    {
-        sys_logi(WIFI_SERVICE_TAG, "Disconnecting before reconnect");
-        esp_wifi_disconnect();
-        g_wifi_connected = false;
-    }
+    if(service_wifi_direct_busy()) return;
 
-    if(!g_wifi_initialized)
+    if(!hal_wifi_initialized())
     {
         service_wifi_init();
     }
 
-    if(!g_wifi_initialized)
+    if(!hal_wifi_initialized())
     {
         sys_logw(WIFI_SERVICE_TAG, "WiFi init failed");
         return;
@@ -203,12 +214,9 @@ void service_wifi_connect(void)
         return;
     }
 
-    wifi_config_t wifi_config = {0};
-    strncpy((char *)wifi_config.sta.ssid, g_service_param.network.wifi_ssid, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char *)wifi_config.sta.password, g_service_param.network.wifi_password, sizeof(wifi_config.sta.password) - 1);
-
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_connect());
+    if(hal_wifi_connect(g_service_param.network.wifi_ssid,
+                        g_service_param.network.wifi_password) != ESP_OK)
+        sys_logw(WIFI_SERVICE_TAG, "WiFi connect failed");
 
     sys_logi(WIFI_SERVICE_TAG, "Connecting to SSID: %s", g_service_param.network.wifi_ssid);
 }
@@ -218,13 +226,13 @@ void service_wifi_connect(void)
  */
 void service_wifi_disconnect(void)
 {
-    if(!g_wifi_initialized)
+    if(service_wifi_direct_busy()) return;
+    if(!hal_wifi_initialized())
     {
         return;
     }
 
-    esp_wifi_disconnect();
-    g_wifi_connected = false;
+    hal_wifi_disconnect();
 
     sys_logi(WIFI_SERVICE_TAG, "WiFi disconnected");
 }
@@ -235,7 +243,7 @@ void service_wifi_disconnect(void)
  */
 uint8_t service_wifi_get_connect_status(void)
 {
-    return g_wifi_connected ? 1 : 0;
+    return hal_wifi_connected() ? 1 : 0;
 }
 
 /**
@@ -243,7 +251,8 @@ uint8_t service_wifi_get_connect_status(void)
  */
 void service_wifi_clear_config(void)
 {
-    if(g_wifi_initialized)
+    if(service_wifi_direct_busy()) return;
+    if(hal_wifi_initialized())
     {
         service_wifi_disconnect();
         service_wifi_deinit();
@@ -257,6 +266,241 @@ void service_wifi_clear_config(void)
     service_param_save();
 
     sys_logi(WIFI_SERVICE_TAG, "WiFi config cleared");
+}
+
+bool service_wifi_direct_busy(void)
+{
+    portENTER_CRITICAL(&g_direct_lock);
+    bool busy = g_direct_busy;
+    portEXIT_CRITICAL(&g_direct_lock);
+    return busy;
+}
+
+void service_wifi_direct_get_status(wifi_direct_status_t *out)
+{
+    if(!out) return;
+    portENTER_CRITICAL(&g_direct_lock);
+    *out = g_direct_status;
+    portEXIT_CRITICAL(&g_direct_lock);
+}
+
+void service_wifi_direct_cancel(void)
+{
+    portENTER_CRITICAL(&g_direct_lock);
+    if(g_direct_busy) g_direct_cancel = true;
+    portEXIT_CRITICAL(&g_direct_lock);
+}
+
+static bool wifi_direct_cancelled(void)
+{
+    portENTER_CRITICAL(&g_direct_lock);
+    bool cancelled = g_direct_cancel;
+    portEXIT_CRITICAL(&g_direct_lock);
+    return cancelled;
+}
+
+static void wifi_direct_status(uint8_t state, uint8_t error, uint32_t received, uint32_t total)
+{
+    portENTER_CRITICAL(&g_direct_lock);
+    g_direct_status.state = state;
+    g_direct_status.error = error;
+    g_direct_status.received = received;
+    g_direct_status.total = total;
+    g_direct_status.progress = total ? (uint8_t)((uint64_t)received * 100 / total) : 0;
+    portEXIT_CRITICAL(&g_direct_lock);
+}
+
+uint8_t service_wifi_direct_start(const char *ssid, const char *password, const char *url)
+{
+    if(!ssid || !password || !url || !ssid[0] ||
+       strlen(ssid) > 32 || strlen(password) > 63 || strlen(url) >= 512 ||
+       strncmp(url, "http://", 7) != 0)
+        return 2;
+
+    wifi_direct_args_t *args = malloc(sizeof(*args));
+    if(!args) return 3;
+    strlcpy(args->ssid, ssid, sizeof(args->ssid));
+    strlcpy(args->password, password, sizeof(args->password));
+    strlcpy(args->url, url, sizeof(args->url));
+
+    portENTER_CRITICAL(&g_direct_lock);
+    if(g_direct_busy || g_wifi_deinit_running || g_legacy_active)
+    {
+        portEXIT_CRITICAL(&g_direct_lock);
+        free(args);
+        return 1;
+    }
+    g_direct_busy = true;
+    g_direct_cancel = false;
+    g_wifi_shutting_down = false;
+    g_direct_status = (wifi_direct_status_t){.state = WIFI_DIRECT_CONNECTING};
+    portEXIT_CRITICAL(&g_direct_lock);
+
+    if(xTaskCreate(wifi_direct_task, "wifi_direct", 6144, args, 5, NULL) != pdPASS)
+    {
+        portENTER_CRITICAL(&g_direct_lock);
+        g_direct_status.state = WIFI_DIRECT_ERROR;
+        g_direct_status.error = WIFI_DIRECT_ERR_RESOURCE;
+        g_direct_busy = false;
+        portEXIT_CRITICAL(&g_direct_lock);
+        free(args);
+        return 3;
+    }
+    return 0;
+}
+
+static bool wifi_direct_wait_connected(uint32_t timeout_ms, bool allow_cancel)
+{
+    uint32_t start = xTaskGetTickCount();
+    while(!hal_wifi_connected())
+    {
+        if((allow_cancel && wifi_direct_cancelled()) ||
+           (xTaskGetTickCount() - start) >= pdMS_TO_TICKS(timeout_ms)) return false;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    return true;
+}
+
+static uint8_t wifi_direct_download(const char *url, uint32_t *received_out, uint32_t *total_out)
+{
+    esp_http_client_config_t cfg = {.url = url, .timeout_ms = 5000};
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if(!client) return WIFI_DIRECT_ERR_RESOURCE;
+
+    uint8_t error = WIFI_DIRECT_ERR_HTTP;
+    bool saving = false;
+    uint32_t received = 0, total = 0;
+    do {
+        if(esp_http_client_open(client, 0) != ESP_OK) break;
+        int64_t length = esp_http_client_fetch_headers(client);
+        int status = esp_http_client_get_status_code(client);
+        if(status != 200 || length < 32 || length > UINT32_MAX) break;
+        total = (uint32_t)length;
+        *total_out = total;
+        wifi_direct_status(WIFI_DIRECT_DOWNLOADING, 0, 0, total);
+
+        const char *start = strrchr(url, '/');
+        start = start ? start + 1 : "direct.film";
+        const char *end = strchr(start, '?');
+        size_t n = end ? (size_t)(end - start) : strlen(start);
+        char filename[128];
+        if(n < 5 || n >= sizeof(filename) ||
+           memcmp(start + n - 5, ".film", 5) != 0)
+            start = "direct.film", n = strlen(start);
+        memcpy(filename, start, n);
+        filename[n] = '\0';
+        if(strchr(filename, '%') || strchr(filename, '\\'))
+            strlcpy(filename, "direct.film", sizeof(filename));
+        if(service_file_save_start(FILE_SAVE_WIFI, filename, total) != 0)
+        {
+            error = WIFI_DIRECT_ERR_SAVE;
+            break;
+        }
+        saving = true;
+        uint32_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(120000);
+        while(received < total)
+        {
+            if(wifi_direct_cancelled()) { error = WIFI_DIRECT_ERR_CANCELLED; break; }
+            if((int32_t)(xTaskGetTickCount() - deadline) >= 0) break;
+            size_t want = total - received;
+            if(want > 4096) want = 4096;
+            uint8_t *chunk = pvPortMalloc(want);
+            if(!chunk) { error = WIFI_DIRECT_ERR_RESOURCE; break; }
+            int got = esp_http_client_read(client, (char *)chunk, (int)want);
+            if(got <= 0) { vPortFree(chunk); break; }
+            if(service_file_save_data(FILE_SAVE_WIFI, chunk, (uint32_t)got) != 0)
+            {
+                error = WIFI_DIRECT_ERR_SAVE;
+                break;
+            }
+            received += (uint32_t)got;
+            *received_out = received;
+            wifi_direct_status(WIFI_DIRECT_DOWNLOADING, 0, received, total);
+        }
+        if(wifi_direct_cancelled()) error = WIFI_DIRECT_ERR_CANCELLED;
+        if(error == WIFI_DIRECT_ERR_CANCELLED || received != total) break;
+        if(service_file_save_stop(FILE_SAVE_WIFI, 1) != 0)
+        {
+            error = WIFI_DIRECT_ERR_SAVE;
+            break;
+        }
+        saving = false;
+        error = WIFI_DIRECT_ERR_NONE;
+    } while(false);
+    if(saving) service_file_save_abort(FILE_SAVE_WIFI);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return error;
+}
+
+static void wifi_direct_task(void *arg)
+{
+    wifi_direct_args_t *args = arg;
+    uint8_t error = WIFI_DIRECT_ERR_NONE;
+    uint32_t received = 0, total = 0;
+    bool was_initialized = false;
+    bool was_connected = false;
+    bool wifi_touched = false;
+    wifi_config_t old_config = {0};
+    bool have_config = false;
+
+    /* A heartbeat may already be in its HTTP request. Let it finish before changing STA. */
+    uint32_t wait_start = xTaskGetTickCount();
+    while(true)
+    {
+        portENTER_CRITICAL(&g_direct_lock);
+        bool active = g_heartbeat_active;
+        portEXIT_CRITICAL(&g_direct_lock);
+        if(!active || wifi_direct_cancelled()) break;
+        if(xTaskGetTickCount() - wait_start >= pdMS_TO_TICKS(12000))
+        { error = WIFI_DIRECT_ERR_RESOURCE; break; }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if(wifi_direct_cancelled()) error = WIFI_DIRECT_ERR_CANCELLED;
+    was_initialized = hal_wifi_initialized();
+    was_connected = hal_wifi_connected();
+    have_config = !was_initialized || hal_wifi_get_sta_config(&old_config) == ESP_OK;
+    if(!have_config && !error) error = WIFI_DIRECT_ERR_RESOURCE;
+    if(!error)
+    {
+        wifi_touched = true;
+        if(was_initialized) hal_wifi_disconnect();
+    }
+    if(!error && (was_initialized ? hal_wifi_set_ram_storage(true) : hal_wifi_init(true)) != ESP_OK)
+        error = WIFI_DIRECT_ERR_RESOURCE;
+    if(!error && hal_wifi_connect(args->ssid, args->password) != ESP_OK)
+        error = WIFI_DIRECT_ERR_CONNECT;
+    if(!error && !wifi_direct_wait_connected(25000, true))
+        error = wifi_direct_cancelled() ? WIFI_DIRECT_ERR_CANCELLED : WIFI_DIRECT_ERR_CONNECT;
+    if(!error) error = wifi_direct_download(args->url, &received, &total);
+
+    wifi_direct_status(WIFI_DIRECT_RESTORING, error, received, total);
+    if(wifi_touched && was_initialized)
+    {
+        hal_wifi_disconnect();
+        if(have_config && hal_wifi_set_sta_config(&old_config) == ESP_OK)
+        {
+            if(was_connected && hal_wifi_reconnect() == ESP_OK)
+            {
+                if(!wifi_direct_wait_connected(25000, false)) error = WIFI_DIRECT_ERR_RESTORE;
+            }
+            else if(was_connected) error = WIFI_DIRECT_ERR_RESTORE;
+        }
+        else error = WIFI_DIRECT_ERR_RESTORE;
+        if(hal_wifi_set_ram_storage(false) != ESP_OK) error = WIFI_DIRECT_ERR_RESTORE;
+    }
+    else if(wifi_touched && hal_wifi_initialized()) hal_wifi_deinit();
+
+    uint8_t state = error == WIFI_DIRECT_ERR_NONE ? WIFI_DIRECT_DONE :
+                    error == WIFI_DIRECT_ERR_CANCELLED ? WIFI_DIRECT_CANCELLED : WIFI_DIRECT_ERROR;
+    wifi_direct_status(state, error, received, total);
+    sys_logi(WIFI_SERVICE_TAG, "Direct WiFi finished: state=%u bytes=%" PRIu32
+             "/%" PRIu32 " error=%u", state, received, total, error);
+    portENTER_CRITICAL(&g_direct_lock);
+    g_direct_busy = false;
+    portEXIT_CRITICAL(&g_direct_lock);
+    free(args);
+    vTaskDelete(NULL);
 }
 
 /*********************************************************************
@@ -423,7 +667,7 @@ static void wifi_download_task(void *pvParameters)
     esp_http_client_config_t config = {
         .url = url,
         .event_handler = wifi_http_event_handler,
-        .timeout_ms = 30000,
+        .timeout_ms = 5000,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -448,6 +692,9 @@ static void wifi_download_task(void *pvParameters)
 
     esp_http_client_cleanup(client);
     free((void *)url);
+    portENTER_CRITICAL(&g_direct_lock);
+    g_legacy_active = false;
+    portEXIT_CRITICAL(&g_direct_lock);
     vTaskDelete(NULL);
 }
 
@@ -462,7 +709,7 @@ void service_wifi_download_start(void)
         return;
     }
 
-    if(!g_wifi_connected)
+    if(!hal_wifi_connected())
     {
         sys_logw(WIFI_SERVICE_TAG, "WiFi not connected, cannot download");
         return;
@@ -488,13 +735,14 @@ void service_wifi_download_start(void)
  */
 void service_wifi_download_url(const char *url)
 {
+    if(service_wifi_direct_busy() || g_wifi_shutting_down) return;
     if(!g_service_param.network.wifi_enable)
     {
         sys_logw(WIFI_SERVICE_TAG, "WiFi disabled, cannot download");
         return;
     }
 
-    if(!g_wifi_connected)
+    if(!hal_wifi_connected())
     {
         sys_logw(WIFI_SERVICE_TAG, "WiFi not connected, cannot download");
         return;
@@ -520,12 +768,26 @@ void service_wifi_download_url(const char *url)
         return;
     }
 
+    portENTER_CRITICAL(&g_direct_lock);
+    if(g_legacy_active || g_direct_busy || g_wifi_shutting_down)
+    {
+        portEXIT_CRITICAL(&g_direct_lock);
+        free(url_copy);
+        return;
+    }
+    g_legacy_active = true;
+    g_download_state = WIFI_DOWNLOAD_DOWNLOADING;
+    portEXIT_CRITICAL(&g_direct_lock);
+
     // 创建下载任务
     if(pdPASS != xTaskCreate(wifi_download_task, "wifi_dl", 4096, url_copy, 5, NULL))
     {
         sys_loge(WIFI_SERVICE_TAG, "Failed to create download task");
         free(url_copy);
         g_download_state = WIFI_DOWNLOAD_ERROR;
+        portENTER_CRITICAL(&g_direct_lock);
+        g_legacy_active = false;
+        portEXIT_CRITICAL(&g_direct_lock);
     }
 }
 
@@ -545,45 +807,12 @@ wifi_download_state_t service_wifi_download_get_state(void)
     return g_download_state;
 }
 
-/**
- * [wifi_event_handler WiFi事件处理]
- */
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data)
-{
-    if(event_base == WIFI_EVENT)
-    {
-        switch(event_id)
-        {
-        case WIFI_EVENT_STA_START:
-            sys_logi(WIFI_SERVICE_TAG, "WiFi STA started");
-            break;
-        case WIFI_EVENT_STA_CONNECTED:
-            sys_logi(WIFI_SERVICE_TAG, "WiFi STA connected");
-            break;
-        case WIFI_EVENT_STA_DISCONNECTED:
-            g_wifi_connected = false;
-            sys_logw(WIFI_SERVICE_TAG, "WiFi STA disconnected");
-            break;
-        default:
-            break;
-        }
-    }
-    else if(event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
-    {
-        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        sys_logi(WIFI_SERVICE_TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        g_wifi_connected = true;
-    }
-}
-
 /*********************************************************************
  * 心跳（film-hub 服务端适配：定时上报 + 指令下发执行）
  *********************************************************************/
 #define HEARTBEAT_RESP_MAX  2048
 #define HEARTBEAT_URL_MAX   512
 
-static TaskHandle_t g_heartbeat_task_hdl = NULL;
 static char g_heartbeat_resp[HEARTBEAT_RESP_MAX];
 static int g_heartbeat_resp_len = 0;
 
@@ -734,6 +963,7 @@ static void wifi_heartbeat_exec_cmd(cJSON *cmd)
  */
 static void wifi_heartbeat_parse(const char *body)
 {
+    if(service_wifi_direct_busy() || g_wifi_shutting_down) return;
     cJSON *root = cJSON_Parse(body);
     if(root == NULL)
     {
@@ -873,9 +1103,19 @@ static void wifi_heartbeat_task(void *pvParameters)
     for(;;)
     {
         // 有 API 地址（用于拼接心跳接口）即视为已配置
-        if(g_wifi_connected && strlen(g_service_param.network.film_api_url) > 0)
+        if(hal_wifi_connected() && strlen(g_service_param.network.film_api_url) > 0)
         {
-            wifi_heartbeat_once();
+            portENTER_CRITICAL(&g_direct_lock);
+            bool run = !g_direct_busy && !g_wifi_shutting_down;
+            if(run) g_heartbeat_active = true;
+            portEXIT_CRITICAL(&g_direct_lock);
+            if(run)
+            {
+                wifi_heartbeat_once();
+                portENTER_CRITICAL(&g_direct_lock);
+                g_heartbeat_active = false;
+                portEXIT_CRITICAL(&g_direct_lock);
+            }
         }
 
         uint32_t interval = g_service_param.network.film_heartbeat_interval;

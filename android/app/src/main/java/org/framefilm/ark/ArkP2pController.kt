@@ -13,6 +13,7 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import java.net.Inet4Address
 import java.security.SecureRandom
 
 /** Creates only a temporary 2.4 GHz group owned by this controller session. */
@@ -21,7 +22,10 @@ class ArkP2pController(context: Context, private val listener: Listener) {
         fun onGroupReady(frequencyMhz: Int)
         fun onState(state: String)
         fun onError(message: String)
+        fun onSessionReady(session: Session) { }
     }
+
+    data class Session(val ssid: String, val passphrase: String, val ownerAddress: Inet4Address)
 
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -30,6 +34,7 @@ class ArkP2pController(context: Context, private val listener: Listener) {
     private var channelGeneration = 0
     private var receiver: BroadcastReceiver? = null
     private var sessionName: String? = null
+    private var sessionPassphrase: String? = null
     private var generation = 0
     private var checking = false
     private var creating = false
@@ -110,12 +115,14 @@ class ArkP2pController(context: Context, private val listener: Listener) {
                     repeat(length) { append(alphabet[random.nextInt(alphabet.length)]) }
                 }
                 val name = "DIRECT-${token(2)}-${token(8)}"
+                val passphrase = token(16)
                 val config = WifiP2pConfig.Builder()
                     .setNetworkName(name)
-                    .setPassphrase(token(16))
+                    .setPassphrase(passphrase)
                     .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_2GHZ)
                     .build()
                 sessionName = name
+                sessionPassphrase = passphrase
                 creating = true
                 listener.onState("创建 2.4GHz 直连组中")
                 setTimeout(20_000) {
@@ -135,6 +142,7 @@ class ArkP2pController(context: Context, private val listener: Listener) {
                             else {
                                 creating = false
                                 sessionName = null
+                                sessionPassphrase = null
                                 clearTimeout()
                                 listener.onError("创建直连组失败：$reason")
                             }
@@ -143,6 +151,7 @@ class ArkP2pController(context: Context, private val listener: Listener) {
                 } catch (_: SecurityException) {
                     creating = false
                     sessionName = null
+                    sessionPassphrase = null
                     clearTimeout()
                     listener.onError("Wi-Fi Direct 权限不可用")
                 }
@@ -188,6 +197,33 @@ class ArkP2pController(context: Context, private val listener: Listener) {
         clearTimeout()
         listener.onState("2.4GHz 直连组已就绪")
         listener.onGroupReady(frequency)
+        requestSessionInfo(group, 0)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestSessionInfo(group: WifiP2pGroup, attempt: Int) {
+        val p2p = manager ?: return
+        val ch = channel ?: return
+        val token = generation
+        try {
+            p2p.requestConnectionInfo(ch) { info -> onMain {
+                if (token != generation || !owned || closing) return@onMain
+                val address = info?.groupOwnerAddress as? Inet4Address
+                val groupPassphrase = group.passphrase
+                val passphrase = groupPassphrase.takeUnless { it.isNullOrEmpty() } ?: sessionPassphrase
+                if (info?.isGroupOwner == true && info.groupFormed && address != null && !passphrase.isNullOrEmpty()) {
+                    listener.onSessionReady(Session(group.networkName, passphrase, address))
+                    return@onMain
+                }
+                val diagnostic = "owner=${info?.isGroupOwner == true}, groupFormed=${info?.groupFormed == true}, " +
+                    "addressPresent=${address != null}, passphrasePresent=${!groupPassphrase.isNullOrEmpty()}"
+                if (attempt == 0) listener.onState("直连连接信息未就绪 ($diagnostic)，等待 IP")
+                if (attempt < 19) main.postDelayed({
+                    if (token == generation && owned && !closing) requestSessionInfo(group, attempt + 1)
+                }, 500)
+                else listener.onError("无法取得直连组连接信息 ($diagnostic)")
+            } }
+        } catch (_: SecurityException) { listener.onError("无法查询直连组连接信息：权限不可用") }
     }
 
     @SuppressLint("MissingPermission")
@@ -205,7 +241,7 @@ class ArkP2pController(context: Context, private val listener: Listener) {
                 if (group?.networkName != name) {
                     finishClose(true)
                 } else {
-                    removeVerifiedGroup(p2p, ch)
+                    removeVerifiedGroup(p2p, ch, 0)
                 }
             } }
         } catch (_: SecurityException) {
@@ -215,25 +251,46 @@ class ArkP2pController(context: Context, private val listener: Listener) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun removeVerifiedGroup(p2p: WifiP2pManager, ch: WifiP2pManager.Channel) {
+    private fun removeVerifiedGroup(p2p: WifiP2pManager, ch: WifiP2pManager.Channel, attempt: Int) {
         listener.onState("释放本次创建的直连组中")
         val token = generation
         try {
             p2p.removeGroup(ch, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() = onMain { if (token == generation) finishClose(true) }
+                override fun onSuccess() = onMain {
+                    if (token != generation) return@onMain
+                    clearTimeout()
+                    // The action was accepted; confirm the owned group actually disappeared.
+                    main.postDelayed({
+                        if (token != generation) return@postDelayed
+                        p2p.requestGroupInfo(ch) { group -> onMain {
+                            if (token != generation) return@onMain
+                            if (group?.networkName != sessionName) finishClose(true)
+                            else retryRemove(p2p, ch, attempt, "组仍存在")
+                        } }
+                    }, 500)
+                }
                 override fun onFailure(reason: Int) = onMain {
                     if (token != generation) return@onMain
-                    listener.onError("释放直连组失败：$reason")
-                    finishClose(false)
+                    clearTimeout()
+                    retryRemove(p2p, ch, attempt, "失败码 $reason")
                 }
             })
             setTimeout(8_000) {
                 if (token != generation) return@setTimeout
-                listener.onError("释放直连组超时")
-                finishClose(false)
+                retryRemove(p2p, ch, attempt, "超时")
             }
         } catch (_: SecurityException) {
             listener.onError("无法释放直连组：权限不可用")
+            finishClose(false)
+        }
+    }
+
+    private fun retryRemove(p2p: WifiP2pManager, ch: WifiP2pManager.Channel, attempt: Int, reason: String) {
+        if (attempt < 3) main.postDelayed({
+            if (closing && channel === ch) removeVerifiedGroup(p2p, ch, attempt + 1)
+        }, 600)
+        else {
+            listener.onError("释放直连组未完成（$reason，已尝试 ${attempt + 1} 次）")
             finishClose(false)
         }
     }
@@ -266,6 +323,7 @@ class ArkP2pController(context: Context, private val listener: Listener) {
         channelGeneration++ // 先作废，再 close；迟到回调不得覆盖本次清理结果或新通道。
         oldChannel?.close()
         sessionName = null
+        sessionPassphrase = null
         checking = false
         creating = false
         owned = false

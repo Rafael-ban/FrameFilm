@@ -1,13 +1,14 @@
 # Ark Android 客户端
 
-当前是 M0 通信验证版，用于在真实 Android 手机上验证 BLE 和 WiFi Direct 群组能力，为后续原生客户端建立基础。
+当前是 M1 直传诊断版，使用 BLE 命令让 Ark 加入手机创建的临时 2.4GHz WiFi Direct 群组，从手机 HTTP 服务获取一份已知有效的 `.film`。
 
 ## 当前范围
 
 - 扫描并连接 `FRAMEFILMARK`，订阅 GATT 通知，通过 `0x42` 读取屏幕参数。
 - 手机创建一个临时的 2.4GHz WiFi Direct 群组，检查群组拥有者身份和实际频率。
 - 开发版自动探针在建组前后各读取一次 Ark 屏幕参数，然后释放自己创建的连接和群组。
-- 不向 Ark 写入 WiFi 配置，不上传文件，不改设备参数。手机建组成功不代表 Ark 已加入群组，也不代表文件直传已经完成。
+- “WiFi 直传测试文件”按钮和 `DirectTransferProbe` 会读取原有 WiFi 配置、建立临时群组、通过 Ark 专用的 `0x50/0x51/0x52` 命令发送和查询测试文件，最后比较配置并清理临时资源。密码只在内存中传给 Ark，不显示在日志。
+- PASS 表示 Ark 报告 DONE，接收及总字节数等于打包 asset 的长度，原有 WiFi 配置查询未变，手机临时组清理完成。屏幕显示效果仍需目视确认。
 
 ## 构建与安装
 
@@ -31,15 +32,34 @@ adb -s <手机序列号> shell am instrument -w org.framefilm.ark.dev/org.framef
 
 探针必须同时报告 `result=PASS` 和 `cleanupCompleted=true` 才算通过。它调用与界面相同的控制器，不模拟屏幕点击。探针仅编入 debug APK；输出不包含群组密码。
 
+M1 真文件传输探针（同样仅在 debug APK 中）：
+
+```powershell
+adb -s <手机序列号> shell am instrument -w org.framefilm.ark.dev/org.framefilm.ark.DirectTransferProbe
+```
+
+请先给应用授予附近蓝牙和附近 WiFi 权限，并确保手机没有其他 WiFi Direct 组。异常时探针请求取消，等待 Ark 报告恢复完成后再释放手机 HTTP 服务及直连组；最长可能等待数分钟。
+
 ## 后续阶段
 
-1. Ark 增加保存在 RAM 中的临时 WiFi 会话，手机通过 BLE 下发本次群组连接信息，避免覆盖已有 NVS 配网参数。
-2. 验证 Ark 加入手机群组并通过 WiFi 获取一份测试 `.film`，以设备实际保存成功验收。
-3. 接入有界缓冲写 SD、取消与超时清理，再逐步迁移网页中的图片转换、文件管理和设备设置。
+1. 在已通过的单文件直传基础上，接入手机选图、预览、转换和真实进度展示。
+2. 针对实际使用补齐取消、连接中断与重试体验，再逐步迁移网页中的文件管理和设备设置。
+3. 基础传输稳定后完善通行证界面。当前仅有诊断界面，不是完整相册客户端，也不与小米互传私有协议互通。
 
 第三方 ROM 声明支持 WiFi Direct 仅表示具备接口，兼容性以具体手机的实测结果为准。
 
 ## 当前验证记录（2026-10-07）
+
+### 新手机：M1 真文件直传与屏幕显示通过
+
+- Ark 使用 ESP-IDF 5.5.2 构建通过；应用大小 1,884,336 字节，应用分区剩余 61,264 字节。已向 COM15 的 Ark 写入应用区并完成 esptool 校验，保留 NVS 与 SD。烧录前应用备份为本地 `.output/ark/backups/pre-direct-m1-app.bin`。
+- Android 调试 APK 构建、安装成功。修复了控制器声明的 Kotlin 递归类型推断错误。
+- 首次联调发现 GO 已建立但 IP 地址尚未就绪：`owner=true, groupFormed=true, addressPresent=false, passphrasePresent=true`。客户端改为有限等待真实地址，并在失败时确认本次组是否释放。为调试失败恢复增加 `DirectTransferProbe -e cleanupGroup <精确组名>` 分支；只清理匹配且属于 GO 的组，不修改其他组。
+- 实机还暴露出 BLE 通知早于 GATT 写完成的竞态。客户端现在同时等待写成功与设备回包，之后才开始下一条命令。
+- 修复后同一 M1 探针返回 `result=PASS`、`cleanupCompleted=true`。Ark 经 WiFi 保存 43,232 字节已知有效的 720×480 单帧 `.film`，状态从 RESTORING 进入 DONE，接收字节数和总长均为 43,232；原有 WiFi 开关、SSID、密码和 API 地址查询结果前后一致。本机原配置为 WiFi 关闭、网络信息为空，尚未验证恢复已有路由器连接。
+- 手机系统另确认回到 `InactiveState`，`groupFormed=false`，临时组已释放。测试文件使用独立时间戳名称，未覆盖用户原有图片。
+- 本地证据：`.output/ark/logs/build-direct-m1-final.log`、`flash-direct-m1.log`、`android-direct-m1-gatt-fix-build.log`、`android-direct-m1-probe-gatt-fixed.log`。最终传输依据设备 BLE 状态回包；串口捕获在最终传输前已结束，不能声称最终串口日志验证了保存或屏幕刷新。
+- 用户已目视确认“已显示新的测试图，正常”，文件传输、保存与实际屏幕显示闭环通过。当前验收限于本次单文件成功路径；取消、断电、满卡、长时间稳定性及吞吐量未做完整回归。
 
 ### 新手机：M0 通过
 

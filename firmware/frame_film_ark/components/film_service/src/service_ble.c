@@ -49,6 +49,7 @@
 #include "service_param.h"
 #include "service_time.h"
 #include "service_wifi.h"
+#include "service_monitor.h"
 
 #include "hal_api.h"
 
@@ -118,6 +119,7 @@ static void ble_file_reset(void);
 
 void service_ble_transfer_disconnected(void)
 {
+    service_wifi_direct_cancel();
     m_ble_link_epoch++;
     m_ble_abort_pending = 1;
     if(m_ble_msg_hdl)
@@ -420,6 +422,55 @@ static void ble_task_handle(void *pvParameters)
     }
 }
 
+static bool ble_cmd_conflicts_with_direct(uint8_t ch)
+{
+    switch(ch)
+    {
+    case BLE_FILM_TRANS_CH_FILE_START:
+    case BLE_FILM_TRANS_CH_FILE_DELETE:
+    case BLE_FILM_TRANS_CH_OTA_START:
+    case BLE_FILM_TRANS_CH_CTRL_RESET:
+    case BLE_FILM_TRANS_CH_CTRL_REBOOT:
+    case BLE_FILM_TRANS_CH_CTRL_SDRESET:
+    case BLE_FILM_TRANS_CH_CTRL_WIFI_ENABLE:
+    case BLE_FILM_TRANS_CH_CTRL_WIFI_SSID:
+    case BLE_FILM_TRANS_CH_CTRL_WIFI_PASSWORD:
+    case BLE_FILM_TRANS_CH_CTRL_FILM_API_URL:
+    case BLE_FILM_TRANS_CH_CTRL_WIFI_CONNECT:
+    case BLE_FILM_TRANS_CH_CTRL_WIFI_DISCONNECT:
+    case BLE_FILM_TRANS_CH_CTRL_WIFI_CLEAR:
+    case BLE_FILM_TRANS_CH_CTRL_FILM_DOWNLOAD:
+    case BLE_FILM_TRANS_CH_CTRL_FILM_HEARTBEAT_URL:
+    case BLE_FILM_TRANS_CH_CTRL_FILM_HEARTBEAT_INTERVAL:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static uint8_t ble_direct_start(const ble_cmd_t *cmd)
+{
+    if(service_monitor_sleep_pending()) return 1;
+    if(cmd->len == 0 || cmd->len > BLE_DIRECT_START_DATA_MAX) return 2;
+    if((m_film_trans_state > BLE_FILM_TRANS_IDLE && m_film_trans_state < BLE_FILM_TRANS_STOPPED) ||
+       (m_ota_trans_state > BLE_OTA_TRANS_IDLE && m_ota_trans_state < BLE_OTA_TRANS_STOPPED)) return 1;
+
+    const uint8_t *cursor = cmd->pdata;
+    size_t remaining = cmd->len;
+    const char *fields[3];
+    for(size_t i = 0; i < 3; i++)
+    {
+        const uint8_t *end = memchr(cursor, '\0', remaining);
+        if(end == NULL) return 2;
+        fields[i] = (const char *)cursor;
+        size_t consumed = (size_t)(end - cursor) + 1;
+        cursor += consumed;
+        remaining -= consumed;
+    }
+    if(remaining != 0) return 2;
+    return service_wifi_direct_start(fields[0], fields[1], fields[2]);
+}
+
 static void ble_cmd_process(ble_cmd_t *cmd)
 {
     if(cmd == NULL)
@@ -428,8 +479,43 @@ static void ble_cmd_process(ble_cmd_t *cmd)
         return;
     }
 
+    if(service_wifi_direct_busy() && ble_cmd_conflicts_with_direct(cmd->ch))
+    {
+        const uint8_t busy = 1;
+        service_ble_send_resp(cmd->ch, &busy, 1);
+        return;
+    }
+
     switch(cmd->ch)
     {
+        case BLE_FILM_TRANS_CH_DIRECT_START:
+        {
+            uint8_t result = ble_direct_start(cmd);
+            service_ble_send_resp(cmd->ch, &result, 1);
+            break;
+        }
+        case BLE_FILM_TRANS_CH_DIRECT_STATUS:
+        {
+            if(cmd->len != 0) break;
+            wifi_direct_status_t status;
+            service_wifi_direct_get_status(&status);
+            uint8_t data[11] = {status.state, status.progress, status.error};
+            for(unsigned i = 0; i < 4; i++)
+            {
+                data[3 + i] = (uint8_t)(status.received >> (24 - 8 * i));
+                data[7 + i] = (uint8_t)(status.total >> (24 - 8 * i));
+            }
+            service_ble_send_resp(cmd->ch, data, sizeof(data));
+            break;
+        }
+        case BLE_FILM_TRANS_CH_DIRECT_CANCEL:
+        {
+            if(cmd->len != 0) break;
+            service_wifi_direct_cancel();
+            const uint8_t accepted = 0;
+            service_ble_send_resp(cmd->ch, &accepted, 1);
+            break;
+        }
         case BLE_FILM_TRANS_CH_FILE_START :
         {
             ble_file_reset();

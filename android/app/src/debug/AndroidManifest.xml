@@ -4,4 +4,8 @@
         android:name="org.framefilm.ark.ConnectivityProbe"
         android:targetPackage="${applicationId}"
         android:label="Ark connectivity probe" />
+    <instrumentation
+        android:name="org.framefilm.ark.DirectTransferProbe"
+        android:targetPackage="${applicationId}"
+        android:label="Ark direct film transfer probe" />
 </manifest>
