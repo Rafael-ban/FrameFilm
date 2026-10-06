@@ -41,6 +41,16 @@ adb -s <手机序列号> shell am instrument -w org.framefilm.ark.dev/org.framef
 
 ## 当前验证记录（2026-10-07）
 
+### 新手机：M0 通过
+
+- 型号 `25042PN24C`、设备代号 `dijun`，系统自报 Android 17 / API 37。使用现有 APK 和已授予的附近设备权限执行探针。
+- 成功扫描、连接 Ark，发现 GATT 服务并订阅通知，读取到面板 ID `0x02`、`720×480`；手机建立临时 2.4GHz GO 组后，BLE 再次查询仍得到相同屏参。
+- 初测 GO 频率为 2462MHz，释放后系统状态回到 `InactiveState`，但客户端收到关闭通道的迟到回调，误报“清理未确认”。已修复：关闭前作废通道身份，忽略主动关闭及旧通道的迟到回调。
+- 修复版构建、安装成功；仅对上述流程复测一次，GO 频率为 2412MHz，返回 `result=PASS`、`cleanupCompleted=true`，没有清理误报。修复版已安装到新手机。
+- 复测日志：本地 `.output/ark/logs/android-m0-probe-dijun-fixed.log`。本轮只验证手机建组与 BLE 控制通信并存；Ark 尚未通过 WiFi 加入该组，没有进行 WiFi 文件传输或吞吐测试。
+
+### 旧测试手机：小米 9 的安装恢复与 BLE 阻塞
+
 - 空工程和 M0 业务代码的 `:app:assembleDebug` 均构建通过；使用 JDK 21、Gradle 8.11.1、AGP 8.10.1、SDK 35。
 - 小米 9（第三方 HyperOS 2 / Android 15、API 35）的 USB 调试已授权，ADB 连接正常。
 - 初次流式、非流式 ADB 安装以及手机本地安装都卡在已提交阶段。两个 ADB 会话虽接受取消请求，仍保留占用标记；此前记录的“已清理”不代表系统实际完成释放。

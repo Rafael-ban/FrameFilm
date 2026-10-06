@@ -27,6 +27,7 @@ class ArkP2pController(context: Context, private val listener: Listener) {
     private val main = Handler(Looper.getMainLooper())
     private val manager = appContext.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
     private var channel: WifiP2pManager.Channel? = null
+    private var channelGeneration = 0
     private var receiver: BroadcastReceiver? = null
     private var sessionName: String? = null
     private var generation = 0
@@ -62,8 +63,10 @@ class ArkP2pController(context: Context, private val listener: Listener) {
     private fun ensureChannel(): WifiP2pManager.Channel? {
         if (channel != null) return channel
         val p2p = manager ?: return null
+        val token = ++channelGeneration
         channel = p2p.initialize(appContext, Looper.getMainLooper()) {
             onMain {
+                if (token != channelGeneration || channel == null) return@onMain
                 channel = null
                 if (checking || creating || owned) listener.onError("Wi-Fi Direct 通道已断开")
                 finishClose(false)
@@ -258,8 +261,10 @@ class ArkP2pController(context: Context, private val listener: Listener) {
         clearTimeout()
         receiver?.let { try { appContext.unregisterReceiver(it) } catch (_: IllegalArgumentException) { } }
         receiver = null
-        channel?.close()
+        val oldChannel = channel
         channel = null
+        channelGeneration++ // 先作废，再 close；迟到回调不得覆盖本次清理结果或新通道。
+        oldChannel?.close()
         sessionName = null
         checking = false
         creating = false
