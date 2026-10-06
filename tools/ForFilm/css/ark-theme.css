@@ -927,12 +927,125 @@ body.theme-ark .ark-herobar{margin-bottom:13px}
         background:var(--ark-ink);color:#fff;border:0;box-shadow:none;transform:none;
     }
     body.theme-ark .nav-item.active .ic{stroke:var(--ark-yellow)}
+    /* 桌面激活项是墨底，文字必须转白 —— 手机那条 .nav-item.active span{color:ink}
+       是同权重下更靠后的规则，不给它加例外会让文字与底色同色（看不见） */
+    body.theme-ark .nav-item.active span{color:#fff}
     body.theme-ark .nav-item.active::after{display:none}
 
     body.theme-ark .card{padding:16px 20px 18px}
     body.theme-ark .card__title{font-size:15.5px}
     body.theme-ark .ark-band{column-span:all}
+    /* Film 页是栅格布局，没有 column-span：横幅要显式跨满整行并独占第一行，
+       否则它只占左栏第一格，而同一行的右栏预览卡会把整行撑高，左栏第一张卡被挤下去。
+       横幅让出第 1 行后，预览卡顺延到第 2 行起（仍独占右栏）。 */
+    body.theme-ark #convert-page.active > .ark-band{grid-column:1 / -1;grid-row:1}
+    body.theme-ark #convert-page.active > .card:has(> .polaroid-frame){grid-row:2 / span 99}
     body.theme-ark .frame-cards{gap:20px}
     body.theme-ark .mcard{padding:16px 15px 17px}
     body.theme-ark .mcard__name{font-size:17px}
 }
+
+/* ============================================================
+   15. 动画工坊（独立页 #anim-page）—— 沿用官网造型语言
+   ============================================================ */
+
+/* 帧数 chip：墨底药丸 */
+body.theme-ark .anim-chip{
+    background:var(--ark-ink);color:#fff;border-radius:var(--ark-r-pill);
+    font-family:var(--ark-mono);font-size:10px;letter-spacing:.12em;padding:5px 9px;
+}
+
+body.theme-ark .anim-hint{color:var(--ark-ink-3);font-family:var(--ark-body);font-size:11px}
+
+/* 绘制盘 / 取景框 / 进度读数：发丝线 + 直角 */
+body.theme-ark .anim-draw-box,
+body.theme-ark .anim-stage-inner{
+    border:1px solid var(--ark-line-2);border-radius:var(--ark-r-sm);
+}
+/* 格线比外框（--ark-line-2）再淡一档：外框是"画布边"，格线只是辅助刻度，
+   两者同色会让四条边和内部格线糊成一圈 */
+body.theme-ark .anim-draw-grid{--anim-grid-line:rgba(0,0,0,.12)}
+
+/* 「应用到所有帧」开关：与 secondary-button 同发丝线；开启态按 mode-button.active 的墨底白字 */
+body.theme-ark .anim-imgtools__all{border-color:var(--ark-line-2);transform:none;box-shadow:none}
+body.theme-ark .anim-imgtools__all:hover{border-color:var(--ark-ink)}
+body.theme-ark .anim-imgtools__all.is-on{
+    background:var(--ark-ink);border-color:var(--ark-ink);color:#fff;transform:none;box-shadow:none;
+}
+body.theme-ark .anim-imgtools__all.is-on input{accent-color:#fff}
+body.theme-ark .anim-imgtools__all:active{transform:none;box-shadow:none}
+/* 取景框内腔与 .polaroid-inner 同款（它没挂 polaroid-inner 类，避免被全局
+   updateCanvasScale() 按机型重算旋转，这里单独补视觉） */
+body.theme-ark .anim-stage-inner{background:#fff}
+body.theme-ark .anim-stage__badge{
+    background:var(--ark-ink);color:#fff;border-radius:0;
+    font-family:var(--ark-mono);font-size:10px;letter-spacing:.12em;padding:4px 8px;
+}
+body.theme-ark .anim-draw-wrap.is-zoom .anim-draw-box{border-color:var(--ark-ink)}
+
+/* 工具：方形键帽；激活 = 墨底黄图标（同底栏激活项语言） */
+body.theme-ark .anim-tool{
+    background:#fff;border:1px solid var(--ark-line-2);border-radius:var(--ark-r-sm);box-shadow:none;
+}
+body.theme-ark .anim-tool:hover{border-color:var(--ark-ink);transform:none}
+body.theme-ark .anim-tool.active{background:var(--ark-ink);border-color:var(--ark-ink)}
+body.theme-ark .anim-tool.active .ic{stroke:var(--ark-yellow)}
+body.theme-ark .anim-zoom.active{background:var(--ark-ink);border-color:var(--ark-ink)}
+body.theme-ark .anim-zoom.active .ic{stroke:var(--ark-yellow)}
+
+/* 调色盘：选中 = 墨色双环 */
+body.theme-ark .anim-swatch{border:1px solid var(--ark-line-2);border-radius:var(--ark-r-sm)}
+body.theme-ark .anim-swatch.on{box-shadow:0 0 0 2px #fff,0 0 0 3px var(--ark-ink)}
+
+/* 帧序列：灰底软块 + ▲ 前导（与批量片单同一族） */
+body.theme-ark .anim-frame{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);box-shadow:none;
+}
+body.theme-ark .anim-frame.on{
+    background:#fff;box-shadow:inset 0 0 0 1px var(--ark-ink),inset 3px 0 0 var(--ark-yellow);
+}
+body.theme-ark .anim-frame__no{
+    background:var(--ark-ink);color:#fff;border-radius:0;
+    font-family:var(--ark-mono);letter-spacing:.08em;
+}
+body.theme-ark .anim-frame__tag{
+    background:var(--ark-yellow);color:var(--ark-ink);border-radius:0;
+    font-family:var(--ark-mono);letter-spacing:.12em;
+}
+
+/* 进度轴：细刻度线上摆白点，激活黄点（同版本日历时间轴） */
+body.theme-ark .anim-scrub{height:20px}
+body.theme-ark .anim-scrub::before{
+    content:'';position:absolute;left:0;right:0;top:9px;height:1px;background:var(--ark-line-2);
+}
+body.theme-ark .anim-scrub::after{
+    content:'';position:absolute;left:0;right:0;top:4px;height:6px;
+    background-image:repeating-linear-gradient(90deg,var(--ark-line-2) 0 1px,transparent 1px 9px);
+}
+body.theme-ark .anim-scrub__dot{
+    top:6px;border:1.5px solid var(--ark-ink);background:#fff;z-index:2;
+}
+body.theme-ark .anim-scrub__dot.on{background:var(--ark-yellow);transform:scale(1.3)}
+
+/* 输出读数：黑 chip 行 */
+body.theme-ark .anim-stat{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);
+    font-family:var(--ark-mono);color:var(--ark-ink);gap:9px;
+}
+body.theme-ark .anim-stat__lbl{color:var(--ark-ink-3);opacity:1;letter-spacing:.14em}
+body.theme-ark .anim-stat b.warn{color:#B26A00}
+body.theme-ark .anim-stat b.over{color:var(--ark-red)}
+body.theme-ark .anim-stat__warn{color:var(--ark-red);font-family:var(--ark-body)}
+
+body.theme-ark .anim-play.is-playing{background:var(--ark-ink)}
+body.theme-ark .anim-play.is-playing .ic{stroke:var(--ark-yellow)}
+
+/* 设备不支持动画的提示条：灰底 + 红竖标（同批量失败的语义色） */
+body.theme-ark .anim-warn{
+    background:var(--ark-bg-2);border:0;border-radius:var(--ark-r-md);
+    box-shadow:inset 3px 0 0 var(--ark-red);
+    color:var(--ark-ink-2);font-size:11px;
+}
+body.theme-ark #animVideo{border:1px solid var(--ark-line-2);border-radius:var(--ark-r-sm)}
+body.theme-ark .anim-device .action-header{font-family:var(--ark-display);font-weight:600}
+

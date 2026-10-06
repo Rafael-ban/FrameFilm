@@ -81,6 +81,33 @@ const BLE_FILM_TRANS_CH_CTRL_KEYBOARD_KEY_GET = 0x44;
 const BLE_FILM_TRANS_CH_CTRL_TIME_SYNC = 0x4D;
 const BLE_FILM_TRANS_CH_CTRL_KEY_INJECT = 0x4E;
 
+// App 控制通道（仅通行证版 / FRAMEFILMARK 实现）：
+// 0x4B 切换 app（1 字节 app_id，设备不回包）；0x4C 查询当前 app
+const BLE_FILM_TRANS_CH_CTRL_APP_SWITCH = 0x4B;
+const BLE_FILM_TRANS_CH_CTRL_APP_CURRENT_GET = 0x4C;
+
+// App 参数通道（TLV 列表，多字节大端；SET 静默不回包）
+const BLE_FILM_TRANS_CH_APP_IMAGE_PARAM = 0x45;
+const BLE_FILM_TRANS_CH_APP_IMAGE_PARAM_GET = 0x46;
+const BLE_FILM_TRANS_CH_APP_TEMPLATE_PARAM = 0x47;
+const BLE_FILM_TRANS_CH_APP_TEMPLATE_PARAM_GET = 0x48;
+const BLE_FILM_TRANS_CH_APP_ANIM_PARAM = 0x49;
+const BLE_FILM_TRANS_CH_APP_ANIM_PARAM_GET = 0x4A;
+
+// app_id（见 docs/blecmd/blecmd_protocol.md §3.6）
+const BLE_APP_ID_IMAGE = 0x00;
+const BLE_APP_ID_TEMPLATE = 0x01;
+const BLE_APP_ID_CLOCK = 0x02;
+const BLE_APP_ID_ANIMATION = 0x03;
+const BLE_APP_ID_SETTINGS = 0x04;
+const BLE_APP_ID_MENU = 0x05;
+const BLE_APP_ID_PASS = 0x06;
+
+// 动画 app 参数 TAG（与固件 app_animation.h 一一对应）
+const BLE_ANIM_TAG_PLAY_MODE = 0x01;  // 1B：0=单文件循环 1=列表轮播
+const BLE_ANIM_TAG_FRAME_MS = 0x02;   // 2B：100~2000 毫秒
+const BLE_ANIM_TAG_LOOP_SEC = 0x03;   // 2B：0~600 秒
+
 // 遥控键值（与固件 service_ble.h 的 BLE_KEY_* 对应）
 const BLE_KEY_SHORT = 0x00;   // 确认键单击
 const BLE_KEY_LONG = 0x01;    // 确认键长按（= 手动休眠）
@@ -916,6 +943,56 @@ function syncTimeSyncAvailability() {
     if (section) {
         section.style.display = (currentDeviceType === 'FRAMEFILMARK') ? '' : 'none';
     }
+}
+
+// ==================== App 控制 / 动画参数（仅通行证版） ====================
+// 0x4B 切换 app：设备收到后由 app 调度器消费，不回包。
+// 动画上传靠它把设备切到「动画」页（数据目录随之切到 /sdcard/animation）。
+async function sendBleAppSwitch(appId) {
+    if (!device || !server || !characteristic) {
+        throw new Error('请先连接设备');
+    }
+    const packet = new Uint8Array(5);
+    packet[0] = BLE_CMD_HEAD;
+    packet[1] = BLE_FILM_TRANS_CH_CTRL_APP_SWITCH;
+    packet[2] = 1;
+    packet[3] = appId & 0xFF;
+    packet[4] = calculateChecksum(packet, 4);
+
+    await characteristic.writeValue(packet);
+    debugLog('切换 app → 0x' + (appId & 0xFF).toString(16));
+    await delay(BLE_CTRL_DELAY);
+}
+
+// 0x49 动画参数设置（TLV，多字节大端，SET 静默不回包）
+// 单包 DATA 建议 ≤15 字节，三个字段合计 11 字节，一包发完。
+async function sendBleAnimParams(playMode, frameMs, loopSeconds) {
+    if (!device || !server || !characteristic) {
+        throw new Error('请先连接设备');
+    }
+    var data = [];
+    if (typeof playMode === 'number') {
+        data.push(BLE_ANIM_TAG_PLAY_MODE, 1, playMode & 0xFF);
+    }
+    if (typeof frameMs === 'number') {
+        var ms = clamp(Math.round(frameMs), 100, 2000);
+        data.push(BLE_ANIM_TAG_FRAME_MS, 2, (ms >> 8) & 0xFF, ms & 0xFF);
+    }
+    if (typeof loopSeconds === 'number') {
+        var ls = clamp(Math.round(loopSeconds), 0, 600);
+        data.push(BLE_ANIM_TAG_LOOP_SEC, 2, (ls >> 8) & 0xFF, ls & 0xFF);
+    }
+
+    const packet = new Uint8Array(4 + data.length);
+    packet[0] = BLE_CMD_HEAD;
+    packet[1] = BLE_FILM_TRANS_CH_APP_ANIM_PARAM;
+    packet[2] = data.length;
+    packet.set(data, 3);
+    packet[packet.length - 1] = calculateChecksum(packet, packet.length - 1);
+
+    await characteristic.writeValue(packet);
+    debugLog('下发动画参数: mode=' + playMode + ' frame=' + frameMs + 'ms loop=' + loopSeconds + 's');
+    await delay(BLE_CTRL_DELAY);
 }
 
 // ==================== 蓝牙遥控（0x4E 远程按键注入） ====================

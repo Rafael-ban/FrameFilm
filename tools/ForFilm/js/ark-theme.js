@@ -14,6 +14,28 @@
     var ARK_DEVICE = 'FRAMEFILMARK';
     var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
+    // 主题偏好：通行证专属主题（ARK 皮肤）是否启用。默认启用。
+    // 在「设置 → 主题选择」里可关闭；关闭后连接通行证版也不再切皮肤，保持默认界面。
+    var THEME_PREF_KEY = 'framefilm.arkTheme';
+    var themePrefEnabled = true;
+
+    function readThemePref() {
+        try {
+            var v = window.localStorage.getItem(THEME_PREF_KEY);
+            return (v === null) ? true : (v === '1');
+        } catch (e) {
+            return true;   // 无存储可用（隐私模式等）：按默认启用
+        }
+    }
+
+    function writeThemePref(on) {
+        try {
+            window.localStorage.setItem(THEME_PREF_KEY, on ? '1' : '0');
+        } catch (e) {
+            /* 写不进去就只在本次会话生效 */
+        }
+    }
+
     var state = { active: false, loader: null, timers: [], raf: 0, fonts: false };
 
     function clearTimers() {
@@ -52,6 +74,7 @@
         '设备连接': 'LINK',
         'Frame 制作': 'CAPTURE',
         '照片转换': 'PIPELINE',
+        '动画工坊': 'MOTION',
         '设备设置': 'SYSTEM'
     };
     // 页头标题用短名（对齐设计稿的 [ Frame ] / [ Film ]，而不是原页面全名）
@@ -59,6 +82,7 @@
         '设备连接': '设备连接',
         'Frame 制作': 'Frame',
         '照片转换': 'Film',
+        '动画工坊': '动画',
         '设备设置': '设置'
     };
 
@@ -251,6 +275,7 @@
         ['frame-camera-transfer-container', 'frameCameraFileName'],
         ['frame-quote-transfer-container', 'frameQuoteFileName'],
         ['frame-batch-transfer-container', 'batchPrefix'],
+        ['anim-transfer-container', 'animFileName'],
         ['transfer-container', 'fileName']
     ];
 
@@ -496,12 +521,49 @@
 
     // 由 utils.js 的 onDeviceTypeChanged() 调用
     function arkThemeSync() {
-        var isArk = (typeof currentDeviceType !== 'undefined' && currentDeviceType === ARK_DEVICE);
+        var isArk = (typeof currentDeviceType !== 'undefined' && currentDeviceType === ARK_DEVICE)
+                    && themePrefEnabled;
         if (isArk) {
             enter();
         } else {
             leave();
         }
+        syncThemeSwitchUI();
+    }
+
+    // 设置页「主题选择」卡片：回填开关 + 说明文字
+    function syncThemeSwitchUI() {
+        var sw = document.getElementById('ark-theme-switch');
+        if (sw) sw.checked = themePrefEnabled;
+        var hint = document.getElementById('ark-theme-hint');
+        if (hint) {
+            hint.textContent = themePrefEnabled
+                ? '当前：已启用 —— 连接 FRAMEFILMARK 后自动切换 ARK 皮肤'
+                : '当前：已关闭 —— 连接通行证版也保持默认皮肤';
+        }
+    }
+
+    // 开关联动：改完立刻生效（开 → 进皮肤；关 → 退皮肤），并持久化
+    function initThemeSetting() {
+        themePrefEnabled = readThemePref();
+        var sw = document.getElementById('ark-theme-switch');
+        if (sw) {
+            sw.checked = themePrefEnabled;
+            sw.addEventListener('change', function () {
+                themePrefEnabled = !!sw.checked;
+                writeThemePref(themePrefEnabled);
+                arkThemeSync();
+                syncThemeSwitchUI();
+            });
+        }
+        syncThemeSwitchUI();
+        arkThemeSync();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initThemeSetting);
+    } else {
+        initThemeSetting();
     }
 
     window.arkThemeSync = arkThemeSync;

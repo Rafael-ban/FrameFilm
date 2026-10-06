@@ -1,0 +1,462 @@
+/* ============================================================
+   ForFilm · 动画工坊（独立页面 #anim-page，位于 Film 与 设置 之间）
+   ------------------------------------------------------------
+   分两层：
+     · 这里只写"结构 + 通用视觉"，颜色/圆角/阴影一律用 style.css 的令牌
+       （--ink / --paper / --line / --r / --sh-*），因此默认皮肤与 ARK 皮肤
+       都能直接继承。
+     · ARK 专属的补强（黄方块、等宽字、发丝线）写在 css/ark-theme.css 的
+       body.theme-ark 作用域里 —— 选择器权重更高，不依赖加载顺序。
+   ============================================================ */
+
+/* ---------- 底部导航：动画页默认隐藏 ----------
+   只有连上能播动画的通行证版（Ark，3.7" 720×480）之后，JS 才会给 <body> 加
+   .show-anim-tab 把入口亮出来；断开即隐藏（页面会被自动退回 Film 页）。 */
+body:not(.show-anim-tab) .nav-item[data-page="anim-page"] { display: none; }
+
+/* ---------- 创作方式 ---------- */
+.anim-modes { flex-wrap: wrap; }
+
+.anim-modes .mode-button {
+    flex: 1 1 calc(50% - 10px);
+    flex-direction: row;
+    gap: 7px;
+    padding: 11px 8px;
+    font-size: 12.5px;
+}
+
+.anim-modes .mode-button .ic { width: 17px; height: 17px; }
+
+.anim-pane { display: none; margin-top: var(--sp-3, 14px); }
+.anim-pane.active { display: block; }
+
+.anim-hint {
+    font-family: var(--font-body);
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    margin-top: 8px;
+}
+
+.anim-chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    padding: 4px 9px;
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 999px;
+}
+
+/* ---------- 像素绘制（竖屏网格 48×72，与设备观看方向一致） ---------- */
+.anim-draw-wrap {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--r-xs, 12px);
+}
+
+.anim-draw-wrap.is-zoom {
+    overflow: auto;
+    max-height: 74vh;
+}
+
+.anim-draw-box {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    line-height: 0;
+    border: 2px solid var(--ink);
+    border-radius: var(--r-xs, 12px);
+    overflow: hidden;
+    background: #fff;
+}
+
+/* 收缩到画布本身尺寸，网格叠层才能精确覆盖 */
+.anim-draw-stage {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    line-height: 0;
+}
+
+#animDraw {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 62vh;          /* 竖屏画布很高，限高避免卡片被撑得过长 */
+    touch-action: none;
+    cursor: crosshair;
+}
+
+/* 放大：按内部像素 1:1 展示（48×72 格 × 12px = 576×864），可滚动细画。
+   尺寸由 JS 的 animUpdateDrawSize() 写内联样式（单一来源），这里只解除收缩约束 */
+.anim-draw-wrap.is-zoom .anim-draw-stage { max-width: none; }
+.anim-draw-wrap.is-zoom #animDraw { max-width: none; max-height: none; }
+
+/* 网格线：用 canvas 按设备像素画 1px 细线（原来的 CSS 百分比渐变在非整数格宽下会发灰，
+   且只在每格左/上沿落线 → 四边不对称）。只画内部格线，外框交给 .anim-draw-box 的边框。 */
+.anim-draw-grid {
+    display: block;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    --anim-grid-line: rgba(0, 0, 0, .16);
+}
+
+.anim-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.anim-tools { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
+
+.anim-tool {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    background: var(--paper);
+    border: 2px solid var(--ink);
+    border-radius: var(--r-xs, 10px);
+    color: var(--ink);
+    cursor: pointer;
+    transition: background .12s, transform .12s;
+}
+
+.anim-tool .ic { width: 18px; height: 18px; }
+.anim-tool:hover { transform: translateY(-1px); }
+.anim-tool.active { background: var(--lemon); }
+
+.anim-zoom.active { background: var(--lemon); }
+
+.anim-palette {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 7px;
+    margin-top: 10px;
+}
+
+.anim-swatch {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border: 2px solid var(--ink);
+    border-radius: var(--r-xs, 8px);
+    cursor: pointer;
+    padding: 0;
+    transition: transform .12s;
+}
+
+.anim-swatch:hover { transform: translateY(-2px); }
+
+.anim-swatch.on {
+    box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
+}
+
+/* 底色格：白底要能看出边界 */
+.anim-swatch.is-bg { border-style: dashed; }
+
+/* ---------- 帧序列 ---------- */
+.anim-frames {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 4px 2px 8px;
+    scrollbar-width: thin;
+}
+
+.anim-frame {
+    position: relative;
+    flex: 0 0 auto;
+    width: 96px;
+    padding: 0;
+    background: var(--paper);
+    border: 2px solid var(--ink);
+    border-radius: var(--r-xs, 10px);
+    overflow: hidden;
+    cursor: pointer;
+    line-height: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.anim-frame canvas { display: block; width: 100%; height: auto; }
+
+/* 选中态压在缩略图外圈，不遮挡画面 */
+.anim-frame.on {
+    box-shadow: 0 0 0 2px var(--lemon), 0 0 0 4px var(--ink);
+}
+
+.anim-frame__no {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    padding: 2px 5px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.4;
+    color: var(--paper);
+    background: var(--ink);
+    border-top-right-radius: 6px;
+}
+
+.anim-frame__tag {
+    position: absolute;
+    right: 0;
+    top: 0;
+    padding: 2px 5px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .08em;
+    color: var(--ink);
+    background: var(--sun);
+    border-bottom-left-radius: 6px;
+}
+
+.anim-frame-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.anim-frame-foot .anim-hint { margin-top: 0; flex: 1; min-width: 0; }
+.anim-frame-move { display: flex; gap: 6px; }
+
+/* ---------- 取景框（竖屏展示：横屏 720×480 转 90°，与 Film 页同款） ---------- */
+.anim-stage-frame { max-width: 100%; }
+
+.anim-stage-inner {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2 / 3;       /* 720×480 转 90° → 480×720 */
+    overflow: hidden;
+    background: var(--cream-2, #FFFDF6);
+    border: 2px solid var(--ink);
+    border-radius: 6px;
+}
+
+#animStage {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: block;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center center;
+}
+
+/* 位图帧可直接在取景框里拖动，给个抓手光标 */
+.anim-stage-inner { cursor: grab; touch-action: none; }
+.anim-stage-inner:active { cursor: grabbing; }
+
+/* 画面调整工具（旋转 / 重置） */
+.anim-imgtools {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.anim-imgtools > button {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    margin: 0;
+    padding: 10px 12px;
+    font-size: 13px;
+}
+
+.anim-imgtools.is-disabled { opacity: .45; }
+.anim-imgtools.is-disabled > button { cursor: not-allowed; }
+
+/* 「应用到所有帧」开关：跟 secondary-button 同款，开启时按选中态高亮 */
+.anim-imgtools__all {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin: 0;
+    padding: 10px 12px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--paper);
+    border: var(--line) solid var(--ink);
+    border-radius: var(--r-sm);
+    box-shadow: var(--sh-1);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+
+.anim-imgtools__all input { margin: 0; accent-color: var(--ink); }
+.anim-imgtools__all.is-on { background: var(--lemon); transform: translate(-1px, -1px); box-shadow: var(--sh-2); }
+.anim-imgtools__all:active { transform: translate(2px, 2px); box-shadow: none; }
+
+.anim-stage__badge {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    padding: 3px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--paper);
+    background: rgba(0, 0, 0, .72);
+    border-radius: 999px;
+}
+
+.anim-scrub {
+    position: relative;
+    height: 18px;
+    margin: 8px 2px 0;
+}
+
+.anim-scrub__dot {
+    position: absolute;
+    top: 6px;
+    width: 7px;
+    height: 7px;
+    margin-left: -3.5px;
+    padding: 0;
+    border: 1.5px solid var(--ink);
+    border-radius: 50%;
+    background: var(--paper);
+    cursor: pointer;
+    transition: background .12s, transform .12s;
+}
+
+.anim-scrub__dot.on {
+    background: var(--lemon);
+    transform: scale(1.35);
+}
+
+.anim-playbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.anim-playbar__meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.anim-playbar__meta input[type="range"] { flex: 1; min-width: 0; }
+.anim-playbar__meta .anim-hint { margin: 0; white-space: nowrap; }
+
+.anim-play.is-playing { background: var(--lemon); }
+
+/* ---------- 输出 ---------- */
+.anim-stat {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0;
+    padding: 10px 12px;
+    background: var(--cream-2, #FFFDF6);
+    border: 2px solid var(--ink);
+    border-radius: var(--r-xs, 12px);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.anim-stat b { font-weight: 700; }
+.anim-stat b.warn { color: #B26A00; }
+.anim-stat b.over { color: #C62828; }
+
+.anim-stat__lbl {
+    font-size: 10px;
+    letter-spacing: .12em;
+    opacity: .55;
+}
+
+.anim-stat__warn {
+    flex: 1 0 100%;
+    font-family: var(--font-body);
+    font-size: 11.5px;
+    color: #C62828;
+}
+
+.anim-result__sub {
+    display: block;
+    margin-top: 4px;
+    font-size: 11.5px;
+    opacity: .75;
+}
+
+/* 设备不支持动画时的提示条 */
+.anim-warn {
+    margin: 0 0 12px;
+    padding: 9px 11px;
+    background: var(--sun, #FFD84D);
+    border: 2px solid var(--ink);
+    border-radius: var(--r-xs, 12px);
+    font-family: var(--font-body);
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--ink);
+}
+
+.anim-device.is-disabled .modes,
+.anim-device.is-disabled .slider-container,
+.anim-device.is-disabled #animApplyBtn,
+.anim-device.is-disabled .switch-row { opacity: .45; }
+
+.anim-device .action-header .ic { width: 17px; height: 17px; }
+.anim-device .slider-container label { flex: 0 0 72px; }
+.anim-device .block-button { margin-top: 6px; }
+
+#animVideo {
+    display: block;
+    width: 100%;
+    margin: 10px 0;
+    background: #000;
+    border: 2px solid var(--ink);
+    border-radius: var(--r-xs, 12px);
+}
+
+/* ---------- 手机/桌面共通：窄屏时创作方式两列 ---------- */
+@media (max-width: 420px) {
+    .anim-palette { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .anim-frame { width: 84px; }
+}
+
+/* ---------- 桌面（≥900px）：左创作+帧序列 / 右预览+输出 ---------- */
+@media (min-width: 900px) {
+    /* 动画页是独立页面，栅格节奏与 Film 页保持一致
+       （.page.active 默认是 column-count:2，这里改成显式两栏网格）。
+       只钉列、不钉行：ARK 皮肤会在页首插一条黄横幅，让它跨满整行独占第一行，
+       其余卡片按列自动落位（dense 回填）—— 于是「创作方式」与「预览与播放」同一行、
+       「帧序列」与「输出与上传」同一行；没有横幅（默认皮肤）时自然从第 1 行开始。 */
+    #anim-page.active {
+        column-count: initial;
+        display: grid;
+        grid-auto-flow: row dense;
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+        column-gap: 26px;
+        align-items: start;
+    }
+
+    /* 黄横幅（仅 ARK 皮肤存在）：跨满整行，别去占左栏第一格 */
+    #anim-page.active > .ark-band { grid-column: 1 / -1; }
+
+    #anim-page.active > .anim-card--source,
+    #anim-page.active > .anim-card--frames { grid-column: 1; }
+
+    #anim-page.active > .anim-card--preview,
+    #anim-page.active > .anim-card--output { grid-column: 2; }
+
+    .anim-modes .mode-button { flex: 0 0 auto; padding: 10px 16px; }
+    .anim-frames { overflow-x: visible; flex-wrap: wrap; }
+}

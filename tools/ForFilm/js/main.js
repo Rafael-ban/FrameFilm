@@ -3,6 +3,7 @@ var PAGE_TITLES = {
     'bluetooth-page': '设备连接',
     'frame-page': 'Frame 制作',
     'convert-page': '照片转换',
+    'anim-page': '动画工坊',
     'config-page': '设备设置'
 };
 

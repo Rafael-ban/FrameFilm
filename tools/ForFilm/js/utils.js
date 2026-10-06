@@ -74,9 +74,13 @@ function setDeviceType(type) {
 
 function onDeviceTypeChanged() {
     // 更新所有 canvas 尺寸
+    // 例外：标了 data-fixed-size 的画布内部尺寸是固定的，不能按机型分辨率覆盖。
+    // 动画工坊的绘制盘（48×72 格竖屏网格）与取景框（恒为横屏 720×480 数据）都在此列 ——
+    // 一旦被改成机型分辨率，绘制盘会变成横屏、网格与落点全错。
     var cfg = getDeviceConfig();
     var canvases = document.querySelectorAll('canvas[id]');
     for (var i = 0; i < canvases.length; i++) {
+        if (canvases[i].hasAttribute('data-fixed-size')) continue;
         canvases[i].width = cfg.screenWidth;
         canvases[i].height = cfg.screenHeight;
     }
@@ -110,6 +114,10 @@ function onDeviceTypeChanged() {
     // 蓝牙遥控（0x4E）仅通行证版（ARK）支持
     if (typeof syncRemoteAvailability === 'function') {
         syncRemoteAvailability();
+    }
+    // 动画工坊：设备播放能力随机型变化（仅 ARK 可播）
+    if (typeof animSyncDeviceAvailability === 'function') {
+        animSyncDeviceAvailability();
     }
     // ARK 通行证版皮肤：连上 FRAMEFILMARK 才切换，其余机型保持原皮肤
     if (typeof arkThemeSync === 'function') {
@@ -200,8 +208,9 @@ function getFilmFileTotalSize() {
     return total;
 }
 
-// 按文件头字段（宽/高/Format）推算 .film 应有的总大小，供传输前校验
+// 按文件头字段（宽/高/Format/FrameCount）推算 .film 应有的总大小，供传输前校验
 // Format: 0x00=v1 4bpp(2px/字节), 0x01=MonoFast 1bpp(8px/字节), 0x02/0x03=8bpp(1px/字节)
+// FrameCount（0x0A，小端；0/1 视为单帧）：>1 时主体按帧连续拼接，用于多帧动画
 // 见 docs/film/film.md
 function getFilmFileExpectedSize(fileData) {
     if (!fileData || fileData.length < 32) {
@@ -210,9 +219,13 @@ function getFilmFileExpectedSize(fileData) {
     var width = fileData[4] | (fileData[5] << 8);
     var height = fileData[6] | (fileData[7] << 8);
     var format = fileData[9];
+    var frameCount = fileData[10] | (fileData[11] << 8);
+    if (frameCount < 1) {
+        frameCount = 1;
+    }
     var pixels = width * height;
     var bodySize = (format === 0x01) ? (pixels / 8) : (format >= 0x02 ? pixels : (pixels / 2));
-    return 32 + bodySize;
+    return 32 + bodySize * frameCount;
 }
 
 // 规范化发送到设备的 film 文件名
