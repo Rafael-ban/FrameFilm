@@ -54,7 +54,9 @@ var ANIM_MONO_FRAME_BYTES = (ANIM_W * ANIM_H) / 8;   // 43200
 var ANIM_COLOR_FRAME_BYTES = ANIM_W * ANIM_H;        // 345600
 
 var ANIM_MAX_FRAMES = 48;                            // 帧数上限（内存与传输时长双约束）
-var ANIM_MAX_BYTES = 2.5 * 1024 * 1024;              // 整体上限：设备整帧载入 PSRAM，留足余量
+// 整体上限：设备端优先把整份文件读进 PSRAM（>1.5MB 装不下时自动退化为"按帧从 SD 读"，
+// 所以大文件能播，只是每帧多一次读卡）。这里卡的是 BLE 传输时长，不是能不能播。
+var ANIM_MAX_BYTES = 2.5 * 1024 * 1024;
 var ANIM_WARN_BYTES = 900 * 1024;                    // 超过即提示传输耗时
 
 var ANIM_DRAW_CELL = 12;                             // 绘制画布内部格子边长（仅显示用）
@@ -1061,7 +1063,7 @@ function animUpdateStats() {
         '<span class="anim-stat__lbl">SIZE</span><b class="' + cls + '">' + formatFileSize(bytes) + '</b>' +
         '<span class="anim-stat__lbl">ETA</span><b>≈ ' + secs + ' s</b>' +
         (bytes > ANIM_MAX_BYTES
-            ? '<span class="anim-stat__warn">超出设备整帧载入上限（约 2.5 MB），请减少帧数或改用黑白快刷</span>'
+            ? '<span class="anim-stat__warn">超出传输上限（约 2.5 MB），传输会很慢，请减少帧数</span>'
             : '');
 }
 
