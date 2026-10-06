@@ -397,14 +397,29 @@ static void file_task_handle(void *pvParameters)
                         if(m_file_state.save_auto_load)
                         {
                             // 定位新文件在列表中的下标，交由 app 层在事件中显示（服务层不直接驱动刷屏）
+                            /* 持锁查找：set_dir() 可能在别的任务里把列表 free 掉，
+                               裸查列表同样会踩到撕裂状态（见 file_load_event 的说明） */
+                            uint32_t found = FILE_ID_NONE;
+                            char want[sizeof(m_file_state.save_filename)];
+
+                            strncpy(want, m_file_state.save_filename, sizeof(want) - 1);
+                            want[sizeof(want) - 1] = '\0';
+
+                            file_list_lock();
                             for(uint32_t i = 0; i < m_file_state.file_count; i++)
                             {
-                                if(strcmp(m_file_state.file_list[i].filename, m_file_state.save_filename) == 0)
+                                if(strcmp(m_file_state.file_list[i].filename, want) == 0)
                                 {
-                                    sys_logi(FILE_TAG, "Found new file at index %d", i);
-                                    m_file_state.current_file_id = i;
+                                    found = i;
                                     break;
                                 }
+                            }
+                            file_list_unlock();
+
+                            if(found != FILE_ID_NONE)
+                            {
+                                sys_logi(FILE_TAG, "Found new file at index %d", found);
+                                m_file_state.current_file_id = found;
                             }
                         }
 
@@ -827,20 +842,32 @@ static void file_load_event(uint32_t file_id)
     m_file_state.load_complete = FILE_LOAD_STATE_LOADING;
     m_file_state.failed_file_id = FILE_ID_NONE;
 
-    if(file_id >= m_file_state.file_count)
+    /* 在校验+取出文件名时**必须持锁**：service_file_set_dir() 可能在别的任务
+       （BLE/app 任务）里把 file_list 整个 free 掉并置 NULL，而它只持有 file_list_lock
+       —— 不加锁读 file_list 会和"先置 NULL、再清零 file_count"这两步之间竞态，
+       拿到 (file_count 非 0, file_list 为 NULL) 的撕裂状态，随后
+       file_list[file_id] 就是一次野指针解引用（实测崩在 strlen，EXCVADDR=file_id*260）。
+       临界区里只做一次 strncpy，不再读列表。 */
+    char filename[256];
+    file_list_lock();
+    if(m_file_state.file_list == NULL || file_id >= m_file_state.file_count)
     {
+        file_list_unlock();
         sys_logw(FILE_TAG, "Invalid file ID: %d", file_id);
         m_file_state.load_complete = FILE_LOAD_STATE_FAILED;
         m_file_state.failed_file_id = file_id;
         return;
     }
+    strncpy(filename, m_file_state.file_list[file_id].filename, sizeof(filename) - 1);
+    filename[sizeof(filename) - 1] = '\0';
+    file_list_unlock();
 
     // 释放现有缓冲区
     file_free_buffer();
 
     // 构建文件路径
     char filepath[512];
-    snprintf(filepath, sizeof(filepath), "%s/%s", m_file_active_dir, m_file_state.file_list[file_id].filename);
+    snprintf(filepath, sizeof(filepath), "%s/%s", m_file_active_dir, filename);
 
     // 打开文件
     FILE* file = fopen(filepath, "rb");
@@ -861,7 +888,7 @@ static void file_load_event(uint32_t file_id)
     if(file_size > SERVICE_FILE_PSRAM_MAX_BYTES)
     {
         sys_loge(FILE_TAG, "File too large to load as a whole: %s size=%u limit=%u",
-                 m_file_state.file_list[file_id].filename, (unsigned)file_size,
+                 filename, (unsigned)file_size,
                  (unsigned)SERVICE_FILE_PSRAM_MAX_BYTES);
         fclose(file);
         m_file_state.load_complete = FILE_LOAD_STATE_FAILED;
@@ -902,7 +929,7 @@ static void file_load_event(uint32_t file_id)
     m_file_state.buffer_size = file_size;
     m_file_state.current_file_id = file_id;
 
-    sys_logi(FILE_TAG, "Loaded file: %s, size: %d bytes", m_file_state.file_list[file_id].filename, file_size);
+    sys_logi(FILE_TAG, "Loaded file: %s, size: %d bytes", filename, file_size);
 
     // 加载完成
     m_file_state.load_complete = FILE_LOAD_STATE_DONE;
@@ -916,14 +943,23 @@ int service_file_is_load_failed(uint32_t file_id)
 
 static void file_load_next_event(void)
 {
-    if(m_file_state.file_count == 0)
+    uint32_t count;
+    uint32_t cur;
+
+    /* 持锁快照：别处的 service_file_set_dir() 可能正在 free/重建列表 */
+    file_list_lock();
+    count = m_file_state.file_count;
+    cur   = m_file_state.current_file_id;
+    file_list_unlock();
+
+    if(count == 0)
     {
         sys_logw(FILE_TAG, "No files to load");
         return;
     }
 
     // 计算下一个文件ID（循环）
-    uint32_t next_file_id = (m_file_state.current_file_id + 1) % m_file_state.file_count;
+    uint32_t next_file_id = (cur + 1) % count;
     file_load_event(next_file_id);
 }
 
