@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Ark 直连测试</string>
+    <string name="setup_ready">Ark 客户端已就绪</string>
+</resources>
