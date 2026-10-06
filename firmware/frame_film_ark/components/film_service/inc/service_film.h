@@ -25,6 +25,7 @@ extern "C" {
 typedef enum {
     MSG_FILM_DISPLAY,          // 显示指定文件（整张/首帧）
     MSG_FILM_RENDER,           // 按帧索引渲染（动图用）
+    MSG_FILM_MONO_END,         // 结束黑白快刷会话（面板断电，见 hal_epd_mono_session_end）
 } film_msg_type_t;
 
 typedef struct {
@@ -97,7 +98,8 @@ extern int service_film_is_busy(void);
  * @brief 丢弃尚未处理的渲染请求，并等当前正在上屏的那一帧画完
  *
  * "按帧推屏"的 app 退出时调用（见 app_entry_t.on_exit）：不丢弃的话，队列里
- * 排队的帧会在切页之后继续刷屏、把新页面覆盖掉。内部最多等待 3s。
+ * 排队的帧会在切页之后继续刷屏、把新页面覆盖掉。函数同时会结束黑白快刷会话
+ * （把播放期间保持上电的面板断电），并等这一切完成才返回，上限 3s。
  */
 extern void service_film_cancel_pending(void);
 

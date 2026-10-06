@@ -40,6 +40,7 @@
 #include "esp_heap_caps.h"
 
 #include "sys_log.h"
+#include "sys_event.h"
 #include "hal_api.h"
 #include "service_file.h"
 #include "service_film.h"
@@ -493,6 +494,17 @@ static void film_task_handle(void *pvParameters)
                 {
                     m_render_pending--;
                 }
+                /* 帧已落屏：通知动图 app 立刻推下一帧，省掉等下一个 100ms 心跳的空档。
+                   订阅方只做非阻塞入队（见 app_manager_on_sys_event），不会拖慢本任务。 */
+                sys_event_publish(SYS_EVT_FILM_FRAME_DONE, NULL, 0);
+                break;
+            case MSG_FILM_MONO_END:
+                /* 结束黑白快刷会话：把播放期间保持上电的面板断电 */
+                hal_epd_mono_session_end();
+                if(m_render_pending > 0)
+                {
+                    m_render_pending--;
+                }
                 break;
             default:
                 break;
@@ -587,8 +599,20 @@ void service_film_cancel_pending(void)
         /* 丢弃 */
     }
 
-    /* 等正在上屏的那一帧画完（上限 3s）：否则它会在新页面之后落屏、
-       把新页面覆盖掉（表现为"按返回没反应 / 画面停在动图"） */
+    /* 让 film_task 收掉"保持上电"的黑白快刷会话（补一次 POF）。
+       断电必须由 film_task 执行：面板 SPI 是单写者，从别的任务直接发命令
+       会和正在上屏的帧交错。这里把它也算作一个未完成操作，与在途帧一起等。 */
+    film_msg_t off = {0};
+    off.ID = MSG_FILM_MONO_END;
+    m_render_pending++;
+    if(xQueueSend(m_film_msg_hdl, &off, 0) != pdPASS)
+    {
+        m_render_pending--;
+        sys_logw(FILM_TAG, "mono end msg send error!");
+    }
+
+    /* 等在途帧与断电都完成（上限 3s）：否则它们会在新页面之后落屏／断电，
+       表现为"按返回没反应 / 画面停在动图" */
     uint32_t wait_count = 0;
     while(m_render_pending > 0 && wait_count < 300)
     {
