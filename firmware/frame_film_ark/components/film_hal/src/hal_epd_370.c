@@ -606,6 +606,8 @@ static bool m_ignore_busy = false;      // BUSY 极性检测失败后忽略等�
 static uint8_t m_spectra_state = 0;     // 48色状态机：0 native/qual, 1 clear, 2 mono, 3 fast-color
 static bool m_mono_inited = false;      // 黑白快刷会话是否已初始化（跨调用保持上一帧）
 static uint8_t m_mono_prev[EPD_MONO_BYTES];  // 黑白快刷上一帧（bit-reversed 存储）
+static bool m_panel_powered = false;         // 面板 DC/DC 是否上电（PON 后、POF 前）；硬复位/深睡会清掉
+static bool m_mono_session = false;          // 黑白快刷会话：打开时帧间保持上电（见 hal_epd_mono_session_begin）
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -622,6 +624,7 @@ static void epd_display_refresh_seq(void);
 static void epd_display_solid(unsigned char color_byte);
 static void epd_spectra_wave(const uint8_t *lut);
 static void epd_spectra_init(void);
+static void epd_spectra_power_off(void);
 static void epd_spectra_refresh(bool power_on, bool power_off);
 static void epd_spectra_wait_cycle(uint32_t assert_timeout_ms, uint32_t release_timeout_ms);
 static void epd_spectra_fill(uint8_t fill_byte);
@@ -764,6 +767,7 @@ static void reset(void)
     /* 硬复位会清掉控制器内的帧数据，mono 差分刷新必须以复位后的状态重新建立会话，
        否则会拿失效的上一帧做差分（整屏闪/花屏）。 */
     m_mono_inited = false;
+    m_panel_powered = false;   // 复位后面板回到未上电态
 }
 
 /*********************************************************************
@@ -835,6 +839,7 @@ static void epd_display_refresh_seq(void)
     EPD_W21_WriteCMD(PON);   // 0x04 Power ON
     epd_wait_busy(BUSY_TIMEOUT_POWER_MS);
     vTaskDelay(10 / portTICK_PERIOD_MS);
+    m_panel_powered = true;
 
     EPD_W21_WriteCMD(REF);   // 0x12 Display Refresh
     EPD_W21_WriteDATA(0x00);
@@ -845,6 +850,7 @@ static void epd_display_refresh_seq(void)
     EPD_W21_WriteDATA(0x00);
     epd_wait_busy(BUSY_TIMEOUT_POWER_MS);
     vTaskDelay(20 / portTICK_PERIOD_MS);
+    m_panel_powered = false;
 }
 
 static void epd_display_solid(unsigned char color_byte)
@@ -905,6 +911,7 @@ static void epd_spectra_init(void)
     EPD_W21_WriteDATA(0x19);
 
     m_spectra_state = 0;
+    m_panel_powered = false;   // 复位序列后面板回到未上电态
 }
 
 // wait_cycle：先等 BUSY 拉低（进入忙），再等拉高（释放）
@@ -938,13 +945,36 @@ static void epd_spectra_wait_cycle(uint32_t assert_timeout_ms, uint32_t release_
     }
 }
 
+/**
+ * @brief 面板断电（POF），幂等：本来就断电时什么都不做
+ *
+ * 从 epd_spectra_refresh 里拆出来，是因为黑白快刷会话会在播放期间保持上电、
+ * 只在停止播放时补一次断电（见 hal_epd_mono_session_end）。
+ */
+static void epd_spectra_power_off(void)
+{
+    if (!m_panel_powered)
+    {
+        return;
+    }
+
+    EPD_W21_WriteCMD(POF);   // 0x02
+    EPD_W21_WriteDATA(0x00);
+    epd_spectra_wait_cycle(1000, BUSY_TIMEOUT_POWER_MS);
+    vTaskDelay(20 / portTICK_PERIOD_MS);
+
+    m_panel_powered = false;
+}
+
 static void epd_spectra_refresh(bool power_on, bool power_off)
 {
-    if (power_on)
+    /* PON 幂等：会话内已上电就不再付一次 PON 的 BUSY 等待（实测约 100ms/次） */
+    if (power_on && !m_panel_powered)
     {
         EPD_W21_WriteCMD(PON);   // 0x04
         epd_spectra_wait_cycle(1000, BUSY_TIMEOUT_POWER_MS);
         vTaskDelay(10 / portTICK_PERIOD_MS);
+        m_panel_powered = true;
     }
 
     EPD_W21_WriteCMD(REF);   // 0x12
@@ -954,10 +984,7 @@ static void epd_spectra_refresh(bool power_on, bool power_off)
 
     if (power_off)
     {
-        EPD_W21_WriteCMD(POF);   // 0x02
-        EPD_W21_WriteDATA(0x00);
-        epd_spectra_wait_cycle(1000, BUSY_TIMEOUT_POWER_MS);
-        vTaskDelay(20 / portTICK_PERIOD_MS);
+        epd_spectra_power_off();
     }
 }
 
@@ -1236,13 +1263,31 @@ void hal_epd_display_film(const unsigned char *filmData)
 
 void hal_epd_sleep(void)
 {
+    /* 深睡之前先把面板 DC/DC 断掉：黑白快刷会话期间面板是保持上电的 */
+    epd_spectra_power_off();
+
     epd_wait_busy(BUSY_TIMEOUT_INIT_MS);
     EPD_W21_WriteCMD(DSLP);  // 0x07
     EPD_W21_WriteDATA(0xA5);
 
     m_mono_inited = false;   // 睡眠后需重新初始化 spectra
+    m_panel_powered = false;
 
     sys_logi(EPD_TAG, "EPD sleep");
+}
+
+void hal_epd_mono_session_begin(void)
+{
+    m_mono_session = true;
+}
+
+void hal_epd_mono_session_end(void)
+{
+    m_mono_session = false;
+
+    /* 结束"保持上电"的黑白快刷会话：把播放期间省下的那一趟 PON/POF 补上。
+       已经在断电态时是空操作，可重复调用。 */
+    epd_spectra_power_off();
 }
 
 void hal_epd_pwroff(void)
@@ -1275,6 +1320,7 @@ void hal_epd_deinit(void)
     gpio_config(&io_conf);
 
     m_mono_inited = false;   // 释放后需重新初始化 spectra
+    m_panel_powered = false; // SPI 已释放，上电状态不再成立
 
     sys_logi(EPD_TAG, "EPD deinit, SPI and GPIOs released");
 }
@@ -1377,7 +1423,11 @@ static void epd_spectra_mono_display(const uint8_t *mono_bitmap, bool is_clear)
 
     epd_spectra_wave(is_clear ? mono_clear : mono_fast);
     epd_spectra_mono_write(mono_bitmap);
-    epd_spectra_refresh(true, true);
+
+    /* 会话打开时帧间**保持上电**（省掉每帧约 100ms 的 PON/POF），只在会话结束时 POF 一次；
+       一次性绘制（UI 页/图片）不打开会话，画完即断电，面板不会一直带电。
+       见 hal_epd_mono_session_begin/end。 */
+    epd_spectra_refresh(true, !m_mono_session);
 
     m_spectra_state = 2;
 }

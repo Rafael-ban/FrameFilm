@@ -40,6 +40,7 @@
 #include "app_shell.h"
 #include "app_manager.h"    /* app_manager_post_ui_msg：进度走完上报切页 */
 #include "app_boot.h"
+#include "hal_epd.h"        /* 黑白快刷会话：进度条逐格刷新期间帧间保持上电 */
 
 /*********************************************************************
  * MACROS
@@ -328,6 +329,10 @@ static void boot_ui_create(lv_obj_t *root)
 
     sys_logi(APP_BOOT_TAG, "create boot page, %u telemetry lines", (unsigned)m_tele_num);
 
+    /* 进度条是"一个会话内逐格刷新"：打开黑白快刷会话，让每格只付一次波形刷新
+       （约 200ms）而不是再各加一趟 PON/POF（约 200ms）。销毁页面时关会话断电。 */
+    hal_epd_mono_session_begin();
+
     /* 外壳：与主菜单/设置页同一套版式（顶部状态栏 + 底部提示行） */
     app_shell_build(root, "MODEL " SYS_HAREWARE_VERSION " / FW " SYS_FIRMWARE_VERSION,
                     "BOOT", &m_shell);
@@ -460,6 +465,9 @@ static void boot_ui_create(lv_obj_t *root)
 
 static void boot_ui_destroy(void)
 {
+    /* 关掉建页时打开的黑白快刷会话：补一次 POF，面板不留在带电态 */
+    hal_epd_mono_session_end();
+
     /* 页面内定时器必须在这里删掉：它挂在已销毁的控件上，不删会野指针 */
     if(m_prog_timer != NULL)
     {

@@ -46,10 +46,12 @@ int  ui_display_acquire(void)               { return -1; }
 void ui_display_release(void)               { }
 void ui_display_set_output(int enable)      { (void)enable; }
 void ui_display_invalidate_all(void)        { }
+int64_t ui_display_last_flush_us(void)      { return 0; }
 
 #else /* SYS_UI_ENABLE */
 
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 
 #include "lvgl.h"
 
@@ -82,6 +84,9 @@ static uint8_t *m_mono_buf = NULL;    /* 送驱动的 mono 位图（物理横向
 /* 输出闸门：app_task 侧 pause/page_exit 需要"立即"生效（防止正在进行的 flush
  * 覆盖随后绘制的直绘内容），而 ui_task 侧每帧都要读，故用 volatile 避免被缓存。 */
 static volatile uint8_t m_output_enabled = 0;
+
+/* 最近一次真正推屏的时刻（µs）；ui_task 据此判断 UI 空闲多久后给面板断电 */
+static volatile int64_t m_last_flush_us = 0;
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -143,9 +148,17 @@ static uint8_t *ui_display_alloc(size_t size, const char *what)
 /**
  * @brief I1 缓冲 → mono 位图：90° 转置 + 极性对齐
  *
- * 逻辑坐标 (sx, sy) ∈ 480x720 → 物理坐标 (dx, dy) ∈ 720x480。
- * 逐像素实现（345,600 像素，240MHz 下约 1~3ms）；UI 层是低频更新场景，
- * 不做位级快速转置以换取可读性与正确性。
+ * 逻辑坐标 (sx, sy) ∈ 480x720 → 物理坐标 (dx, dy) ∈ 720x480，
+ * 即目标像素 (dx, dy) 取源像素 (sx = dy, sy = 719 - dx)。
+ *
+ * 实现要点（实测：逐像素版 493ms/帧，本版约 20ms）：**按目标行攒满一整行再顺序写**。
+ * 逐像素版的内层循环沿源行推进，于是每个像素写进 mono 的位置跨 90 字节
+ * （一行 90 字节），345,600 次零散读改写 PSRAM 是这一帧的绝对大头。
+ * 换算到"目标行 + 目标字节"后，一行只对应源缓冲里的**同一列**：
+ *   · 同一目标行 dy 内，源字节偏移固定为 dy>>3、位固定为 7-(dy&7)——取位是常量掩码；
+ *   · 目标字节 k 覆盖 dx = 8k..8k+7，对应源行 sy = (719-8k-r)，r = 0..7，
+ *     即 8 个相邻源行、步长 60 字节，可整块读出。
+ * 于是每字节 8 次取位拼好后写进**内部 RAM 的行缓冲**，再 memcpy 进 PSRAM（顺序写）。
  *
  * 注意：入参 i1 必须已**跳过调色板**（见 UI_I1_PALETTE_BYTES 与 ui_flush_cb）。
  */
@@ -154,27 +167,59 @@ static void ui_i1_to_mono(const uint8_t *i1, uint8_t *mono)
     /* 先整体填"白"：若转置存在未覆盖像素，失败姿态是白底而不是花屏 */
     memset(mono, UI_MONO_WHITE_BYTE, UI_MONO_BYTES);
 
+#if UI_ROTATE_90_CW
+    {
+        const int src_row_bytes = UI_LOGICAL_W / 8;   /* 60 */
+        const int dst_row_bytes = UI_MONO_W / 8;      /* 90 */
+        uint8_t row[UI_MONO_W / 8];
+
+        for(int dy = 0; dy < UI_MONO_H; dy++)
+        {
+            /* 源列 dy 的字节偏移：sy = 719 那一行的第 (dy>>3) 字节 */
+            const uint8_t *col = i1 + (uint32_t)(UI_MONO_W - 1) * (uint32_t)src_row_bytes
+                                    + (uint32_t)(dy >> 3);
+            const uint8_t bitmask = (uint8_t)(1u << (7u - ((uint32_t)dy & 7u)));
+
+            for(int k = 0; k < dst_row_bytes; k++)
+            {
+                /* r = 0 对应 dx = 8k → sy = 719-8k；r 每加 1 源行上一行 */
+                const uint8_t *p = col - (uint32_t)(8 * k) * (uint32_t)src_row_bytes;
+                uint8_t v = UI_MONO_WHITE_BYTE;
+
+                for(int r = 0; r < 8; r++)
+                {
+                    uint8_t mask = (uint8_t)(0x80u >> r);
+                    int black = (((*p & bitmask) ? 1 : 0) == UI_I1_BIT_BLACK);
+
+                    if(black)
+                    {
+                        v |= mask;
+                    }
+                    else
+                    {
+                        v &= (uint8_t)~mask;
+                    }
+                    p -= src_row_bytes;
+                }
+                row[k] = v;
+            }
+
+            memcpy(mono + (uint32_t)dy * (uint32_t)dst_row_bytes, row, sizeof(row));
+        }
+    }
+#else
     for(int sy = 0; sy < UI_LOGICAL_H; sy++)
     {
         for(int sx = 0; sx < UI_LOGICAL_W; sx++)
         {
             /* I1 位值 → 是否黑（UI_I1_BIT_BLACK 定义 I1 缓冲中"黑"的位值） */
             int black = (ui_i1_get_bit(i1, sx, sy) == UI_I1_BIT_BLACK);
-            int dx;
-            int dy;
 
-#if UI_ROTATE_90_CW
-            /* 顺时针：源左上角 → 目标右上角 */
-            dx = UI_MONO_W - 1 - sy;
-            dy = sx;
-#else
             /* 逆时针：源左上角 → 目标左下角 */
-            dx = sy;
-            dy = UI_MONO_H - 1 - sx;
-#endif
-            ui_mono_put_pixel(mono, dx, dy, black);
+            ui_mono_put_pixel(mono, sy, UI_MONO_H - 1 - sx, black);
         }
     }
+#endif
 }
 
 /**
@@ -189,6 +234,8 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
 
     if(m_output_enabled && lv_display_flush_is_last(disp))
     {
+        int64_t t0 = esp_timer_get_time();
+
         /* px_map 指向缓冲区开头，前 UI_I1_PALETTE_BYTES 字节是调色板：
            每次 flush 顺手写一次，保证索引色语义确定（索引 0 = 黑、1 = 白，
            与 UI_I1_BIT_BLACK "位 1 = 白" 一致；黑白在任意字节序下都一样，
@@ -199,7 +246,21 @@ static void ui_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
         pal[4] = 0xFF; pal[5] = 0xFF; pal[6] = 0xFF; pal[7] = 0xFF;   /* 索引 1：白 */
 
         ui_i1_to_mono(px_map + UI_I1_PALETTE_BYTES, m_mono_buf);
-        hal_epd_display_mono(m_mono_buf);   /* 阻塞：约 35ms@40MHz + 波形时间 */
+        int64_t t1 = esp_timer_get_time();
+
+        /* 打开黑白快刷会话：UI 连续刷新（进度条逐格 / 连点换页）帧间省掉
+           每帧约 200ms 的 PON/POF。会话由 ui_task 在空闲一段时间后关闭
+           （见 ui_core.c），页面退出时也会关，面板不会留在带电态。 */
+        hal_epd_mono_session_begin();
+        hal_epd_display_mono(m_mono_buf);
+        int64_t t2 = esp_timer_get_time();
+
+        /* TEMP 打点：定位 UI 一帧 ~1s 花在哪（conv = I1→mono 转置 / epd = 驱动刷屏） */
+        sys_logd(UI_DISPLAY_TAG, "flush: period=%dus conv=%dus epd=%dus",
+                 (int32_t)(m_last_flush_us ? (t0 - m_last_flush_us) : 0),
+                 (int32_t)(t1 - t0), (int32_t)(t2 - t1));
+
+        m_last_flush_us = t2;
     }
 
     lv_display_flush_ready(disp);
@@ -277,7 +338,17 @@ void ui_display_release(void)
 
 void ui_display_set_output(int enable)
 {
+    if(enable)
+    {
+        /* 新一页开始：清掉上一页的推屏时刻，避免 ui_task 拿着旧时间戳提前断电 */
+        m_last_flush_us = 0;
+    }
     m_output_enabled = enable ? 1 : 0;
+}
+
+int64_t ui_display_last_flush_us(void)
+{
+    return m_last_flush_us;
 }
 
 void ui_display_invalidate_all(void)

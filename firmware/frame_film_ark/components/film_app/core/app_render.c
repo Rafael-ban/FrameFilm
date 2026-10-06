@@ -106,8 +106,9 @@ void app_render_display_full(const unsigned char *filmData)
     /* MonoFast 单独处理，不能走 hal_epd_display_init()/hal_epd_pwroff()：
      * 前者会硬复位面板（控制器里缓存的上一帧是差分基准），后者内部是 DSLP 深睡，
      * 两者都会让下一次 mono 刷新退化成整屏刷新（翻封面/时钟每帧整屏闪）。
-     * 该路径的 spectra 会话与电源（PON/REF/POF）由 hal_epd_display_mono 自行管理，
-     * 面板不会一直带电。 */
+     * 这里是一次性绘制（画一张就完），不打开黑白快刷会话，故 hal_epd_display_mono
+     * 会自己走完 PON/REF/POF，面板不会留在带电态。
+     * 连续逐帧刷新（动图播放）才用 hal_epd_mono_session_begin/end 省掉帧间的 PON/POF。 */
     if(format == 0x01)
     {
         if(caps & EPD_CAP_MONOFAST)
@@ -173,8 +174,17 @@ void app_render_display_mono(const unsigned char *mono_bitmap)
     }
 
     /* 同 display_full 的 MonoFast 分支：不能复位/深睡，否则时钟每秒一帧都会整屏闪。
-       spectra 会话与电源由 hal_epd_display_mono 自行管理。 */
+       一次性绘制不打开黑白快刷会话，电源由 hal_epd_display_mono 自己走完 PON/REF/POF。 */
     hal_epd_display_mono(mono_bitmap);
+}
+
+void app_render_clean_panel(void)
+{
+    /* 与 ui_core.c 的 ui_clean_panel() 同一套做法：硬复位把 mono 会话置为无效，
+       下一次 mono 刷新会重建会话并先走一次完整清场（epd_spectra_full_clear）。
+       直绘层与 UI 页共用同一个 mono 差分会话，不复位就会把上一屏"同色"的残留
+       像素漏在新画面上（快刷波形没有彻底擦除的相位），即残影。 */
+    hal_epd_display_init();
 }
 
 void app_render_clear(void)

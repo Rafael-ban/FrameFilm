@@ -77,6 +77,12 @@ void ui_core_post_key(uint8_t key)                                  { (void)key;
  */
 #define UI_TAG      "ui_core"
 
+/* 黑白快刷会话的保持时长：最后一次推屏之后超过它就给面板断电。
+   取 2s 是为了"连点按键翻页 / 进度条逐格刷新"这类连续刷新的间隙（间隔远小于 2s）
+   都落在同一个会话里、省掉每帧那趟 PON/POF；同时保证真正停下来后很快断电。
+   ui_task 的等待上限 UI_WAIT_MAX_MS(200ms) 保证了断电判定的及时性。 */
+#define UI_MONO_SESSION_HOLD_MS     (2000)
+
 /*********************************************************************
 * TYPEDEFS
 */
@@ -178,6 +184,10 @@ static void ui_clean_panel(void)
  */
 static void ui_page_teardown(void)
 {
+    /* 关掉黑白快刷会话并把面板断电：本函数在 ui_task 里同步跑完（page_exit 之后
+       才放行 DIRECT 层绘制），所以不会和随后的直绘抢 SPI，也不会让会话标志残留。 */
+    hal_epd_mono_session_end();
+
     if(m_ops != NULL && m_ops->destroy != NULL)
     {
         m_ops->destroy();
@@ -324,6 +334,8 @@ static void ui_handle_cmd(const ui_cmd_t *c)
 
     case UI_CMD_PAUSE:
         ui_display_set_output(0);
+        /* 面板马上要被直绘占用：先关会话断电，避免 DC/DC 带着电跨到直绘期间 */
+        hal_epd_mono_session_end();
         if(m_state == UI_STATE_ACTIVE)
         {
             m_state = UI_STATE_PAUSED;
@@ -399,6 +411,16 @@ static void ui_task(void *pvParameters)
         if(m_state == UI_STATE_ACTIVE)
         {
             idle = lv_timer_handler();
+
+            /* 黑白快刷会话的空闲收尾：距最后一次推屏超过 HOLD 就断电（幂等）。
+               只在这里做（ui_task 上下文），不和直绘抢 SPI：
+               UI 与直绘互斥，且 page_exit/pause 的同步握手保证切走前会话已关。 */
+            int64_t last = ui_display_last_flush_us();
+            if(last != 0 &&
+               (esp_timer_get_time() - last) >= (int64_t)UI_MONO_SESSION_HOLD_MS * 1000)
+            {
+                hal_epd_mono_session_end();
+            }
         }
 
         if(idle < UI_WAIT_MIN_MS)

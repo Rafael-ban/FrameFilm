@@ -264,16 +264,26 @@ int main(void)
     assert(file_saved_events == 1);
     remove_traces("full.film");
 
-    /* Successful same-name replacement also works with FatFs rename semantics. */
+    /* Replacing a loaded file must invalidate its old buffer as well as commit on FatFs. */
     path_for(target, sizeof(target), "replace.film", "");
     path_for(backup, sizeof(backup), "replace.film", ".ffupload.bak");
     write_bytes(target, old_film, film_size);
+    file_list_refresh_event();
+    file_load_event(0);
+    assert(service_file_get_load_complete() == FILE_LOAD_STATE_DONE);
+    assert(memcmp(service_file_get_buffer(), old_film, film_size) == 0);
     assert(service_file_save_start(FILE_SAVE_BLE, "replace.film", film_size) == 0);
     assert(save_data(new_film, film_size) == 0);
     assert(service_file_save_stop(FILE_SAVE_BLE, 1) == 0);
     expect_bytes(target, new_film, film_size);
     expect_absent(backup);
     assert(last_auto_load == 1);
+    assert(service_file_get_load_complete() == FILE_LOAD_STATE_NONE);
+    file_load_event(service_file_get_current_id());
+    assert(service_file_get_load_complete() == FILE_LOAD_STATE_DONE);
+    assert(service_file_get_buffer_size() == film_size);
+    assert(memcmp(service_file_get_buffer(), new_film, film_size) == 0);
+    file_free_buffer();
     remove_traces("replace.film");
 
     /* Complete transport bytes with a truncated film body must not replace old data. */

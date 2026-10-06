@@ -34,6 +34,7 @@ typedef enum {
     SYS_EVT_FILE_LIST    = 0x0102,  // 文件列表刷新完成，payload: u32 count
     SYS_EVT_SD_MOUNT     = 0x0103,  // TF 卡挂载
     SYS_EVT_SD_UNMOUNT   = 0x0104,  // TF 卡卸载
+    SYS_EVT_FILM_FRAME_DONE = 0x0105, // 动图某一帧已上屏（按帧推屏的 app 据此立刻推下一帧）
 
     SYS_EVT_WIFI_STATE   = 0x0201,  // WiFi 连接状态变化，payload: u8 state
     SYS_EVT_WIFI_DL_DONE = 0x0202,  // WiFi 下载完成

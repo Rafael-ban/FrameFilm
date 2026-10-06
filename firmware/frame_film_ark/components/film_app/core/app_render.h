@@ -90,6 +90,17 @@ void app_render_display_mono(const unsigned char *mono_bitmap);
  */
 void app_render_clear(void);
 
+/**
+ * @brief 复位面板，使下次 mono 刷新先做一次完整清场
+ *
+ * 与 UI 页进入时的 ui_clean_panel 同一套做法（硬复位让 mono 会话失效，下次
+ * 刷新即重建会话并走 epd_spectra_full_clear 的完整清场波形）。
+ * 直绘层与 UI 页共用同一个 mono 差分会话，**切进直绘 app 前调一次**可消掉上一屏
+ * 的残影（见 app_manager 的 app_start_current）。复位本身不改画面，
+ * 清场代价由下一次刷新付（约 3s）。
+ */
+void app_render_clean_panel(void);
+
 #ifdef __cplusplus
 }
 #endif

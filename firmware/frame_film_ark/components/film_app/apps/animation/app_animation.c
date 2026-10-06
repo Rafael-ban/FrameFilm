@@ -90,9 +90,12 @@ static const app_anim_state_t m_anim_default = {
     .file_id = 0,
 };
 
-// 关注的全局事件：新动图落盘后刷新列表并重置到第一个播放
+// 关注的全局事件：
+//  - 新动图落盘 → 刷新列表并重置到第一个播放
+//  - 某一帧已上屏 → 立刻推下一帧（不必等下一个 100ms 心跳）
 static const uint16_t m_anim_events[] = {
     SYS_EVT_FILE_SAVED,
+    SYS_EVT_FILM_FRAME_DONE,
     0,
 };
 
@@ -109,6 +112,7 @@ static void anim_start(uint32_t file_id, int persist);
 static void anim_step(int32_t delta, int persist);
 static void anim_toggle_mode(void);
 static void anim_next_round(void);
+static void anim_advance(void);
 static void app_animation_on_downloaded(void);
 static const char *app_animation_enter_block_reason(void);
 
@@ -316,7 +320,72 @@ static void app_animation_on_exit(void)
 }
 
 /**
- * @brief 周期心跳：按 frame_ms 分频推进帧，一轮播完按 loop_seconds 停顿
+ * @brief 尝试推进一帧：受"上一帧已落屏"与"帧间隔已到"两重约束
+ *
+ * 由两条路径驱动：
+ *  - 100ms 心跳（app_animation_on_tick）负责累计帧间隔并兜底推进；
+ *  - 帧完成事件（SYS_EVT_FILM_FRAME_DONE）在面板刷新一结束就调用一次，
+ *    于是面板慢于 frame_ms 时能立刻接上下一帧 —— 否则要空等到下一个心跳，
+ *    实测每帧白等约 90ms。
+ */
+static void anim_advance(void)
+{
+    if(m_frame_count == 0)
+    {
+        return;
+    }
+
+    /* 轮间停顿期间不推进（由心跳负责消减等待，见 on_tick） */
+    if(m_loop_wait_ms > 0)
+    {
+        return;
+    }
+
+    /* 上一帧还没上屏：不推进（时间累计由心跳继续） */
+    if(service_film_is_busy())
+    {
+        return;
+    }
+
+    if(m_frame_acc_ms < m_anim.frame_ms)
+    {
+        return;
+    }
+    m_frame_acc_ms -= m_anim.frame_ms;
+    /* 面板比 frame_ms 慢时把余量压回一格：既保持"随时可推"，
+       又不让累计值无限增长 */
+    if(m_frame_acc_ms > m_anim.frame_ms)
+    {
+        m_frame_acc_ms = m_anim.frame_ms;
+    }
+
+    /* 还有后续帧：直接推进 */
+    if(m_frame_idx + 1 < m_frame_count)
+    {
+        m_frame_idx++;
+        service_film_render_frame(m_anim.file_id, m_frame_idx);
+        return;
+    }
+
+    /* 一轮播完。没有可推进的下一帧（单帧 + 单文件）时直接停住：
+       否则"按顺序播放 + 只有一个文件"会每 100ms 重刷一次同一帧（整屏闪） */
+    if(m_frame_count <= 1 && service_file_get_count() <= 1)
+    {
+        return;
+    }
+
+    if(m_anim.loop_seconds > 0)
+    {
+        m_loop_wait_ms = (uint32_t)m_anim.loop_seconds * 1000u;
+        sys_logi(APP_ANIM_TAG, "round end, wait %us", (unsigned)m_anim.loop_seconds);
+        return;
+    }
+
+    anim_next_round();
+}
+
+/**
+ * @brief 周期心跳：累计帧间隔（推进动作见 anim_advance）并消减轮间停顿
  *
  * 心跳基准固定为 APP_ANIM_TICK_MS(100ms)；frame_ms 为 100 的整数倍时精确，
  * 非整数倍时用"减去 frame_ms"而非清零来保留余数，避免累积漂移。
@@ -343,44 +412,8 @@ static void app_animation_on_tick(void)
         return;
     }
 
-    /* 上一帧还没上屏：本 tick 不推进，也不累计时间。
-       EPD 单帧刷新远慢于 frame_ms，无此流控会以 tick 速率堆渲染请求 */
-    if(service_film_is_busy())
-    {
-        return;
-    }
-
-    /* 帧分频：累计满 frame_ms 才推进一帧 */
     m_frame_acc_ms += APP_ANIM_TICK_MS;
-    if(m_frame_acc_ms < m_anim.frame_ms)
-    {
-        return;
-    }
-    m_frame_acc_ms -= m_anim.frame_ms;
-
-    /* 还有后续帧：直接推进 */
-    if(m_frame_idx + 1 < m_frame_count)
-    {
-        m_frame_idx++;
-        service_film_render_frame(m_anim.file_id, m_frame_idx);
-        return;
-    }
-
-    /* 一轮播完。没有可推进的下一帧（单帧 + 单文件）时直接停住：
-       否则"按顺序播放 + 只有一个文件"会每 100ms 重刷一次同一帧（整屏闪） */
-    if(m_frame_count <= 1 && service_file_get_count() <= 1)
-    {
-        return;
-    }
-
-    if(m_anim.loop_seconds > 0)
-    {
-        m_loop_wait_ms = (uint32_t)m_anim.loop_seconds * 1000u;
-        sys_logi(APP_ANIM_TAG, "round end, wait %us", (unsigned)m_anim.loop_seconds);
-        return;
-    }
-
-    anim_next_round();
+    anim_advance();
 }
 
 /**
@@ -514,11 +547,21 @@ static void app_animation_on_event(const app_event_t *e)
         break;
 
     case APP_EVT_SYS:
-        // 新动图落盘：列表已刷新，重置到第一个播放
-        if((sys_event_id_t)e->cmd == SYS_EVT_FILE_SAVED &&
-           (e->len == 0 || e->payload[0] != 0))
+        switch((sys_event_id_t)e->cmd)
         {
-            app_animation_on_downloaded();
+        case SYS_EVT_FILE_SAVED:
+            // 新动图落盘：列表已刷新，重置到第一个播放
+            if(e->len == 0 || e->payload[0] != 0)
+            {
+                app_animation_on_downloaded();
+            }
+            break;
+        case SYS_EVT_FILM_FRAME_DONE:
+            /* 上一帧刚落屏：不等到下一个 100ms 心跳，立刻接上下一帧 */
+            anim_advance();
+            break;
+        default:
+            break;
         }
         break;
 
