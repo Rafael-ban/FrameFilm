@@ -178,6 +178,15 @@ void app_render_display_mono(const unsigned char *mono_bitmap)
     hal_epd_display_mono(mono_bitmap);
 }
 
+void app_render_clean_panel(void)
+{
+    /* 与 ui_core.c 的 ui_clean_panel() 同一套做法：硬复位把 mono 会话置为无效，
+       下一次 mono 刷新会重建会话并先走一次完整清场（epd_spectra_full_clear）。
+       直绘层与 UI 页共用同一个 mono 差分会话，不复位就会把上一屏"同色"的残留
+       像素漏在新画面上（快刷波形没有彻底擦除的相位），即残影。 */
+    hal_epd_display_init();
+}
+
 void app_render_clear(void)
 {
     hal_epd_display_init();

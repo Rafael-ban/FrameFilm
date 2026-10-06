@@ -216,6 +216,13 @@ static void app_start_current(void)
         return;
     }
 
+    /* 直绘层没有 UI 那样的"进页先清场"（ui_page_build → ui_clean_panel），
+       但它接着上一屏（主菜单/别的 app）的画面继续做 mono 差分刷新 ——
+       快刷波形没有彻底擦除的相位，"同色"的残留像素不会被驱动，会留在屏上（残影）。
+       这里与 UI 层对称：切进直绘 app 前复位一次面板，让该 app 的首帧先做完整清场。
+       复位本身不改画面，清场代价（约 3s）由首帧付。 */
+    app_render_clean_panel();
+
     app_ensure_running();
 }
 
