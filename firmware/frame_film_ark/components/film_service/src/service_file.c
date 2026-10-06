@@ -53,7 +53,8 @@
 #define FILE_MSG_QUEUE_ITEM_SIZE    sizeof( file_msg_t )
 
 #define SYS_OS_PRI_FILE_TASK        (6)
-#define SYS_OS_SIZE_FILE_TASK       (4096)
+/* 启动时清理上传残留最多递归 3 层，每层有路径/stat 局部变量；4KB 实机溢出。 */
+#define SYS_OS_SIZE_FILE_TASK       (8192)
 #define SYS_OS_NAME_FILE_TASK       "file_task"
 
 #define FILE_TIMER_BASE_INTERVAL_MS (1000)
