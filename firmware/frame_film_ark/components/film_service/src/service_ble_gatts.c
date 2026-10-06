@@ -51,6 +51,7 @@
 #include "sys_log.h"
 #include "sys_event.h"
 #include "service_ble_gatts.h"
+#include "service_ble.h"
 
 /*********************************************************************
  * MACROS
@@ -697,6 +698,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         {
             ble_gatts_connect = BLE_GATTS_DISCONNECT;
             ble_gatts_notify_mask = 0x00;
+            service_ble_transfer_disconnected();
             sys_logi(GATTS_TAG, "ESP_GATTS_DISCONNECT_EVT, disconnect reason 0x%x", param->disconnect.reason);
             esp_ble_gap_start_advertising(&adv_params);
             sys_event_publish(SYS_EVT_BLE_DISCONN, NULL, 0);

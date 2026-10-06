@@ -515,7 +515,8 @@ static void app_animation_on_event(const app_event_t *e)
 
     case APP_EVT_SYS:
         // 新动图落盘：列表已刷新，重置到第一个播放
-        if((sys_event_id_t)e->cmd == SYS_EVT_FILE_SAVED)
+        if((sys_event_id_t)e->cmd == SYS_EVT_FILE_SAVED &&
+           (e->len == 0 || e->payload[0] != 0))
         {
             app_animation_on_downloaded();
         }

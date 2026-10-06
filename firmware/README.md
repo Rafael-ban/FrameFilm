@@ -83,6 +83,12 @@ frame_film/
 
 相对 `frame_film` **已删除**：`FRAMEFILM_STD/PRO/MAX` 机型宏、全部 `EPD_SELECT_E6_*` 屏幕选择宏、其余屏幕驱动（`hal_epd_360.c` / `hal_epd_364.c` / `hal_epd_368.c` / `hal_epd_709.c`）、STD 专用编码器实现（`hal_encoder.c`）、`sdkconfig_{std,pro,max}`。
 
+Ark 当前以板载 SDNAND 模式运行（`hal_sd.c` 中 `SD_USE_SDNAND=1`），此模式不启用插卡检测。正常开机挂载失败不会自动格式化；检查存储后可重启重试。需要初始化空白存储或明确清空数据时，使用现有 BLE `0x2B` 格式化命令；该命令会删除存储内容，未挂载但硬件可访问的存储也可通过此入口重新初始化。
+
+Ark 上传先写临时文件，完整关闭后才提交正式文件；同名替换失败保留旧内容。BLE 中断后从 `FILE_START` 重传，WiFi 与 BLE 的保存会话互斥。文件命令尚无应用层保存结果 ACK，客户端的发送进度不等于设备保存或显示结果，详见 BLE 协议 §4.2。
+
+存储专项测试：在带 C 编译器的 Linux/WSL 中，从 Ark 工程执行 `sh tests/host_storage/run.sh`。测试直接调用实际文件服务代码，使用临时目录模拟短写、关闭失败、提交失败和重启残留恢复；包含完整 MonoFast 帧、同名替换、错误文件头及跨目录静默保存。它不验证 FreeRTOS 并发、实际 BLE/WiFi 链路、SDNAND 断电行为或屏幕显示，也不代替 ESP-IDF 5.5.2 固件构建。
+
 ## 架构
 
 ```

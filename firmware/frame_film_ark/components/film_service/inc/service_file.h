@@ -54,6 +54,7 @@ typedef enum {
     MSG_FILE_SAVE_START_TO,   // 开始保存文件（显式相对路径，不参与列表/事件）
     MSG_FILE_SAVE_DATA,       // 保存文件数据
     MSG_FILE_SAVE_STOP,       // 停止保存文件
+    MSG_FILE_SAVE_ABORT,      // 撤销当前上传
 } file_msg_type_t;
 
 typedef struct {
@@ -62,7 +63,13 @@ typedef struct {
     uint32_t file_size;
     uint32_t data_len;
     uint8_t *pdata;
+    uint8_t owner;
 } file_msg_t;
+
+typedef enum {
+    FILE_SAVE_BLE = 1,
+    FILE_SAVE_WIFI = 2,
+} file_save_owner_t;
 
 /*********************************************************************
  * CONSTANTS
@@ -139,26 +146,25 @@ extern void service_file_refresh_list(void);
 /**
  * @brief 保存文件数据
  *
- * 此函数用于通过BLE接收文件数据并保存到SD卡。
+ * 同步写入当前 owner 的暂存文件。调用后总是接管并释放 pdata，失败也一样。
  *
- * @param pfilename 文件名
- * @param file_size 文件大小
+ * @param owner 上传来源，BLE/WiFi 会话互斥
  * @param pdata 数据指针
  * @param data_len 数据长度
  * @return int 0:成功, -1:失败
  */
-extern int service_file_save_data(const char *pfilename, uint32_t file_size, uint8_t *pdata, uint32_t data_len);
+extern int service_file_save_data(file_save_owner_t owner, uint8_t *pdata, uint32_t data_len);
 
 /**
  * @brief 开始保存文件
  *
- * 此函数用于开始BLE文件传输，初始化文件保存。
+ * 同步开始上传；已有其他 owner 会话时返回失败，不覆盖其数据。
  *
  * @param pfilename 文件名
  * @param file_size 文件大小
  * @return int 0:成功, -1:失败
  */
-extern int service_file_save_start(const char *pfilename, uint32_t file_size);
+extern int service_file_save_start(file_save_owner_t owner, const char *pfilename, uint32_t file_size);
 
 /**
  * @brief 开始保存文件到显式相对路径
@@ -172,14 +178,16 @@ extern int service_file_save_start(const char *pfilename, uint32_t file_size);
  * @param file_size 文件大小
  * @return int 0:成功, -1:失败
  */
-extern int service_file_save_start_to(const char *rel_path, uint32_t file_size);
+extern int service_file_save_start_to(file_save_owner_t owner, const char *rel_path, uint32_t file_size);
 
 /**
- * @brief 停止保存文件
+ * @brief 完成保存并提交正式文件
  *
- * 此函数用于完成BLE文件传输，关闭文件句柄。
+ * 同步检查长度、写入和 close 结果；失败撤销暂存并保留旧文件。
  */
-extern void service_file_save_stop(uint8_t auto_load);
+extern int service_file_save_stop(file_save_owner_t owner, uint8_t auto_load);
+/** 撤销本 owner 的上传会话；不会撤销其他来源。 */
+extern int service_file_save_abort(file_save_owner_t owner);
 
 /**
  * @brief 加载指定文件

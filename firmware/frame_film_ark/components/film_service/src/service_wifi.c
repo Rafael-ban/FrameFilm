@@ -30,6 +30,7 @@
  */
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <sys/time.h>
 
 #include "freertos/FreeRTOS.h"
@@ -308,32 +309,57 @@ static esp_err_t wifi_http_event_handler(esp_http_client_event_t *evt)
         break;
 
     case HTTP_EVENT_ON_FINISH:
+    {
         sys_logi(WIFI_SERVICE_TAG, "HTTP download finished, received: %d bytes", g_download_received);
+        int status = esp_http_client_get_status_code(evt->client);
+        int64_t content_length = esp_http_client_get_content_length(evt->client);
+        if(g_download_state != WIFI_DOWNLOAD_DOWNLOADING || status < 200 || status >= 300 ||
+           (content_length >= 0 && g_download_received != content_length))
+        {
+            sys_loge(WIFI_SERVICE_TAG, "HTTP download incomplete: status=%d received=%d expected=%" PRId64,
+                     status, g_download_received, content_length);
+            if(g_download_buffer) heap_caps_free(g_download_buffer);
+            g_download_buffer = NULL;
+            g_download_state = WIFI_DOWNLOAD_ERROR;
+            break;
+        }
         if(g_download_buffer && g_download_received > 0)
         {
-            if(service_file_save_start(g_download_filename, g_download_received) == 0)
+            if(service_file_save_start(FILE_SAVE_WIFI, g_download_filename, g_download_received) == 0)
             {
-                service_file_save_data(g_download_filename, g_download_received,
-                                       g_download_buffer, g_download_received);
-                service_file_save_stop(1);
-                /* save_data takes ownership, file task will free */
+                int write_result = service_file_save_data(FILE_SAVE_WIFI,
+                                                          g_download_buffer, g_download_received);
+                /* save_data takes ownership even on failure. */
+                g_download_buffer = NULL;
+                int save_result = write_result == 0 ? service_file_save_stop(FILE_SAVE_WIFI, 1) : -1;
+                if(save_result != 0)
+                {
+                    service_file_save_abort(FILE_SAVE_WIFI);
+                    g_download_state = WIFI_DOWNLOAD_ERROR;
+                    sys_loge(WIFI_SERVICE_TAG, "HTTP download save failed");
+                }
+                else
+                {
+                    g_download_state = WIFI_DOWNLOAD_DONE;
+                    g_download_progress = 100;
+                }
             }
             else
             {
                 heap_caps_free(g_download_buffer);
+                g_download_state = WIFI_DOWNLOAD_ERROR;
             }
             g_download_buffer = NULL;
-            g_download_state = WIFI_DOWNLOAD_DONE;
-            g_download_progress = 100;
         }
         else
         {
-            g_download_state = WIFI_DOWNLOAD_DONE;
-            g_download_progress = 100;
+            g_download_state = WIFI_DOWNLOAD_ERROR;
         }
-        /* 下载字节接收完成（与文件落盘完成 SYS_EVT_FILE_SAVED 区分），payload: u32 字节数 */
-        sys_event_publish(SYS_EVT_WIFI_DL_DONE, &g_download_received, sizeof(g_download_received));
+        /* 下载完成事件只在文件真正保存成功后发布。 */
+        if(g_download_state == WIFI_DOWNLOAD_DONE)
+            sys_event_publish(SYS_EVT_WIFI_DL_DONE, &g_download_received, sizeof(g_download_received));
         break;
+    }
 
     case HTTP_EVENT_DISCONNECTED:
         sys_logi(WIFI_SERVICE_TAG, "HTTP disconnected");

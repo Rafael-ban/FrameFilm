@@ -95,6 +95,8 @@ static uint8_t m_film_trans_state = BLE_FILM_TRANS_IDLE;
 static uint8_t m_film_trans_filename[256];
 static uint32_t m_film_trans_file_size = 0;
 static uint32_t m_film_trans_received = 0;
+static volatile uint8_t m_ble_link_epoch = 0;
+static volatile uint8_t m_ble_abort_pending = 0;
 static uint8_t m_ota_trans_state = BLE_OTA_TRANS_IDLE;
 static uint32_t m_ota_trans_file_size = 0;
 static uint32_t m_ota_trans_received = 0;
@@ -112,6 +114,28 @@ static service_ble_app_id_get_cb_t m_app_id_get_cb = NULL;
 static void ble_task_handle(void *pvParameters);
 static uint8_t ble_checksum(uint8_t arr[], int len);
 static void ble_cmd_process(ble_cmd_t *cmd);
+static void ble_file_reset(void);
+
+void service_ble_transfer_disconnected(void)
+{
+    m_ble_link_epoch++;
+    m_ble_abort_pending = 1;
+    if(m_ble_msg_hdl)
+    {
+        ble_msg_t msg = {.ID = MSG_BLE_FILE_ABORT};
+        (void)xQueueSend(m_ble_msg_hdl, &msg, 0);
+    }
+}
+
+static void ble_file_reset(void)
+{
+    if(m_film_trans_state != BLE_FILM_TRANS_IDLE && m_film_trans_state != BLE_FILM_TRANS_STOPPED)
+        service_file_save_abort(FILE_SAVE_BLE);
+    m_film_trans_state = BLE_FILM_TRANS_IDLE;
+    m_film_trans_received = 0;
+    m_film_trans_file_size = 0;
+    m_film_trans_filename[0] = '\0';
+}
 
 /*********************************************************************
  * GLOBAL FUNCTIONS
@@ -190,6 +214,7 @@ void service_ble_apply_enable(uint8_t on)
             return;
         }
         service_ble_gatts_dev_disconnect();
+        service_ble_transfer_disconnected();
         service_ble_gatt_server_uninit();
         m_ble_up = 0;
     }
@@ -246,6 +271,7 @@ void service_ble_msg_gatts_cmd_send( uint8_t const *p_data, uint16_t len )
         ble_msg_t msg = {0};
 
         msg.ID = MSG_BLE_CH1_IN_CMD;
+        msg.subID = m_ble_link_epoch;
         msg.len = len;
         msg.pdata = pvPortMalloc(len);
         if(msg.pdata == NULL)
@@ -308,10 +334,21 @@ static void ble_task_handle(void *pvParameters)
         ble_msg_t msg;
         SYS_ERROR_CHECK( xQueueReceive( m_ble_msg_hdl, (void *const)&msg, portMAX_DELAY ) != pdPASS );
 
+        if(m_ble_abort_pending)
+        {
+            m_ble_abort_pending = 0;
+            ble_file_reset();
+        }
+
         switch(msg.ID)
         {
         case MSG_BLE_CH1_IN_CMD :
         {
+            if(msg.subID != m_ble_link_epoch)
+            {
+                vPortFree(msg.pdata);
+                break;
+            }
             if( msg.len )
             {
                 if(msg.pdata[0] ==  BLE_CMD_HEAD)
@@ -369,6 +406,8 @@ static void ble_task_handle(void *pvParameters)
         case MSG_BLE_GAP_DISCONNECT:
             service_ble_gatts_dev_disconnect();
             break;
+        case MSG_BLE_FILE_ABORT:
+            break; // 队首统一执行 m_ble_abort_pending 撤销
         default :
         {
             if( msg.len )
@@ -393,23 +432,15 @@ static void ble_cmd_process(ble_cmd_t *cmd)
     {
         case BLE_FILM_TRANS_CH_FILE_START :
         {
-            if(m_film_trans_state == BLE_FILM_TRANS_IDLE || m_film_trans_state == BLE_FILM_TRANS_STOPPED)
-            {
-                m_film_trans_state = BLE_FILM_TRANS_STARTED;
-                m_film_trans_received = 0;
-                memset(m_film_trans_filename, 0, sizeof(m_film_trans_filename));
-                m_film_trans_file_size = 0;
-                sys_logi(BEL_SERVICE_TAG, "Film transfer started");
-            }
-            else
-            {
-                sys_logw(BEL_SERVICE_TAG, "Invalid state for FILE_START: %d", m_film_trans_state);
-            }
+            ble_file_reset();
+            m_film_trans_state = BLE_FILM_TRANS_STARTED;
+            sys_logi(BEL_SERVICE_TAG, "Film transfer started");
             break;
         }
         case BLE_FILM_TRANS_CH_FILE_NAME :
         {
-            if(m_film_trans_state == BLE_FILM_TRANS_STARTED && cmd->len > 0)
+            if(m_film_trans_state == BLE_FILM_TRANS_STARTED && cmd->len > 0 &&
+               cmd->len < sizeof(m_film_trans_filename))
             {
                 memcpy(m_film_trans_filename, cmd->pdata, cmd->len);
                 m_film_trans_filename[cmd->len] = '\0';
@@ -427,19 +458,23 @@ static void ble_cmd_process(ble_cmd_t *cmd)
             if(m_film_trans_state == BLE_FILM_TRANS_RECV_NAME && cmd->len == 4)
             {
                 m_film_trans_file_size = (cmd->pdata[0] << 24) | (cmd->pdata[1] << 16) | (cmd->pdata[2] << 8) | cmd->pdata[3];
-                m_film_trans_state = BLE_FILM_TRANS_RECV_LEN;
                 sys_logi(BEL_SERVICE_TAG, "Received file size: %d", m_film_trans_file_size);
 
                 // 文件名含 '/' 视为显式相对路径（如 app/image/cover.film），
                 // 写入 /sdcard/<相对路径>，不参与图片/动图列表与事件
+                int result;
                 if(strchr((const char*)m_film_trans_filename, '/') != NULL)
                 {
-                    service_file_save_start_to((const char*)m_film_trans_filename, m_film_trans_file_size);
+                    result = service_file_save_start_to(FILE_SAVE_BLE,
+                              (const char*)m_film_trans_filename, m_film_trans_file_size);
                 }
                 else
                 {
-                    service_file_save_start((const char*)m_film_trans_filename, m_film_trans_file_size);
+                    result = service_file_save_start(FILE_SAVE_BLE,
+                              (const char*)m_film_trans_filename, m_film_trans_file_size);
                 }
+                if(result == 0) m_film_trans_state = BLE_FILM_TRANS_RECV_LEN;
+                else { sys_loge(BEL_SERVICE_TAG, "FILE_LEN: save start failed"); ble_file_reset(); }
             }
             else
             {
@@ -452,12 +487,21 @@ static void ble_cmd_process(ble_cmd_t *cmd)
             if((m_film_trans_state == BLE_FILM_TRANS_RECV_LEN || m_film_trans_state == BLE_FILM_TRANS_RECV_DATA) && cmd->len > 0)
             {
                 uint8_t *pdata_copy = (uint8_t*)pvPortMalloc(cmd->len);
-                if(pdata_copy)
+                if(pdata_copy && cmd->len <= m_film_trans_file_size - m_film_trans_received)
                 {
                     memcpy(pdata_copy, cmd->pdata, cmd->len);
-                    service_file_save_data((const char*)m_film_trans_filename, m_film_trans_file_size, pdata_copy, cmd->len);
-                    m_film_trans_received += cmd->len;
-                    m_film_trans_state = BLE_FILM_TRANS_RECV_DATA;
+                    if(service_file_save_data(FILE_SAVE_BLE, pdata_copy, cmd->len) == 0)
+                    {
+                        m_film_trans_received += cmd->len;
+                        m_film_trans_state = BLE_FILM_TRANS_RECV_DATA;
+                    }
+                    else { sys_loge(BEL_SERVICE_TAG, "FILE_DATA: write failed"); ble_file_reset(); }
+                }
+                else
+                {
+                    if(pdata_copy) vPortFree(pdata_copy);
+                    sys_loge(BEL_SERVICE_TAG, "FILE_DATA: allocation or length failed");
+                    ble_file_reset();
                 }
             }
             else
@@ -476,9 +520,20 @@ static void ble_cmd_process(ble_cmd_t *cmd)
                 {
                     auto_load = 0;
                 }
-                service_file_save_stop(auto_load);
-                sys_logi(BEL_SERVICE_TAG, "Film transfer stopped, received: %d/%d bytes", m_film_trans_received, m_film_trans_file_size);
-                m_film_trans_state = BLE_FILM_TRANS_STOPPED;
+                int result = -1;
+                if(m_film_trans_received == m_film_trans_file_size)
+                    result = service_file_save_stop(FILE_SAVE_BLE, auto_load);
+                if(result == 0)
+                {
+                    sys_logi(BEL_SERVICE_TAG, "Film transfer saved: %d bytes", m_film_trans_received);
+                    m_film_trans_state = BLE_FILM_TRANS_STOPPED;
+                }
+                else
+                {
+                    sys_loge(BEL_SERVICE_TAG, "FILE_STOP: save failed, received=%d expected=%d",
+                             m_film_trans_received, m_film_trans_file_size);
+                    ble_file_reset();
+                }
             }
             else
             {

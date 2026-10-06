@@ -35,6 +35,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <stdbool.h>
 
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -88,7 +89,7 @@ static sdmmc_card_t *card;
 /*********************************************************************
  * LOCAL FUNCTIONS
  */
-static void sd_mount(void);
+static void sd_mount(bool allow_format);
 static void sd_unmount(void);
 #if SD_USE_SDNAND == 0
 static void sd_det_init(void);
@@ -105,13 +106,13 @@ static void sd_check_task(void *arg);
 void hal_sd_init(void)
 {
 #if SD_USE_SDNAND
-    sd_mount();
+    sd_mount(false);
 #else
     sd_det_init();
     int io_level = gpio_get_level(PIN_NUM_DET);
     if(!io_level)
     {
-        sd_mount();
+        sd_mount(false);
     }
 #endif
 }
@@ -142,7 +143,7 @@ static void sd_check_task(void *arg)
             if(io_level == 0 && sd_mount_status == SD_UNMOUNT)
             {
                 sys_logi(TF_TAG, "MOUNT TF");
-                sd_mount();
+                sd_mount(false);
             }
 
             if(io_level == 1 && sd_mount_status == SD_MOUNT)
@@ -174,16 +175,13 @@ static void sd_det_init(void)
 }
 #endif
 
-static void sd_mount(void)
+static void sd_mount(bool allow_format)
 {
     esp_err_t ret;
     esp_vfs_fat_sdmmc_mount_config_t mount_config =
     {
-#if SD_USE_SDNAND
-        .format_if_mount_failed = true,
-#else
-        .format_if_mount_failed = false,
-#endif
+        /* 开机/重试保留现有数据；只有明确的格式化请求允许重建文件系统。 */
+        .format_if_mount_failed = allow_format,
         .max_files = 5,
         .allocation_unit_size = 16 * 1024
     };
@@ -210,8 +208,8 @@ static void sd_mount(void)
     {
         if (ret == ESP_FAIL)
         {
-            sys_loge(TF_TAG, "Failed to mount filesystem. "
-                     "If you want the card to be formatted, set the EXAMPLE_FORMAT_IF_MOUNT_FAILED menuconfig option.");
+            sys_loge(TF_TAG, "Failed to mount filesystem; automatic formatting is disabled on normal startup. "
+                     "Retry after checking storage, or explicitly request SD format to erase it.");
         }
         else
         {
@@ -266,8 +264,13 @@ int hal_sd_format(void)
 {
     if (sd_mount_status != SD_MOUNT)
     {
-        sys_loge(TF_TAG, "SD card not mounted, cannot format");
-        return -1;
+        /* 空白或文件系统损坏的 SDNAND 也必须能通过用户操作重新初始化。 */
+        sys_logi(TF_TAG, "Explicit format requested for unmounted storage");
+        sd_mount(true);
+        if (sd_mount_status != SD_MOUNT)
+        {
+            return -1;
+        }
     }
 
     sys_logi(TF_TAG, "Formatting SD card...");
