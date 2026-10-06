@@ -43,6 +43,10 @@ adb -s <手机序列号> shell am instrument -w org.framefilm.ark.dev/org.framef
 
 - 空工程和 M0 业务代码的 `:app:assembleDebug` 均构建通过；使用 JDK 21、Gradle 8.11.1、AGP 8.10.1、SDK 35。
 - 小米 9（第三方 HyperOS 2 / Android 15、API 35）的 USB 调试已授权，ADB 连接正常。
-- 流式和非流式 ADB 安装均停在系统安装会话已提交的阶段，没有返回完成或错误。用户确认 USB 安装开关已开启；两个挂起会话已清理，具体阻塞原因尚未确定。
-- APK 已复制到手机 `Download/FrameFilm-Ark-M0-0.1.0-debug.apk`，等待通过手机系统安装器确认本地安装结果。
-- BLE 实机查询、2.4GHz GO 建组及并行通信探针尚未运行，不能据构建成功判断手机直传兼容性。
+- 初次流式、非流式 ADB 安装以及手机本地安装都卡在已提交阶段。两个 ADB 会话虽接受取消请求，仍保留占用标记；此前记录的“已清理”不代表系统实际完成释放。
+- APK 的 v2 签名校验通过，手机 Download 中的文件 SHA-256 与本地构建产物一致，手机剩余存储约 90GB。没有发现文件损坏、签名或存储不足问题。
+- 重启手机并解锁后，**原 APK 未经修改即安装成功**，ADB 命令约 2 秒完成。安装阻塞随系统运行状态恢复而解除，具体卡住的系统组件尚未确定；没有为此修改应用代码或降低 targetSdk。
+- 客户端主界面启动命令返回 `Status: ok`，冷启动约 696ms，应用进程存在。这是启动验证，不代表界面视觉验收。
+- 首次通信探针因蓝牙运行时权限未就绪而退出，连接资源清理成功。随后确认 BLE 权限已授予，并补齐附近 WiFi 设备权限。
+- 补齐权限后的探针已扫描到 Ark 并发起连接，随后返回 `Process crashed`；同一阶段日志记录系统进程 `com.android.bluetooth` 在 `MiuiBluetooth/system/gd/hci/hci_layer.cc:256` 因 `LE_EXTENDED_CREATE_CONNECTION(0x2043) was not expecting complete event` 中止。尚无成功的屏参回包，未进入 WiFi 建组步骤；不能把它记为 BLE 或双通道通过，也尚不能仅凭此断言探针退出的完整因果链。
+- 本次安装问题已恢复；第三方 ROM 的 BLE 连接兼容性仍待单独定位。调试证据保存在本地 `.output/ark/logs/android-m0-probe.log` 和 `android-m0-probe-crash.log`，不将手机原始系统日志入库。
