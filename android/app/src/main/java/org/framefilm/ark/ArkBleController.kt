@@ -28,6 +28,7 @@ class ArkBleController(context: Context, private val listener: Listener) {
         fun onPanel(panelId: Int, width: Int, height: Int)
         fun onState(state: String)
         fun onError(message: String)
+        fun onPacket(packet: ByteArray) { }
     }
 
     private val appContext = context.applicationContext
@@ -330,6 +331,7 @@ class ArkBleController(context: Context, private val listener: Listener) {
         if (length + 4 != data.size && !(requestChannel(data) == 0x31 && length == 1 && data.size == 6)) return
         val validSum = data.copyOfRange(0, length + 3).sumOf { it.toInt() and 0xff } and 0xff
         if (validSum != (data[length + 3].toInt() and 0xff)) return
+        listener.onPacket(data.copyOfRange(0, length + 4))
         val request = pending ?: return
         if (data[1].toInt() and 0xff != request.channel) return
         request.response = data.copyOfRange(3, 3 + length)

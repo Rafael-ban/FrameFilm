@@ -45,6 +45,9 @@ class ArkP2pController(context: Context, private val listener: Listener) {
     private val closeCallbacks = mutableListOf<(Boolean) -> Unit>()
     private val random = SecureRandom()
 
+    /** A failed cleanup retains the exact group identity for a later retry. */
+    val hasPendingCleanup: Boolean get() = sessionName != null
+
     private fun onMain(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
     }
@@ -165,7 +168,7 @@ class ArkP2pController(context: Context, private val listener: Listener) {
     @SuppressLint("MissingPermission")
     private fun requestGroup() {
         val p2p = manager ?: return
-        val ch = channel ?: return
+        val ch = channel ?: ensureChannel() ?: return
         val token = generation
         try {
             p2p.requestGroupInfo(ch) { group -> onMain { if (token == generation) handleGroup(group) } }
@@ -229,7 +232,7 @@ class ArkP2pController(context: Context, private val listener: Listener) {
     @SuppressLint("MissingPermission")
     private fun removeOwnedGroup() {
         val p2p = manager
-        val ch = channel
+        val ch = channel ?: ensureChannel()
         val name = sessionName
         if (!owned || p2p == null || ch == null || name == null) { finishClose(false); return }
         if (removing) return
@@ -301,9 +304,9 @@ class ArkP2pController(context: Context, private val listener: Listener) {
         closing = true
         clearTimeout()
         if (owned) removeOwnedGroup()
-        else if (creating) {
+        else if (sessionName != null) {
             requestGroup()
-            setTimeout(20_000) {
+            setTimeout(if (creating) 20_000 else 5_000) {
                 requestGroup()
                 setTimeout(3_000) {
                     listener.onError("无法确认本次创建的直连组已清理")
@@ -316,6 +319,17 @@ class ArkP2pController(context: Context, private val listener: Listener) {
     private fun finishClose(success: Boolean) {
         generation++
         clearTimeout()
+        if (!success && sessionName != null) {
+            checking = false
+            creating = false
+            closing = false
+            removing = false
+            listener.onState("Wi-Fi Direct 清理未确认，可重试释放本次组")
+            val callbacks = closeCallbacks.toList()
+            closeCallbacks.clear()
+            callbacks.forEach { it(false) }
+            return
+        }
         receiver?.let { try { appContext.unregisterReceiver(it) } catch (_: IllegalArgumentException) { } }
         receiver = null
         val oldChannel = channel
