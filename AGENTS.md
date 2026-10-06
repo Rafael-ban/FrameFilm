@@ -2,6 +2,8 @@
 
 FrameFilm 项目 AI 开发指南。
 
+按当前任务和目标固件查阅下列索引；无需预读全部文档或加载不相关 Skills。结构分析不要求构建或测试；代码变更只验证受影响的功能。
+
 ## 项目身份
 
 开源彩色电子纸冰箱贴。ESP32-S3 + EPD + BLE/WiFi，手机传照片显示。
@@ -114,20 +116,20 @@ film_service → film_hal → film_sys → ESP-IDF
 
 ### 跨端一致性（必须）
 
-修改以下内容时，**三个端必须同时更新**：
+修改以下共享协议或编码时，检查并同步**实际受影响的固件与客户端**；Ark 专有命令不要因此移植到经典固件，Dock 的共用协议变更也需检查其 BLE/USB 解析。
 
 | 内容 | C 固件 | 小程序 | Web |
 |------|--------|--------|-----|
-| BLE 命令常量 | `service_ble.h`（`frame_film` 与 `frame_film_ark` **各一份，两处都要改**） | `ble-utils.js` | `frame.js` |
-| film 颜色编码 | `hal_epd.h`（同上，两套冰箱贴固件各一份） | `film-utils.js` | `convert.js` |
+| BLE 命令常量 | 各目标固件的 `service_ble.h`；Dock 另查 `service_cmd.c` | `ble-utils.js` | `frame.js` |
+| film 颜色编码 | 各目标固件的 `hal_epd.h` 与对应解码实现 | `film-utils.js` | `convert.js` |
 
 ### 关键常量
 
 - `BLE_CHUNK_SIZE = 192`（数据包大小）
 - `BLE_CMD_HEAD = 0x55`（帧头）
-- film 文件大小 = **32B 头 + (宽×高/2) 像素**（标准版 600×400 为 120032 字节）
+- v1 单帧 film 文件大小 = **32B 头 + (宽×高/2) 像素**（标准版 600×400 为 120032 字节）；v2 与多帧按 `Format` / `FrameCount` 计算，见 `docs/film/film.md`
 - 6 色编码：黑 0x00 | 白 0x11 | 绿 0x66 | 蓝 0x55 | 红 0x33 | 黄 0x22
-- BLE 可用命令范围：`0x3E` 起
+- 新增 BLE 命令先查下方命令表与协议文档；`0x3E` 起已有已分配通道，不是空闲范围
 
 ## 命名约定
 
@@ -141,15 +143,15 @@ film_service → film_hal → film_sys → ESP-IDF
 
 ## 关键文件
 
-> **路径口径**：下表路径以 `firmware/frame_film/`（三机型线）为基准；`firmware/frame_film_ark/`（通行证版，单机型）的 `film_sys` / `film_hal` / `film_service` 与其同构、文件名一致，但**多出 `film_ui` 与 `film_app` 两个组件（app 框架只在 ark）**，且已无编码器、只留 `hal_epd_370.c`、无机型/屏幕宏。**凡路径含 `film_app` / `film_ui` 的条目只存在于 `frame_film_ark/`**；机型/屏幕宏相关条目仅 `frame_film` 适用；协议与常量类改动两套固件都要落。
+> **路径口径**：下表按实际所属固件列出入口。三套固件各有 `film_sys` / `film_hal` / `film_service`，按任务选择对应目录；`film_app` / `film_ui` 及 app 通道只在 Ark，机型/屏幕选择宏只在经典固件。共享协议与常量变更同步实际受影响的实现。
 
 | 要改什么 | 核心文件 |
 |---|---|
 | 机型配置 | `firmware/frame_film/components/film_sys/inc/sys_cfg.h` + `firmware/frame_film/sdkconfig_{std,pro,max}` |
 | 屏幕选择 | `firmware/frame_film/components/film_hal/inc/hal_epd.h`（`EPD_SELECT_E6_*` 宏） |
 | BLE 协议 | `firmware/frame_film/components/film_service/inc/service_ble.h` |
-| 蓝牙遥控（0x4E 按键注入） | `firmware/frame_film/components/film_service/src/service_ble.c`（发布）+ `film_app/core/app_manager.c`（`ble_key_to_press` 映射投递） |
-| 时间同步（0x4D） | `firmware/frame_film/components/film_service/src/service_time.c` + `service_param.h`（`tz_min`） |
+| 蓝牙遥控（0x4E 按键注入） | `firmware/frame_film_ark/components/film_service/src/service_ble.c`（发布）+ `film_app/core/app_manager.c`（`ble_key_to_press` 映射投递） |
+| 时间同步（0x4D） | `firmware/frame_film_ark/components/film_service/src/service_time.c` + `service_param.h`（`tz_min`） |
 | 全局事件总线 | `firmware/frame_film/components/film_sys/inc/sys_event.h` |
 | EPD 驱动 | `firmware/frame_film/components/film_hal/src/hal_epd_{360,368,370,709}.c` |
 | film 播放 | `firmware/frame_film/components/film_service/src/service_film.c` |
@@ -160,17 +162,17 @@ film_service → film_hal → film_sys → ESP-IDF
 | Dock 命令解析（BLE/USB 共用） | `firmware/frame_film_dock/components/film_service/src/service_cmd.c` |
 | Dock USB 描述符/CDC | `firmware/frame_film_dock/components/film_hal/src/hal_usb.c` |
 | Dock USB 传图工具 | `tools/framefilm-dock-upload/scripts/dock_upload.py` |
-| UI 层框架（LVGL 宿主/页面生命周期） | `firmware/frame_film/components/film_ui/src/ui_core.c` |
-| UI 层开关与显示链路 | `firmware/frame_film/components/film_ui/inc/{ui_conf.h,ui_ops.h}` + `src/ui_display.c` |
-| 开机画面 / 主菜单 / 系统设置（框架页面） | `firmware/frame_film/components/film_app/pages/app_{boot,menu,settings}.c` |
-| 时钟页主读数数字字库（60px，自备） | `firmware/frame_film/components/film_app/apps/clock/font_clock_hero.c` + `tools/clock-font/gen_clock_font.py` |
-| 休眠卡 + 入睡流程（主菜单长按） | `firmware/frame_film/components/film_app/pages/app_sleep.c` |
-| 手动休眠入口 / 占屏门闸 | `firmware/frame_film/components/film_app/core/app_manager.c`（`app_manager_sleep_show` + `m_sleep_page`） |
-| 进低功耗（deinit + deep sleep） | `firmware/frame_film/components/film_service/src/service_monitor.c`（`service_monitor_request_sleep`） |
-| UI 页公共外壳（状态栏 + 居中时间 + 提示行 + 周期 tick） | `firmware/frame_film/components/film_app/core/app_shell.{h,c}` |
-| 开机行为参数（BOOT PAGE / START APP） | `firmware/frame_film/components/film_app/core/app_boot_cfg.{h,c}`（持久化在 `service_param` 的 `app7` 槽位） |
-| 内容 app（图片/模板/时钟/动图/通行证） | `firmware/frame_film/components/film_app/apps/<name>/app_<name>.{h,c}`（一个 app 一个文件夹） |
-| SD 可替换图标（FFUI 容器） | `firmware/frame_film/components/film_ui/src/ui_assets.c` + `tools/ui-assets/gen_ui_assets.py` |
+| UI 层框架（LVGL 宿主/页面生命周期） | `firmware/frame_film_ark/components/film_ui/src/ui_core.c` |
+| UI 层开关与显示链路 | `firmware/frame_film_ark/components/film_ui/inc/{ui_conf.h,ui_ops.h}` + `src/ui_display.c` |
+| 开机画面 / 主菜单 / 系统设置（框架页面） | `firmware/frame_film_ark/components/film_app/pages/app_{boot,menu,settings}.c` |
+| 时钟页主读数数字字库（60px，自备） | `firmware/frame_film_ark/components/film_app/apps/clock/font_clock_hero.c` + `tools/clock-font/gen_clock_font.py` |
+| 休眠卡 + 入睡流程（主菜单长按） | `firmware/frame_film_ark/components/film_app/pages/app_sleep.c` |
+| 手动休眠入口 / 占屏门闸 | `firmware/frame_film_ark/components/film_app/core/app_manager.c`（`app_manager_sleep_show` + `m_sleep_page`） |
+| 进低功耗（deinit + deep sleep） | `firmware/frame_film_ark/components/film_service/src/service_monitor.c`（`service_monitor_request_sleep`） |
+| UI 页公共外壳（状态栏 + 居中时间 + 提示行 + 周期 tick） | `firmware/frame_film_ark/components/film_app/core/app_shell.{h,c}` |
+| 开机行为参数（BOOT PAGE / START APP） | `firmware/frame_film_ark/components/film_app/core/app_boot_cfg.{h,c}`（持久化在 `service_param` 的 `app7` 槽位） |
+| 内容 app（图片/模板/时钟/动图/通行证） | `firmware/frame_film_ark/components/film_app/apps/<name>/app_<name>.{h,c}`（一个 app 一个文件夹） |
+| SD 可替换图标（FFUI 容器） | `firmware/frame_film_ark/components/film_ui/src/ui_assets.c` + `tools/ui-assets/gen_ui_assets.py` |
 | 协议文档 | `docs/blecmd/blecmd_protocol.md` |
 
 ## 常见陷阱（不要做）
@@ -179,7 +181,7 @@ film_service → film_hal → film_sys → ESP-IDF
 
 1. **不要只在 service 层调 esp_wifi_init 等 ESP-IDF driver** — 必须通过 HAL
 2. **不要只改一个机型的宏分支** — 机型差异代码需覆盖 `FRAMEFILM_STD/PRO/MAX`（EPD 驱动、输入设备、SD 等按宏隔离）。**此条仅 `frame_film` 适用**：`frame_film_ark` 是刻意的单机型设计，不要往它里面引入机型宏或 `#if` 分支
-3. **不要改 BLE 命令值** — 值一旦定义就固定，新增命令从 `0x3E` 起
+3. **不要改 BLE 命令值** — 值一旦定义就固定，新增命令先核对协议表，避免复用已分配通道
 4. **不要假设字符串编码** — BLE 传输一律 ASCII + `\0` 结尾
 5. **不要忘记更新 blecmd_protocol.md** — 协议文档必须与实际实现一致
 6. **不要在 service 层直接操作 GPIO** — 所有硬件操作走 film_hal
@@ -215,8 +217,8 @@ film_service → film_hal → film_sys → ESP-IDF
 
 ## 任务模板
 
-### 新增 BLE 命令 (如 0x3E)
-1. `service_ble.h` 定义 `#define BLE_FILM_TRANS_CH_XXX 0x3E`
+### 新增 BLE 命令
+1. 核对协议表中的空闲通道，在目标固件的 `service_ble.h` 定义 `BLE_FILM_TRANS_CH_XXX`；共享命令同步受影响的固件
 2. `service_ble.c` 添加 case 处理
 3. `ble-utils.js` + `frame.js` 添加同名常量
 4. `blecmd_protocol.md` 更新
