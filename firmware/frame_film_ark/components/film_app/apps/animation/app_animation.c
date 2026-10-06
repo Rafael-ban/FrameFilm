@@ -180,6 +180,14 @@ static void anim_start(uint32_t file_id, int persist)
     m_frame_acc_ms = 0;
     m_loop_wait_ms = 0;
 
+    /* 帧数 0 = 文件读不出来（格式未知 / 长度不足 / 已损坏）：
+       不要再投递渲染，否则会每次空转一轮加载超时，表现为按键无响应 */
+    if(m_frame_count == 0)
+    {
+        sys_loge(APP_ANIM_TAG, "file %u unplayable (bad header/size)", (unsigned)file_id);
+        return;
+    }
+
     sys_logi(APP_ANIM_TAG, "start anim file=%u frames=%u mode=%s", (unsigned)file_id,
              (unsigned)m_frame_count, (m_anim.play_mode == APP_ANIM_PLAY_SEQ) ? "seq" : "single");
     service_film_render_frame(file_id, 0);
@@ -264,6 +272,14 @@ static const char *app_animation_enter_block_reason(void)
     {
         return "NO FILM IN /sdcard/animation";
     }
+
+    /* 帧数取不到 = 文件头损坏 / 长度不足：进去也只有空屏，拦在菜单里说明原因。
+       （超大文件不在此列：装不进 PSRAM 的会自动按帧从 SD 流式播放） */
+    uint32_t id = (m_anim.file_id < service_file_get_count()) ? m_anim.file_id : 0;
+    if(service_film_get_frame_count(id) == 0)
+    {
+        return "ANIM FILE UNREADABLE";
+    }
     return NULL;
 }
 
@@ -292,6 +308,10 @@ static void app_animation_on_enter(void)
 
 static void app_animation_on_exit(void)
 {
+    /* 丢掉排队中的帧并等当前帧落屏，再让框架去画新页面：
+       否则这些帧会在切页之后继续刷屏、把主菜单覆盖掉；
+       正在上屏的那一帧也会落在新页面之后（表现为"按返回没反应"） */
+    service_film_cancel_pending();
     sys_logi(APP_ANIM_TAG, "exit animation app");
 }
 
@@ -323,6 +343,13 @@ static void app_animation_on_tick(void)
         return;
     }
 
+    /* 上一帧还没上屏：本 tick 不推进，也不累计时间。
+       EPD 单帧刷新远慢于 frame_ms，无此流控会以 tick 速率堆渲染请求 */
+    if(service_film_is_busy())
+    {
+        return;
+    }
+
     /* 帧分频：累计满 frame_ms 才推进一帧 */
     m_frame_acc_ms += APP_ANIM_TICK_MS;
     if(m_frame_acc_ms < m_anim.frame_ms)
@@ -339,8 +366,9 @@ static void app_animation_on_tick(void)
         return;
     }
 
-    /* 一轮播完。单帧静态图在"单文件循环"下没有下一帧，无需重复刷屏 */
-    if(m_frame_count <= 1 && m_anim.play_mode == APP_ANIM_PLAY_SINGLE)
+    /* 一轮播完。没有可推进的下一帧（单帧 + 单文件）时直接停住：
+       否则"按顺序播放 + 只有一个文件"会每 100ms 重刷一次同一帧（整屏闪） */
+    if(m_frame_count <= 1 && service_file_get_count() <= 1)
     {
         return;
     }

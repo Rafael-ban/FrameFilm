@@ -84,12 +84,31 @@ extern void service_film_display(uint32_t file_id);
 extern void service_film_render_frame(uint32_t file_id, uint32_t frame_idx);
 
 /**
+ * @brief 是否已有按帧渲染请求排队或正在上屏
+ *
+ * 供"按帧推屏"的 app（动图）做流控：面板刷新慢于推送节奏时，要等上一帧
+ * 落屏再推下一帧，否则请求会堆积（退出后仍在刷屏，队列满还会阻塞调用任务）。
+ *
+ * @return int 1:忙（应等待）, 0:空闲
+ */
+extern int service_film_is_busy(void);
+
+/**
+ * @brief 丢弃尚未处理的渲染请求，并等当前正在上屏的那一帧画完
+ *
+ * "按帧推屏"的 app 退出时调用（见 app_entry_t.on_exit）：不丢弃的话，队列里
+ * 排队的帧会在切页之后继续刷屏、把新页面覆盖掉。内部最多等待 3s。
+ */
+extern void service_film_cancel_pending(void);
+
+/**
  * @brief 获取文件帧数
  *
  * 读取文件头 偏移 0x0A（小端）。0/1 视为单帧，>1 为多帧动图。
+ * 只读文件头，不会触发整份加载（可在 app 任务调用）。
  *
  * @param file_id 文件ID
- * @return uint32_t 帧数（至少 1）
+ * @return uint32_t 帧数（≥1）；文件读不出来/格式未知/长度不足时返回 0
  */
 extern uint32_t service_film_get_frame_count(uint32_t file_id);
 

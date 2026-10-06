@@ -25,6 +25,16 @@ extern "C" {
 #define FILE_LOAD_STATE_NONE        (0)
 #define FILE_LOAD_STATE_LOADING     (1)
 #define FILE_LOAD_STATE_DONE        (2)
+#define FILE_LOAD_STATE_FAILED      (3)   // 加载失败（过大/读失败）：与 NONE(未请求) 区分，调用方据此停止重试
+
+/* 单文件"整份读进 PSRAM"的尺寸上限（file_load_event 一次性 malloc 整文件）。
+   超过它必然分配失败，并记录为 FILE_LOAD_STATE_FAILED；上层（service_film）
+   据此改走"按帧从 SD 读"的流式路径，所以大文件仍能播放，只是每帧多一次读卡。
+   实测运行时最大连续 PSRAM 块约 1.75MB，这里留出余量。 */
+#define SERVICE_FILE_PSRAM_MAX_BYTES    (1536 * 1024)
+
+/* 无文件时用这个值表示"没有失败记录" */
+#define FILE_ID_NONE                (0xFFFFFFFFu)
 
 /*********************************************************************
 * TYPEDEFS
@@ -255,6 +265,17 @@ extern uint8_t service_file_get_load_complete(void);
  * @return uint32_t 文件大小
  */
 extern uint32_t service_file_get_size(uint32_t file_id);
+
+/**
+ * @brief 指定文件是否已判定"加载失败"
+ *
+ * 加载失败后（文件过大、读失败）不重复发起加载：否则每次调用都会空等加载超时，
+ * 表现为界面卡住、按键无响应。任何一次新的加载请求都会清掉失败记录。
+ *
+ * @param file_id 文件ID
+ * @return int 1:该文件已判定失败, 0:否
+ */
+extern int service_file_is_load_failed(uint32_t file_id);
 
 /**
  * @brief 删除文件

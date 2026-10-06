@@ -77,6 +77,7 @@ typedef struct {
     uint32_t current_file_id; // 当前加载的文件ID
     uint8_t* psram_buffer;   // PSRAM缓冲区
     uint8_t load_complete;   // 文件加载完成状态
+    uint32_t failed_file_id; // 最近一次"判定加载失败"的文件ID（FILE_ID_NONE 表示无）
     uint32_t buffer_size;    // 缓冲区大小
     uint8_t sd_mounted;      // SD卡挂载状态
     FILE* save_file_handle;  // 文件保存句柄
@@ -157,6 +158,7 @@ void service_file_init(void)
     m_file_state.buffer_size = 0;
     m_file_state.sd_mounted = 0;
     m_file_state.load_complete = FILE_LOAD_STATE_NONE;
+    m_file_state.failed_file_id = FILE_ID_NONE;
     m_file_state.save_file_handle = NULL;
     m_file_state.save_file_size = 0;
     m_file_state.save_written = 0;
@@ -221,6 +223,7 @@ void service_file_set_dir(const char *dir)
     m_file_state.file_count = 0;
     m_file_state.current_file_id = 0;
     m_file_state.load_complete = FILE_LOAD_STATE_NONE;
+    m_file_state.failed_file_id = FILE_ID_NONE;   // 换目录：失败记录一并作废
     /* 必须在锁内置零：若正在进行的旧刷新在锁外结束时把标志置 1，
        set_dir_sync 会误判新目录列表已就绪而立即返回空 count */
     m_list_ready = 0;
@@ -796,13 +799,15 @@ static void file_load_event(uint32_t file_id)
         return;
     }
 
-    // 进入加载状态
+    // 进入加载状态；同时清掉上一次的失败记录（本次加载会重新判定）
     m_file_state.load_complete = FILE_LOAD_STATE_LOADING;
+    m_file_state.failed_file_id = FILE_ID_NONE;
 
     if(file_id >= m_file_state.file_count)
     {
         sys_logw(FILE_TAG, "Invalid file ID: %d", file_id);
-        m_file_state.load_complete = FILE_LOAD_STATE_NONE;
+        m_file_state.load_complete = FILE_LOAD_STATE_FAILED;
+        m_file_state.failed_file_id = file_id;
         return;
     }
 
@@ -818,7 +823,8 @@ static void file_load_event(uint32_t file_id)
     if(file == NULL)
     {
         sys_loge(FILE_TAG, "Open file failed: %s", filepath);
-        m_file_state.load_complete = FILE_LOAD_STATE_NONE;
+        m_file_state.load_complete = FILE_LOAD_STATE_FAILED;
+        m_file_state.failed_file_id = file_id;
         return;
     }
 
@@ -826,6 +832,18 @@ static void file_load_event(uint32_t file_id)
     fseek(file, 0, SEEK_END);
     uint32_t file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
+
+    // 尺寸预检：整份 malloc 必然失败的大文件直接判失败，别去撞堆（撞了也只能报个分配错误）
+    if(file_size > SERVICE_FILE_PSRAM_MAX_BYTES)
+    {
+        sys_loge(FILE_TAG, "File too large to load as a whole: %s size=%u limit=%u",
+                 m_file_state.file_list[file_id].filename, (unsigned)file_size,
+                 (unsigned)SERVICE_FILE_PSRAM_MAX_BYTES);
+        fclose(file);
+        m_file_state.load_complete = FILE_LOAD_STATE_FAILED;
+        m_file_state.failed_file_id = file_id;
+        return;
+    }
 
     // 分配PSRAM缓冲区
     m_file_state.psram_buffer = (uint8_t*)heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM);
@@ -838,7 +856,8 @@ static void file_load_event(uint32_t file_id)
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
         fclose(file);
-        m_file_state.load_complete = FILE_LOAD_STATE_NONE;
+        m_file_state.load_complete = FILE_LOAD_STATE_FAILED;
+        m_file_state.failed_file_id = file_id;
         return;
     }
 
@@ -849,7 +868,8 @@ static void file_load_event(uint32_t file_id)
         sys_loge(FILE_TAG, "Read file failed");
         file_free_buffer();
         fclose(file);
-        m_file_state.load_complete = FILE_LOAD_STATE_NONE;
+        m_file_state.load_complete = FILE_LOAD_STATE_FAILED;
+        m_file_state.failed_file_id = file_id;
         return;
     }
 
@@ -862,6 +882,12 @@ static void file_load_event(uint32_t file_id)
 
     // 加载完成
     m_file_state.load_complete = FILE_LOAD_STATE_DONE;
+}
+
+int service_file_is_load_failed(uint32_t file_id)
+{
+    return (m_file_state.load_complete == FILE_LOAD_STATE_FAILED &&
+            m_file_state.failed_file_id == file_id) ? 1 : 0;
 }
 
 static void file_load_next_event(void)
@@ -898,8 +924,9 @@ int service_file_load(uint32_t file_id)
         return -1;
     }
     
-    // 清空加载状态
+    // 清空加载状态（含失败记录：显式请求加载即视为"重新试一次"）
     m_file_state.load_complete = FILE_LOAD_STATE_NONE;
+    m_file_state.failed_file_id = FILE_ID_NONE;
 
     file_msg_t msg;
     msg.ID = MSG_FILE_LOAD;
@@ -912,6 +939,7 @@ void service_file_load_next(void)
 {
     // 清空加载状态
     m_file_state.load_complete = FILE_LOAD_STATE_NONE;
+    m_file_state.failed_file_id = FILE_ID_NONE;
 
     file_msg_t msg;
     msg.ID = MSG_FILE_LOAD_NEXT;
