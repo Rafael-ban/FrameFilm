@@ -1421,7 +1421,7 @@ void hal_epd_display_mono(const unsigned char *mono_bitmap)
     }
 
     epd_spectra_mono_display(mono_bitmap, false);
-    sys_logi(EPD_TAG, "Display mono (B/W fast refresh) completed");
+    sys_logd(EPD_TAG, "Display mono (B/W fast refresh) completed");
 }
 
 uint32_t hal_epd_get_capabilities(void)
