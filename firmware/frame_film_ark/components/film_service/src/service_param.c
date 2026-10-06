@@ -95,6 +95,13 @@ ServiceParam_Def_t g_service_param = {0};
 void service_param_init(void)
 {
     nvs_init();
+    /* 旧版 AUTO(2) 会在运行 20 秒后熄灯；保留其它已存参数，仅迁移 LED 值。 */
+    if(g_service_param.sys.led_mode == SERVICE_LED_MODE_AUTO)
+    {
+        g_service_param.sys.led_mode = SERVICE_LED_MODE_ALWAYS;
+        service_param_save();
+        sys_logi("param", "LED mode migrated: AUTO -> ALWAYS");
+    }
     service_param_ensure_device_id();
 }
 
@@ -158,9 +165,7 @@ static void service_param_set_default(void)
     /* 时区默认 UTC（= 改动前的行为）。想默认东八区就把它改成 +480。
        注意 localtime_r 依赖 TZ 环境变量，光设这个字段不生效 —— 由 service_time 应用。 */
     g_service_param.sys.tz_min = 0;
-    /* LED 默认"自动"：有操作时呼吸、闲置后熄灭（冰箱上长时间亮着很扰人）。
-       想默认常亮改成 SERVICE_LED_MODE_ALWAYS 即可。 */
-    g_service_param.sys.led_mode = SERVICE_LED_MODE_AUTO;
+    g_service_param.sys.led_mode = SERVICE_LED_MODE_ALWAYS;
 
     g_service_param.sleep.sleep_mode = 1;  // 休眠模式默认开启
     g_service_param.sleep.sleep_auto = 0;  // 自动唤醒默认关闭

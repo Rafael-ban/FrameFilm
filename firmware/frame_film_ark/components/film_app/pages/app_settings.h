@@ -52,7 +52,7 @@ typedef struct {
     uint8_t sleep_auto;     // 0/1
     uint8_t wifi_on;        // 0/1
     uint8_t bt_on;          // 0/1
-    uint8_t led_mode_sel;   // LED 模式候选下标（0=ALWAYS 1=OFF 2=AUTO）
+    uint8_t led_mode_sel;   // LED 模式候选下标（0=ALWAYS 1=OFF）
     uint8_t wake_sel;       // WAKE INTERVAL 候选下标
     uint8_t hb_sel;         // HEARTBEAT 候选下标
     uint8_t boot_page_sel;  // BOOT PAGE 候选下标（0=SHOW 1=SKIP）

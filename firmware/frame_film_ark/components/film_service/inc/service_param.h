@@ -76,8 +76,8 @@ typedef struct
    候选顺序即设置页候选表顺序（"LED" 行），改这里要同步 app_settings.c。 */
 #define SERVICE_LED_MODE_ALWAYS    (0)   // 常亮：一直呼吸
 #define SERVICE_LED_MODE_OFF       (1)   // 关闭：不亮
-#define SERVICE_LED_MODE_AUTO      (2)   // 自动：闲置一段时间（见 service_monitor 的 MONITOR_LED_AUTO_OFF_SEC）后熄灭
-#define SERVICE_LED_MODE_NUM       (3)
+#define SERVICE_LED_MODE_AUTO      (2)   // 旧 NVS 值，仅用于迁移到 ALWAYS，不再提供设置选项
+#define SERVICE_LED_MODE_NUM       (2)
 
 typedef struct
 {

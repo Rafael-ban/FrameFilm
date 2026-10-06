@@ -86,7 +86,7 @@ static const uint16_t HB_OPTS_SEC[HB_OPT_NUM] = {
 /* ---- LED 模式（下标 == 落盘值，与 service_param.h 的 SERVICE_LED_MODE_* 同序）---- */
 #define LED_OPT_NUM         (SERVICE_LED_MODE_NUM)
 static const char *const LED_OPTS[LED_OPT_NUM] = {
-    "ALWAYS", "OFF", "AUTO"                      // 常亮 / 关闭 / 闲置自动熄灭
+    "ALWAYS", "OFF"                               // 持续呼吸 / 关闭
 };
 
 /* ---- 开机行为（BOOT PAGE / START APP）----
