@@ -10,6 +10,7 @@
     <link id="ark-theme-sheet" rel="stylesheet" href="css/ark-theme.css">
     <!-- 动画工坊样式（独立页） -->
     <link rel="stylesheet" href="css/animation.css">
+    <link rel="stylesheet" href="css/ark-controls.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&family=Baloo+2:wght@400..800&family=Noto+Sans+SC:wght@400..900&display=swap" rel="stylesheet">
@@ -117,7 +118,11 @@
                     <button id="usb-button" class="secondary-button">
                         <svg class="ic" viewBox="0 0 24 24"><use href="#i-usb"/></svg>USB 连接
                     </button>
+                    <button id="ark-reconnect-button" class="secondary-button" type="button" disabled>重连上次 Ark</button>
                 </div>
+                <p class="field-hint">Ark 通过蓝牙连接；CH343 USB 接口用于供电和固件调试，不能用这里的 USB 连接传图。</p>
+                <p id="ark-operation-status" class="field-hint" role="status" aria-live="polite">未连接。可以先在“通行证”中编辑并保存草稿。</p>
+                <button id="ark-operation-cancel" data-ark-cancel class="secondary-button" type="button" hidden>取消当前操作</button>
             </div>
 
             <div class="card">
@@ -128,7 +133,7 @@
                 <div id="device-list" class="device-list"></div>
                 <div id="bluetooth-info" class="info">
                     <p>点击扫描按钮开始搜索 FrameFilm 设备</p>
-                    <p class="device-hint">支持 FrameFilm、FrameFilm Pro、FrameFilm Max 和 FrameFilm Dock</p>
+                    <p class="device-hint">支持 FrameFilm、Pro、Max、Ark（含自定义名称）和 Dock</p>
                 </div>
             </div>
 
@@ -546,6 +551,10 @@
                     <div id="transfer-status" class="transfer-status">准备传输...</div>
                     <div class="progress-bar"><div id="transfer-progress-bar" class="progress-fill"></div></div>
                     <div id="transfer-progress" class="transfer-progress">0%</div>
+                    <div class="btn-row">
+                        <button id="ark-upload-cancel" data-ark-cancel type="button" class="secondary-button" hidden>取消发送</button>
+                        <button id="ark-upload-retry" type="button" class="secondary-button" hidden>从头重试</button>
+                    </div>
                 </div>
                 <div class="result" id="imageResult"></div>
             </div>
@@ -859,8 +868,40 @@
                 </div>
         </div>
 
+        <!-- ================= Ark 通行证 ================= -->
+        <div id="pass-page" class="page">
+            <div class="card">
+                <div class="card__title">Ark · 个人通行证</div>
+                <p id="ark-pass-connection" class="field-hint" role="status">离线可编辑、预览和导出；读取或发送前请先连接 Ark。</p>
+                <div class="btn-row">
+                    <button type="button" class="secondary-button" id="ark-pass-connect">前往设备连接</button>
+                    <button type="button" class="secondary-button" id="ark-pass-open" data-ark-connected disabled>在设备打开通行证</button>
+                </div>
+            </div>
+            <iframe id="ark-pass-editor" title="Ark 个人通行证编辑器" src="../ark-pass-editor/index.html?embedded=1" loading="lazy"></iframe>
+        </div>
+
         <!-- ================= 设置 ================= -->
         <div id="config-page" class="page">
+            <div class="card" id="ark-system-section" hidden>
+                <div class="card__title">Ark · 系统与传输</div>
+                <p class="field-hint">固定 720 × 480 彩色电子纸，界面纵向显示为 480 × 720。个人资料保存于设备 SD 卡。</p>
+                <div class="btn-row">
+                    <button class="secondary-button" type="button" id="ark-open-settings" data-ark-connected disabled>打开设备系统设置</button>
+                    <button class="secondary-button" type="button" id="ark-open-menu" data-ark-connected disabled>返回设备主菜单</button>
+                </div>
+                <p class="field-hint">中英文、开机画面和启动应用：在设备设置页修改，可使用下方遥控器操作；当前固件未提供网页直接读写接口。</p>
+                <p class="field-hint">主菜单长按确认显示休眠卡；图片等应用内长按仍保留当前画面。关闭自动休眠不会禁用手动休眠。</p>
+                <div class="divider"></div>
+                <div class="card__title">WiFi 直传状态</div>
+                <p class="field-hint">查看或取消手机发起的直传。纯网页不能创建手机的临时 WiFi 网络；本页照片发送仍使用蓝牙。</p>
+                <div id="ark-direct-status" class="status" role="status" aria-live="polite">尚未查询</div>
+                <progress id="ark-direct-progress" max="100" value="0" aria-label="WiFi 直传下载进度"></progress>
+                <div class="btn-row">
+                    <button type="button" class="secondary-button" id="ark-direct-refresh" data-ark-connected disabled>查询直传状态</button>
+                    <button type="button" class="secondary-button" id="ark-direct-cancel" data-ark-connected disabled>取消设备直传</button>
+                </div>
+            </div>
             <div class="card">
                 <div class="card__title">
                     <span class="ic-wrap ic-wrap--lemon"><svg class="ic" viewBox="0 0 24 24"><use href="#i-film"/></svg></span>
@@ -910,7 +951,7 @@
                 <div class="switch-row">
                     <span>
                         <span class="switch-row__label">休眠开关</span>
-                        <span class="switch-row__hint">开启后将在 3 分钟内自动休眠</span>
+                        <span class="switch-row__hint">开启后按固件的空闲策略自动休眠；手动休眠独立于此开关</span>
                     </span>
                     <label class="switch">
                         <input type="checkbox" id="sleep-switch" onchange="toggleSleepSwitch()">
@@ -1004,7 +1045,9 @@
                         <span id="ark-device-name-current">连接后读取</span>
                         <input id="ark-device-name-suffix" type="text" aria-label="Ark 设备名称后缀" autocomplete="off" placeholder="名称后缀">
                         <button class="secondary-button" id="ark-device-name-save" onclick="saveArkDeviceName()">保存名称</button>
+                        <button class="secondary-button" type="button" onclick="loadArkDeviceName()">重新读取</button>
                     </div>
+                    <p class="field-hint"><span id="ark-name-byte-count">0 / 16 字节</span>；中文通常占 3 个字节。</p>
                     <div id="ark-device-name-status" class="switch-row__hint" role="status"></div>
                 </div>
                 <div class="action-item">
@@ -1119,6 +1162,10 @@
             <svg class="ic" viewBox="0 0 24 24"><use href="#i-film-strip"/></svg>
             <span>动画</span>
         </a>
+        <a href="#" class="nav-item" data-page="pass-page">
+            <svg class="ic" viewBox="0 0 24 24"><use href="#i-photo"/></svg>
+            <span>通行证</span>
+        </a>
         <a href="#" class="nav-item" data-page="config-page">
             <svg class="ic" viewBox="0 0 24 24"><use href="#i-gear"/></svg>
             <span>设置</span>
@@ -1164,6 +1211,7 @@
 <script src="js/atkinson_enhanced_lut.js"></script>
 <script src="js/sz_enhanced.js"></script>
 <script src="js/bluetooth.js"></script>
+<script src="js/ark-device.js"></script>
 <script src="js/usb.js"></script>
 <script src="js/keyboard.js"></script>
 <script src="js/convert.js"></script>
@@ -1174,5 +1222,6 @@
 <script src="js/animation.js"></script>
 <script src="js/main.js"></script>
 <script src="js/ark-theme.js"></script>
+<script src="js/ark-controls.js"></script>
 </body>
 </html>

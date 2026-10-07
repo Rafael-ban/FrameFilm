@@ -1,4 +1,9 @@
 :root{color-scheme:light;--ink:#181818;--muted:#666;--line:#d8d8d8;--paper:#fff;--ground:#f1f1ef;--danger:#a52720;font-family:"Noto Sans CJK SC","Microsoft YaHei","PingFang SC",system-ui,sans-serif}
+.embedded-nav,.embedded-connection-hint{display:none}
+body.embedded .masthead,body.embedded #connect,body.embedded .device-name-panel,body.embedded .standalone-connection-hint{display:none}
+body.embedded .embedded-nav{display:block;max-width:1240px;margin:0 auto;padding:16px 24px 0}
+body.embedded .embedded-connection-hint{display:block}
+body.embedded .workspace{padding-top:16px}
 *{box-sizing:border-box}body{margin:0;background:var(--ground);color:var(--ink)}
 .masthead{max-width:1240px;margin:0 auto;padding:34px 24px 28px;border-bottom:2px solid var(--ink)}
 .mastline,.section-head span{font:700 11px/1.4 ui-monospace,Consolas,monospace;letter-spacing:.16em}.mastline{display:flex;justify-content:space-between;gap:12px}

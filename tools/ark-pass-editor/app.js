@@ -9,6 +9,8 @@
   const CH = { start: 0x03, name: 0x00, length: 0x01, data: 0x02, stop: 0x04 };
   const DEVICE_NAME_PREFIX = 'FRAMEFILMARK-';
   const NAME_GET = 0x54, NAME_SET = 0x55;
+  const embedded = new URLSearchParams(location.search).get('embedded') === '1' && window.parent !== window;
+  const getArkDevice = () => embedded ? window.parent.ArkDevice : null;
   const $ = (id) => document.getElementById(id);
   const canvas = $('preview');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -21,6 +23,31 @@
   let valid = false;
   let device = null, characteristic = null, transfer = null, readJob = null, readWaiter = null, nameWaiter = null;
   let nameWriteInProgress = false;
+  let parentState = { connected: false, busy: false, label: '' };
+
+  function deviceAvailable() {
+    if (!embedded) return !!characteristic;
+    const arkDevice = getArkDevice();
+    return !!arkDevice?.connected() && !arkDevice.busy();
+  }
+  function refreshDeviceControls() {
+    const ownJob = !!transfer || !!readJob;
+    $('send').disabled = !valid || !deviceAvailable() || ownJob;
+    $('read-device').disabled = !deviceAvailable() || ownJob;
+    if (embedded) $('cancel').disabled = !ownJob;
+  }
+  function updateParentState(event) {
+    if (!embedded) return;
+    parentState = event?.detail || {
+      connected: !!getArkDevice()?.connected(), busy: !!getArkDevice()?.busy(), label: ''
+    };
+    refreshDeviceControls();
+    if (!transfer && !readJob) {
+      setDeviceStatus(!parentState.connected ? 'Ark 未连接。请返回 ForFilm 连接页连接设备。' :
+        parentState.busy ? `设备正在执行${parentState.label || '其他操作'}，请稍候。` :
+          'Ark 已连接，可以发送或读取资料。');
+    }
+  }
 
   function emptyProfile() {
     return { version: PROFILE_VERSION, codename: '', codenameUnset: false,
@@ -77,7 +104,7 @@
     valid = fields.every((id) => !errors[id]);
     $('download-bin').disabled = !valid || !!transfer || !!readJob;
     $('download-png').disabled = !valid || !!transfer || !!readJob;
-    $('send').disabled = !valid || !characteristic || !!transfer || !!readJob;
+    refreshDeviceControls();
     return valid;
   }
   function draw() {
@@ -249,6 +276,17 @@
     if (!name.startsWith(DEVICE_NAME_PREFIX)) throw new Error('设备返回的名称前缀无效。');
     return name;
   }
+  function parseReadPayload(payload, expectedOffset, count) {
+    if (payload.length < 9 || payload.length > 137) throw new Error('设备返回的读取数据长度无效。');
+    const offset = u32(payload, 1);
+    if (offset !== expectedOffset) throw new Error('设备返回的资料分块偏移无效。');
+    const status = payload[0], total = u32(payload, 5), data = payload.subarray(9);
+    const failures = { 1: '设备尚未配置个人资料。', 2: '设备读取资料失败。', 3: '设备正忙，请稍后重试。', 4: '设备拒绝了读取参数。' };
+    if (status !== 0) throw new Error(failures[status] || `设备返回未知状态 ${status}。`);
+    if (total > 350000 || offset > total || data.length > count || offset + data.length > total ||
+        (offset < total && data.length === 0)) throw new Error('设备返回的资料大小或分块范围无效。');
+    return { offset, total, data: new Uint8Array(data) };
+  }
   function onNotification(event) {
     const value = event.target.value;
     const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
@@ -270,21 +308,11 @@
       return;
     }
     const payload = bytes.subarray(3, bytes.length - 1);
-    if (payload.length < 9 || payload.length > 137) {
-      finishReadWaiter(new Error('设备返回的读取数据长度无效。'));
-      return;
-    }
+    if (payload.length < 9) { finishReadWaiter(new Error('设备返回的读取数据长度无效。')); return; }
     const offset = u32(payload, 1);
     if (offset !== readWaiter.offset) return; // 迟到的上一块；等待当前 offset 的应答。
-    const status = payload[0], total = u32(payload, 5), data = payload.subarray(9);
-    const failures = { 1: '设备尚未配置个人资料。', 2: '设备读取资料失败。', 3: '设备正忙，请稍后重试。', 4: '设备拒绝了读取参数。' };
-    if (status !== 0) { finishReadWaiter(new Error(failures[status] || `设备返回未知状态 ${status}。`)); return; }
-    if (total > 350000 || offset > total || data.length > readWaiter.count || offset + data.length > total ||
-        (offset < total && data.length === 0)) {
-      finishReadWaiter(new Error('设备返回的资料大小或分块范围无效。'));
-      return;
-    }
-    finishReadWaiter(null, { offset, total, data: new Uint8Array(data) });
+    try { finishReadWaiter(null, parseReadPayload(payload, readWaiter.offset, readWaiter.count)); }
+    catch (error) { finishReadWaiter(error); }
   }
   function requestName(channel, suffix = '') {
     if (!characteristic || !device?.gatt?.connected || transfer || readJob || nameWaiter || nameWriteInProgress)
@@ -360,36 +388,47 @@
     });
   }
   async function readFromDevice() {
-    if (!characteristic || transfer || readJob) return;
-    if (!prepareProfileOperation()) return;
+    if (!deviceAvailable() || transfer || readJob) return;
+    if (!embedded && !prepareProfileOperation()) return;
     const job = { cancelled: false }; readJob = job;
     updateNameControls();
     setEditingLocked(true);
-    $('connect').disabled = true; $('send').disabled = true; $('read-device').disabled = true; $('cancel').disabled = false;
+    if (!embedded) $('connect').disabled = true;
+    $('send').disabled = true; $('read-device').disabled = true; $('cancel').disabled = false;
     $('progress').value = 0; setDeviceStatus('正在读取设备上的 profile.json；当前草稿会在完整校验后替换。');
     try {
-      let offset = 0, total = null, data = null;
-      do {
-        const part = await requestReadChunk(offset, 128, job);
-        if (job.cancelled) throw new Error('读取已取消。');
-        if (total === null) { total = part.total; data = new Uint8Array(total); }
-        else if (part.total !== total) throw new Error('设备资料大小在读取期间发生变化，请重试。');
-        data.set(part.data, offset); offset += part.data.length;
-        $('progress').value = total ? Math.round(offset * 100 / total) : 100;
-        setDeviceStatus(`正在读取 profile.json：${offset} / ${total} 字节`);
-      } while (offset < total);
-      const imported = parseProfile(new TextDecoder('utf-8', { fatal: true }).decode(data));
-      const img = await imageFromDataUrl(imported.avatar);
-      if (job.cancelled || readJob !== job || !device?.gatt?.connected) throw new Error('读取已取消或设备已断开。');
-      profile = imported; avatarImage = img; persist(); syncForm();
+      const readAll = async (transportCtx) => {
+        let offset = 0, total = null, data = null;
+        do {
+          const part = transportCtx ? parseReadPayload(
+            await transportCtx.request(0x53, new Uint8Array([...be32(offset), 128]), 7000), offset, 128) :
+            await requestReadChunk(offset, 128, job);
+          if (job.cancelled) throw new Error('读取已取消。');
+          if (total === null) { total = part.total; data = new Uint8Array(total); }
+          else if (part.total !== total) throw new Error('设备资料大小在读取期间发生变化，请重试。');
+          data.set(part.data, offset); offset += part.data.length;
+          $('progress').value = total ? Math.round(offset * 100 / total) : 100;
+          setDeviceStatus(`正在读取 profile.json：${offset} / ${total} 字节`);
+        } while (offset < total);
+        const imported = parseProfile(new TextDecoder('utf-8', { fatal: true }).decode(data));
+        const img = await imageFromDataUrl(imported.avatar);
+        if (job.cancelled || readJob !== job || !(embedded ? getArkDevice()?.connected() : device?.gatt?.connected))
+          throw new Error('读取已取消或设备已断开。');
+        return { imported, img };
+      };
+      const result = embedded ? await getArkDevice().run('读取通行证', readAll) : await readAll(null);
+      if (job.cancelled || readJob !== job || !(embedded ? getArkDevice()?.connected() : device?.gatt?.connected))
+        throw new Error('读取已取消或设备已断开。');
+      profile = result.imported; avatarImage = result.img; persist(); syncForm();
       setDeviceStatus('已从设备读取资料并替换当前草稿。');
     } catch (error) {
       setDeviceStatus(`${job.cancelled ? '读取已取消' : `读取失败：${error.message}`}。当前编辑资料和本地草稿已保留。`);
     } finally {
       if (readWaiter) finishReadWaiter(new Error('读取已结束。'));
-      readJob = null; setEditingLocked(false); $('connect').disabled = false; $('cancel').disabled = true;
-      validate(); $('read-device').disabled = !characteristic;
-      updateNameControls();
+      readJob = null; setEditingLocked(false);
+      if (!embedded) $('connect').disabled = false;
+      $('cancel').disabled = true; validate(); refreshDeviceControls();
+      if (!embedded) updateNameControls();
     }
   }
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -467,34 +506,62 @@
     } finally { $('connect').disabled = false; }
   }
   async function send() {
-    if (!validate() || !characteristic || transfer || readJob) return;
-    if (!prepareProfileOperation()) return;
+    if (!validate() || !deviceAvailable() || transfer || readJob) return;
+    if (!embedded && !prepareProfileOperation()) return;
     const job = { cancelled: false, interrupted: false, binDone: false, jsonDone: false }; transfer = job;
     updateNameControls();
     setEditingLocked(true);
-    $('send').disabled = true; $('read-device').disabled = true; $('connect').disabled = true; $('cancel').disabled = false;
+    $('send').disabled = true; $('read-device').disabled = true;
+    if (!embedded) $('connect').disabled = true;
+    $('cancel').disabled = false;
     $('progress').value = 0;
     const bin = profileBin(), json = jsonBytes(), total = bin.length + json.length;
     try {
       setDeviceStatus('开始发送 profile.bin…');
-      await sendFile('app/pass/profile.bin', bin, job, 0, total);
-      job.binDone = true;
-      setDeviceStatus('profile.bin 已发送；正在发送 profile.json…');
-      await sendFile('app/pass/profile.json', json, job, bin.length, total);
-      job.jsonDone = true;
+      if (embedded) await getArkDevice().run('发送通行证', async (transportCtx) => {
+        const progress = (name, base, length) => (sent) => {
+          $('progress').value = Math.round((base + sent) * 100 / total);
+          setDeviceStatus(`发送 ${name}：${sent} / ${length} 字节`);
+        };
+        await transportCtx.uploadFile('app/pass/profile.bin', bin, progress('profile.bin', 0, bin.length));
+        if (job.cancelled) throw new Error('传输已取消。');
+        job.binDone = true;
+        setDeviceStatus('profile.bin 已发送；正在发送 profile.json…');
+        await transportCtx.uploadFile('app/pass/profile.json', json,
+          progress('profile.json', bin.length, json.length));
+        if (job.cancelled) throw new Error('传输已取消。');
+        job.jsonDone = true;
+      });
+      else {
+        await sendFile('app/pass/profile.bin', bin, job, 0, total);
+        job.binDone = true;
+        setDeviceStatus('profile.bin 已发送；正在发送 profile.json…');
+        await sendFile('app/pass/profile.json', json, job, bin.length, total);
+        job.jsonDone = true;
+      }
       setDeviceStatus('两个文件已发送完成。请在设备上按确认加载；协议不提供保存确认。');
     } catch (error) {
       const prefix = job.cancelled ? '已取消' : `发送中断：${error.message}`;
       setDeviceStatus(transferFailureText(job, prefix));
-      if (device?.gatt?.connected) device.gatt.disconnect();
-      characteristic = null;
+      if (!embedded) {
+        if (device?.gatt?.connected) device.gatt.disconnect();
+        characteristic = null;
+      }
     } finally {
-      transfer = null; setEditingLocked(false); $('cancel').disabled = true; $('connect').disabled = false;
-      validate(); $('read-device').disabled = !characteristic;
-      updateNameControls();
+      transfer = null; setEditingLocked(false); $('cancel').disabled = true;
+      if (!embedded) $('connect').disabled = false;
+      validate(); refreshDeviceControls();
+      if (!embedded) updateNameControls();
     }
   }
   function init() {
+    if (embedded) {
+      document.body.classList.add('embedded');
+      window.parent.addEventListener('ark-device-state', updateParentState);
+      $('back-to-connect').addEventListener('click', () => {
+        window.parent.document.querySelector('[data-page="bluetooth-page"]')?.click();
+      });
+    }
     try {
       const stored = localStorage.getItem(DRAFT_KEY);
       if (stored) profile = parseProfile(stored);
@@ -535,8 +602,10 @@
       if (transfer) transfer.cancelled = true;
       if (readJob) { readJob.cancelled = true; finishReadWaiter(new Error('读取已取消。')); }
       setDeviceStatus('正在取消；断开连接以终止当前操作。');
-      if (device?.gatt?.connected) device.gatt.disconnect();
+      if (embedded) getArkDevice()?.cancel();
+      else if (device?.gatt?.connected) device.gatt.disconnect();
     });
+    if (embedded) updateParentState();
   }
   init();
 })();

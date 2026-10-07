@@ -4,6 +4,7 @@ var PAGE_TITLES = {
     'frame-page': 'Frame 制作',
     'convert-page': '照片转换',
     'anim-page': '动画工坊',
+    'pass-page': '个人通行证',
     'config-page': '设备设置'
 };
 

@@ -8,6 +8,7 @@
   <script src="app.js" defer></script>
 </head>
 <body>
+  <nav class="embedded-nav" aria-label="ForFilm 导航"><button id="back-to-connect" type="button" class="secondary">返回 ForFilm 连接页</button></nav>
   <header class="masthead">
     <div class="mastline"><strong>ARKNIGHTS</strong><span>个人档案 — 01</span></div>
     <h1>个人通行证</h1>
@@ -57,7 +58,8 @@
       <p id="file-status" class="status" role="status"></p>
 
       <div class="section-head actions-head"><span>03 / 设备连接</span><h2>发送到 Ark</h2></div>
-      <p class="hint">通过浏览器手动选择 FRAMEFILMARK。发送到固定路径 app/pass/profile.bin 与 app/pass/profile.json；读取会替换当前本地草稿。</p>
+      <p class="hint standalone-connection-hint">通过浏览器手动选择 FRAMEFILMARK。发送到固定路径 app/pass/profile.bin 与 app/pass/profile.json；读取会替换当前本地草稿。</p>
+      <p class="hint embedded-connection-hint">使用 ForFilm 已连接的 Ark。依次发送 profile.bin 和 profile.json；读取成功后才会替换当前本地草稿。</p>
       <div class="actions">
         <button id="connect" type="button" class="secondary">连接 Ark</button>
         <button id="send" type="button" class="primary" disabled>发送到设备</button>

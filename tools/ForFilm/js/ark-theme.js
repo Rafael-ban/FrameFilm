@@ -1,4 +1,4 @@
-// ForFilm · ARK 通行证版皮肤（终末地视觉语言）
+// ForFilm · Ark 通行证版皮肤（罗德岛品牌，沿用现有布局）
 // ------------------------------------------------------------
 // 默认：ForFilm 打开是现有「贴纸玩具」界面，什么都不做。
 // 触发：连接通行证版（currentDeviceType === 'FRAMEFILMARK'）后，
@@ -75,6 +75,7 @@
         'Frame 制作': 'CAPTURE',
         '照片转换': 'PIPELINE',
         '动画工坊': 'MOTION',
+        '个人通行证': 'PROFILE',
         '设备设置': 'SYSTEM'
     };
     // 页头标题用短名（对齐设计稿的 [ Frame ] / [ Film ]，而不是原页面全名）
@@ -83,6 +84,7 @@
         'Frame 制作': 'Frame',
         '照片转换': 'Film',
         '动画工坊': '动画',
+        '个人通行证': '通行证',
         '设备设置': '设置'
     };
 
@@ -131,7 +133,7 @@
 
             var brand = document.createElement('div');
             brand.className = 'ark-brand';
-            brand.innerHTML = '<svg class="mk" viewBox="0 0 214 233"><use href="#ark-ef-logo"/></svg>'
+            brand.innerHTML = '<img class="mk" src="../ui-assets/boot_logo_mono.png" alt="罗德岛">'
                             + '<span class="nm">FRAMEFILM</span>'
                             + '<span class="ark-tag">ARK</span>';
             brandrow.appendChild(brand);
@@ -178,7 +180,7 @@
                 var band = document.createElement('div');
                 band.className = 'ark-band';
                 band.innerHTML = '<svg class="tri" viewBox="0 0 31 28"><use href="#ark-ef-tri-y"/></svg>'
-                               + '<span>ARKNIGHTS · ENDFIELD</span>'
+                               + '<span>ARKNIGHTS · RHODES ISLAND</span>'
                                + '<span class="r">ARK</span>';
                 pages[i].insertBefore(band, pages[i].firstChild);
             }
@@ -364,13 +366,13 @@
             '<div class="ark-loader__bg"></div>' +
             '<div class="ark-loader__bar"><i></i></div>' +
             '<div class="ark-loader__center">' +
-                '<svg class="lg" viewBox="0 0 214 233"><use href="#ark-ef-logo"/></svg>' +
+                '<img class="lg" src="../ui-assets/boot_logo_mono.png" alt="罗德岛">' +
                 '<div class="nm">FRAMEFILM</div>' +
                 '<div class="sub">// ARK EDITION</div>' +
                 '<div class="dv"></div>' +
                 '<div class="ark-loader__slogrow">' +
                     '<svg class="tris" viewBox="0 0 23 21"><use href="#ark-ef-tris"/></svg>' +
-                    '<span>OVER THE FRONTIER / INTO THE FRONT</span>' +
+                    '<span>PRTS · RHODES ISLAND TERMINAL</span>' +
                 '</div>' +
             '</div>' +
             '<div class="ark-loader__pct">' +
