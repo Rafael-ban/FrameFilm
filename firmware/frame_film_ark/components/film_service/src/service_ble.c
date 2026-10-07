@@ -988,13 +988,8 @@ static void ble_cmd_process(ble_cmd_t *cmd)
         case BLE_FILM_TRANS_CH_CTRL_SLEEPONOFF_GET : // 休眠模式开关查询
         {
             sys_logi(BEL_SERVICE_TAG, "Sleep mode: %s", g_service_param.sleep.sleep_mode ? "ON" : "OFF");
-            uint8_t resp_buf[6];
-            resp_buf[0] = BLE_CMD_HEAD;
-            resp_buf[1] = BLE_FILM_TRANS_CH_CTRL_SLEEPONOFF_GET;
-            resp_buf[2] = 1;
-            resp_buf[3] = g_service_param.sleep.sleep_mode & 0xFF;
-            resp_buf[4] = ble_checksum(resp_buf, 4);
-            service_ble_msg_gatts_data_send(resp_buf, sizeof(resp_buf), MSG_BLE_CH1_OUT_DATA);
+            uint8_t mode = g_service_param.sleep.sleep_mode;
+            service_ble_send_resp(cmd->ch, &mode, 1);
             break;
         }
         case BLE_FILM_TRANS_CH_CTRL_SLEEPMODE : // 定时唤醒开关
@@ -1011,13 +1006,8 @@ static void ble_cmd_process(ble_cmd_t *cmd)
         case BLE_FILM_TRANS_CH_CTRL_SLEEPMODE_GET : // 定时唤醒开关查询
         {
             sys_logi(BEL_SERVICE_TAG, "Auto wake: %s", g_service_param.sleep.sleep_auto ? "ON" : "OFF");
-            uint8_t resp_buf[6];
-            resp_buf[0] = BLE_CMD_HEAD;
-            resp_buf[1] = BLE_FILM_TRANS_CH_CTRL_SLEEPMODE_GET;
-            resp_buf[2] = 1;
-            resp_buf[3] = g_service_param.sleep.sleep_auto & 0xFF;
-            resp_buf[4] = ble_checksum(resp_buf, 4);
-            service_ble_msg_gatts_data_send(resp_buf, sizeof(resp_buf), MSG_BLE_CH1_OUT_DATA);
+            uint8_t auto_wake = g_service_param.sleep.sleep_auto;
+            service_ble_send_resp(cmd->ch, &auto_wake, 1);
             break;
         }
         case BLE_FILM_TRANS_CH_CTRL_SLEEPMODE_TIME : // 定时唤醒时间（单位分钟）
@@ -1037,14 +1027,11 @@ static void ble_cmd_process(ble_cmd_t *cmd)
         case BLE_FILM_TRANS_CH_CTRL_SLEEPMODE_TIME_GET : // 定时唤醒时间查询（单位分钟）
         {
             sys_logi(BEL_SERVICE_TAG, "Sleep wake time: %d min", g_service_param.sleep.sleep_time);
-            uint8_t resp_buf[7];
-            resp_buf[0] = BLE_CMD_HEAD;
-            resp_buf[1] = BLE_FILM_TRANS_CH_CTRL_SLEEPMODE_TIME_GET;
-            resp_buf[2] = 2;
-            resp_buf[3] = (g_service_param.sleep.sleep_time >> 8) & 0xFF;
-            resp_buf[4] = g_service_param.sleep.sleep_time & 0xFF;
-            resp_buf[5] = ble_checksum(resp_buf, 5);
-            service_ble_msg_gatts_data_send(resp_buf, sizeof(resp_buf), MSG_BLE_CH1_OUT_DATA);
+            uint8_t time_min[2] = {
+                (uint8_t)(g_service_param.sleep.sleep_time >> 8),
+                (uint8_t)g_service_param.sleep.sleep_time,
+            };
+            service_ble_send_resp(cmd->ch, time_min, sizeof(time_min));
             break;
         }
         case BLE_FILM_TRANS_CH_CTRL_SDRESET : // SD卡格式化

@@ -30,7 +30,6 @@
  */
 #include "esp_sleep.h"
 #include "driver/gpio.h"
-#include "driver/rtc_io.h"
 #include "esp_pm.h"
 
 #include "sys_log.h"
@@ -160,8 +159,7 @@ void hal_pwr_enter_sleep(void)
 
     sys_logi(PWR_TAG, "Configured wakeup source: GPIO %d, level %d", WAKEUP_GPIO_NUM, WAKEUP_GPIO_LEVEL);
 
-    // 唤醒脚高阻态：断开数字 I/O 缓冲器减少漏电
-    rtc_gpio_isolate(WAKEUP_GPIO_NUM);
+    // GPIO5 是 ext0 唤醒输入；隔离并 hold 它会使按键无法唤醒。
 
     esp_deep_sleep_start();
 }
