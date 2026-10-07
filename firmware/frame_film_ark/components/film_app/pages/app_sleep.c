@@ -44,6 +44,7 @@
 #include "ui_fonts.h"
 #include "ui_ops.h"
 #include "app_shell.h"
+#include "app_language.h"
 #include "app_manager.h"
 #include "app_sleep.h"
 
@@ -154,21 +155,21 @@ static void sleep_foot_text(char *buf)
 
     if(!m_auto_on)
     {
-        snprintf(buf, SP_FOOT_BUF_LEN, "定时唤醒已关闭");
+        snprintf(buf, SP_FOOT_BUF_LEN, "%s", app_text("定时唤醒已关闭", "AUTO WAKE OFF"));
         return;
     }
 
     wake = time(NULL) + (time_t)m_minutes * 60;
     if(localtime_r(&wake, &tmv) == NULL)
     {
-        snprintf(buf, SP_FOOT_BUF_LEN, "定时唤醒 --:--");
+        snprintf(buf, SP_FOOT_BUF_LEN, "%s", app_text("定时唤醒 --:--", "AUTO WAKE --:--"));
         return;
     }
 
     /* 收敛到窄类型：GCC 按 int 全域推演 %02u 会判为可能截断（本项目 -Wformat-truncation 是错误级） */
     hour   = (unsigned)tmv.tm_hour & 0xFFu;
     minute = (unsigned)tmv.tm_min  & 0xFFu;
-    snprintf(buf, SP_FOOT_BUF_LEN, "定时唤醒 %02u:%02u", hour, minute);
+    snprintf(buf, SP_FOOT_BUF_LEN, app_text("定时唤醒 %02u:%02u", "AUTO WAKE %02u:%02u"), hour, minute);
 }
 
 static void sleep_ui_create(lv_obj_t *root)
@@ -190,7 +191,7 @@ static void sleep_ui_create(lv_obj_t *root)
     lv_obj_set_style_text_font(o, &ui_font_36, LV_PART_MAIN);
     lv_obj_set_style_text_color(o, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(o, SP_WORD_LS, LV_PART_MAIN);
-    lv_label_set_text(o, "已休眠");
+    lv_label_set_text(o, app_text("已休眠", "STANDBY"));
     lv_obj_align(o, LV_ALIGN_TOP_MID, SP_WORD_LS / 2, SP_WORD_Y);
 
     sleep_rule(root, SP_RULE2_Y);
@@ -200,7 +201,7 @@ static void sleep_ui_create(lv_obj_t *root)
     lv_obj_set_style_text_font(o, &ui_font_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(o, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(o, SP_MICRO_LS, LV_PART_MAIN);
-    lv_label_set_text(o, "按确认键唤醒");
+    lv_label_set_text(o, app_text("按确认键唤醒", "PRESS ENTER TO WAKE"));
     lv_obj_align(o, LV_ALIGN_TOP_MID, SP_MICRO_LS / 2, SP_WAKE_Y);
 
     /* ---- 页脚：锚在屏幕底边，不参与居中构图 ---- */

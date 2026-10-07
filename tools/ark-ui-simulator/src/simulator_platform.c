@@ -32,7 +32,7 @@ static lv_obj_t *root;
 static const app_ui_ops_t *current_ops;
 static const app_entry_t *current_entry;
 static int boot_done;
-static app_boot_cfg_t boot_cfg = {APP_BOOT_PAGE_SHOW, APP_START_MENU};
+static app_boot_cfg_t boot_cfg = {APP_BOOT_PAGE_SHOW, APP_START_MENU, APP_LANGUAGE_ZH_CN};
 
 ServiceParam_Def_t g_service_param = {
     .sys = {.led_mode = SERVICE_LED_MODE_ALWAYS},
@@ -117,6 +117,11 @@ const app_boot_cfg_t *app_boot_cfg_get(void) { return &boot_cfg; }
 void app_boot_cfg_set(uint8_t boot_page, uint8_t start_app)
 {
     boot_cfg.boot_page = boot_page; boot_cfg.start_app = start_app;
+}
+uint8_t app_language_get(void) { return boot_cfg.language; }
+void app_language_set(uint8_t language)
+{
+    if(language <= APP_LANGUAGE_EN) boot_cfg.language = language;
 }
 
 uint8_t app_manager_param_get(uint8_t app_id, uint8_t *out, uint8_t max)

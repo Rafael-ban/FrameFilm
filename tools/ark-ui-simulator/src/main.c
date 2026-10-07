@@ -10,6 +10,7 @@
 #include "app_pass.h"
 #include "app_clock.h"
 #include "app_interface.h"
+#include "app_boot_cfg.h"
 #include "simulator.h"
 
 static uint8_t menu_sel;
@@ -128,8 +129,15 @@ int main(int argc, char **argv)
         press_key(INPUT_PRESS_SHORT);
         simulator_process_requests();
         result |= save_frame(display, argv[2], "settings");
+        /* From WIFI, five UP presses reach LANGUAGE in SYSTEM PARAMETERS. */
+        for(int i = 0; i < 5; i++) press_key(INPUT_PRESS_UP);
+        press_key(INPUT_PRESS_SHORT);
+        simulator_process_requests();
+        if(app_language_get() != APP_LANGUAGE_EN) result = -1;
+        result |= save_frame(display, argv[2], "settings-en");
         press_key(INPUT_PRESS_DOUBLE);
         if(menu_sel != 5) result = -1;
+        result |= save_frame(display, argv[2], "menu-en");
         simulator_show(g_app_clock_entry.ui_ops, &g_app_clock_entry);
         result |= save_frame(display, argv[2], "clock");
         press_key(INPUT_PRESS_DOUBLE);

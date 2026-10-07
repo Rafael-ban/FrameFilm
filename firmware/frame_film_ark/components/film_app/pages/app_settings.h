@@ -22,8 +22,8 @@ extern "C" {
 #define SET_KIND_TOGGLE     (2)   // 开关：ENTER 切换
 #define SET_KIND_CYCLE      (3)   // 枚举：ENTER 在候选值间循环
 
-/* 行数：设备信息 7 行 + 参数 6 行 + app 参数 4 行 */
-#define SETTINGS_ROW_NUM    (17)
+/* 行数：设备信息 7 行 + 系统参数 7 行 + app 参数 4 行 */
+#define SETTINGS_ROW_NUM    (18)
 
 /*********************************************************************
 * TYPEDEFS
@@ -57,6 +57,7 @@ typedef struct {
     uint8_t hb_sel;         // HEARTBEAT 候选下标
     uint8_t boot_page_sel;  // BOOT PAGE 候选下标（0=SHOW 1=SKIP）
     uint8_t start_app_sel;  // START APP 候选下标（app_start_t）
+    uint8_t language_sel;   // 0=简体中文 1=English
 
     /* app 参数（IMG PLAY / IMG INTERVAL / ANIM LOOP / ANIM SPEED）
        —— 归属 app 的参数，由 app_manager_param_get 读回、param_set 写回 */

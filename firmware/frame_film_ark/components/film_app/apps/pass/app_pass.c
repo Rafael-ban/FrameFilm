@@ -14,6 +14,7 @@
 #include "ui_assets.h"
 #include "ui_fonts.h"
 #include "app_shell.h"
+#include "app_language.h"
 #include "app_manager.h"
 #include "app_pass.h"
 
@@ -27,6 +28,7 @@
 #define PASS_RULE_W          (240)
 #define PASS_WORD_LS         (8)
 #define PASS_FOOT_HINT       "单击刷新  双击确认退出  长按休眠"
+#define PASS_FOOT_HINT_EN    "OK RELOAD  2X BACK  HOLD SLEEP"
 
 typedef enum {
     PASS_LOAD_OK = 0,
@@ -176,15 +178,15 @@ static void pass_show_result(pass_load_result_t result)
     {
         lv_obj_add_flag(m_empty_panel, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(m_card_img, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(m_result_note, result == PASS_LOAD_OK ? "" : "读取失败，保留当前通行证");
+        lv_label_set_text(m_result_note, result == PASS_LOAD_OK ? "" : app_text("读取失败，保留当前通行证", "Read failed; showing current pass"));
     }
     else
     {
         lv_label_set_text(m_empty_note, result == PASS_LOAD_MISSING ?
-                          "尚未配置资料" : "资料读取失败");
+                          app_text("尚未配置资料", "No profile configured") : app_text("资料读取失败", "Profile read failed"));
         lv_obj_add_flag(m_card_img, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(m_empty_panel, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(m_result_note, "请用网页上传资料后刷新");
+        lv_label_set_text(m_result_note, app_text("请用网页上传资料后刷新", "Upload profile on web, then reload"));
     }
 }
 
@@ -199,7 +201,7 @@ static void pass_ui_create(lv_obj_t *root)
     /* 模拟器单线程直接调 create，没有 app_manager 入页预检。 */
     (void)pass_prepare();
 #endif
-    app_shell_build(root, PASS_FOOT_HINT, "通行证", &m_shell);
+    app_shell_build(root, app_text(PASS_FOOT_HINT, PASS_FOOT_HINT_EN), app_text("通行证", "PASS"), &m_shell);
 
     body = lv_obj_create(root);
     lv_obj_remove_style_all(body);
@@ -223,12 +225,12 @@ static void pass_ui_create(lv_obj_t *root)
     icon = lv_image_create(m_empty_panel);
     src = ui_assets_icon(UI_ICON_PASS);
     if(src != NULL) lv_image_set_src(icon, src);
-    title = pass_label(m_empty_panel, &ui_font_36, lv_color_black(), "通行证");
+    title = pass_label(m_empty_panel, &ui_font_36, lv_color_black(), app_text("通行证", "PASS"));
     lv_obj_set_style_text_letter_space(title, PASS_WORD_LS, LV_PART_MAIN);
     lv_obj_set_style_translate_x(title, PASS_WORD_LS / 2, LV_PART_MAIN);
     pass_rule(m_empty_panel);
-    m_empty_note = pass_label(m_empty_panel, &ui_font_18, lv_color_black(), "尚未配置资料");
-    (void)pass_label(m_empty_panel, &ui_font_14, lv_color_black(), "单击确认刷新");
+    m_empty_note = pass_label(m_empty_panel, &ui_font_18, lv_color_black(), app_text("尚未配置资料", "No profile configured"));
+    (void)pass_label(m_empty_panel, &ui_font_14, lv_color_black(), app_text("单击确认刷新", "Press Enter to reload"));
 
     m_result_note = pass_label(root, &ui_font_14, lv_color_black(), "");
     lv_obj_set_pos(m_result_note, SHELL_BODY_PAD_X, 672);
@@ -273,7 +275,7 @@ static void pass_ui_on_key(input_press_type_t key)
        app_manager_post_ui_msg(APP_UI_REQ_PASS_RELOAD, NULL, 0) != 0)
     {
         sys_logw(APP_PASS_TAG, "reload request queue full");
-        lv_label_set_text(m_result_note, "设备忙，请再按确认重试");
+        lv_label_set_text(m_result_note, app_text("设备忙，请再按确认重试", "Busy; press Enter to retry"));
     }
 }
 

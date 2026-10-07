@@ -29,6 +29,7 @@
  * INCLUDES
  */
 #include <string.h>
+#include <stdatomic.h>
 
 #include "sys_log.h"
 #include "service_param.h"
@@ -45,12 +46,14 @@
  * LOCAL VARIABLES
  */
 static app_boot_cfg_t m_cfg;
+static atomic_uchar m_language;
 
 /* 默认值：显示开机画面 + 落主菜单 —— 与加这两个参数之前的行为完全一致。
    即"不配置就不会有任何变化"，避免升级固件后老设备开机行为突变。 */
 static const app_boot_cfg_t m_cfg_default = {
     .boot_page = APP_BOOT_PAGE_SHOW,
     .start_app = APP_START_MENU,
+    .language = APP_LANGUAGE_ZH_CN,
 };
 
 /*********************************************************************
@@ -77,14 +80,19 @@ static int last_app_valid(void)
 
 void app_boot_cfg_init(void)
 {
+    uint8_t legacy[2];
     memcpy(&m_cfg, &m_cfg_default, sizeof(m_cfg));
 
     if(service_param_app_load(SERVICE_PARAM_APP_ID_BOOT_CFG, &m_cfg,
                               (uint16_t)sizeof(m_cfg), APP_BOOT_CFG_VER) != 0)
     {
-        sys_logw(APP_BOOT_CFG_TAG, "no valid cfg, use default (boot_page=%u start=%u)",
-                 (unsigned)m_cfg_default.boot_page, (unsigned)m_cfg_default.start_app);
-        return;
+        /* v1 was two bytes. Keep both boot choices when adding language. */
+        if(service_param_app_load(SERVICE_PARAM_APP_ID_BOOT_CFG, legacy,
+                                  sizeof(legacy), 1) == 0)
+        {
+            m_cfg.boot_page = legacy[0];
+            m_cfg.start_app = legacy[1];
+        }
     }
 
     /* 值域兜底：NVS 里可能是别的版本写进去的/被写坏的值 */
@@ -96,9 +104,14 @@ void app_boot_cfg_init(void)
     {
         m_cfg.start_app = APP_START_MENU;
     }
+    if(m_cfg.language > APP_LANGUAGE_EN)
+    {
+        m_cfg.language = APP_LANGUAGE_ZH_CN;
+    }
+    atomic_store(&m_language, m_cfg.language);
 
-    sys_logi(APP_BOOT_CFG_TAG, "loaded: boot_page=%u start=%u",
-             (unsigned)m_cfg.boot_page, (unsigned)m_cfg.start_app);
+    sys_logi(APP_BOOT_CFG_TAG, "loaded: boot_page=%u start=%u language=%u",
+             (unsigned)m_cfg.boot_page, (unsigned)m_cfg.start_app, (unsigned)m_cfg.language);
 }
 
 const app_boot_cfg_t *app_boot_cfg_get(void)
@@ -124,8 +137,27 @@ void app_boot_cfg_set(uint8_t boot_page, uint8_t start_app)
     (void)service_param_app_save(SERVICE_PARAM_APP_ID_BOOT_CFG, &m_cfg,
                                 (uint16_t)sizeof(m_cfg), APP_BOOT_CFG_VER);
 
-    sys_logi(APP_BOOT_CFG_TAG, "saved: boot_page=%u start=%u",
-             (unsigned)boot_page, (unsigned)start_app);
+    sys_logi(APP_BOOT_CFG_TAG, "saved: boot_page=%u start=%u language=%u",
+             (unsigned)boot_page, (unsigned)start_app, (unsigned)m_cfg.language);
+}
+
+uint8_t app_language_get(void)
+{
+    return atomic_load(&m_language);
+}
+
+void app_language_set(uint8_t language)
+{
+    if(language > APP_LANGUAGE_EN || m_cfg.language == language)
+    {
+        return;
+    }
+    m_cfg.language = language;
+    atomic_store(&m_language, language);
+    (void)service_param_app_save(SERVICE_PARAM_APP_ID_BOOT_CFG, &m_cfg,
+                                (uint16_t)sizeof(m_cfg), APP_BOOT_CFG_VER);
+    sys_logi(APP_BOOT_CFG_TAG, "saved: boot_page=%u start=%u language=%u",
+             (unsigned)m_cfg.boot_page, (unsigned)m_cfg.start_app, (unsigned)m_cfg.language);
 }
 
 app_id_t app_boot_cfg_resolve_target(void)

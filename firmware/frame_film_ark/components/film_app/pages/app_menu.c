@@ -38,6 +38,7 @@
 #include "ui_ops.h"
 #include "ui_fonts.h"
 #include "app_shell.h"
+#include "app_language.h"
 #include "app_menu.h"
 /*********************************************************************
  * MACROS
@@ -100,6 +101,19 @@ static const menu_item_t MENU_ITEMS[APP_MENU_ENTRY_NUM] = {
     { "动图",   "ANI", "播放多帧画面，支持调整速度",     "连续播放", "设置中调整播放参数", UI_ICON_ANIMATION },
     { "设置",   "SET", "设备信息、连接与系统参数",       "系统管理", "确认键修改当前选项", UI_ICON_SETTINGS },
 };
+static const menu_item_t MENU_ITEMS_EN[APP_MENU_ENTRY_NUM] = {
+    {"IMAGE", "IMG", "SD PHOTO WALL / UP-DOWN PAGING", "DIRECT", "MONO SESSION REBUILD", UI_ICON_IMAGE},
+    {"PASS", "PAS", "PERSONAL PROFILE / ID RECORD", "UI", "ENTER TO RELOAD PROFILE", UI_ICON_PASS},
+    {"TEMPLATE", "TPL", "LIVE PUSH CONTENT / WEATHER, CALENDAR", "DIRECT", "MONO SESSION REBUILD", UI_ICON_TEMPLATE},
+    {"CLOCK", "CLK", "DEVICE TIME / DATE AND WEEKDAY", "UI", "UI PAGE (LOW COST)", UI_ICON_CLOCK},
+    {"ANIMATION", "ANI", "FRAME ANIMATION / ADJUSTABLE RATE", "DIRECT", "MONO SESSION REBUILD", UI_ICON_ANIMATION},
+    {"SETTINGS", "SET", "DEVICE INFO AND SYSTEM PARAMETERS", "UI", "UI PAGE (LOW COST)", UI_ICON_SETTINGS},
+};
+
+static const menu_item_t *menu_item(uint8_t idx)
+{
+    return app_language_get() == APP_LANGUAGE_EN ? &MENU_ITEMS_EN[idx] : &MENU_ITEMS[idx];
+}
 
 /*********************************************************************
  * LOCAL VARIABLES
@@ -162,7 +176,7 @@ static lv_obj_t *menu_rule(lv_obj_t *parent, lv_color_t color)
  */
 static lv_obj_t *menu_make_plate(lv_obj_t *parent, uint8_t idx, int cur)
 {
-    const menu_item_t *it = &MENU_ITEMS[idx];
+    const menu_item_t *it = menu_item(idx);
     lv_color_t fg = cur ? lv_color_white() : lv_color_black();
     lv_obj_t *plate = lv_obj_create(parent);
     lv_obj_t *grp;
@@ -319,13 +333,16 @@ static void menu_notice_set(const void *data, uint8_t len)
         return;
     }
 
-    if(len >= 7 && memcmp(data, "NO FILM", 7) == 0)
-        n = snprintf(buf, sizeof(buf), "%s / 暂无内容", MENU_ITEMS[m_sel].name);
+    if(app_language_get() == APP_LANGUAGE_EN)
+        n = snprintf(buf, sizeof(buf), "%s - %.*s",
+                     menu_item(m_sel)->name, (int)len, (const char *)data);
+    else if(len >= 7 && memcmp(data, "NO FILM", 7) == 0)
+        n = snprintf(buf, sizeof(buf), app_text("%s / 暂无内容", "%s / No content"), menu_item(m_sel)->name);
     else if(len == 20 && memcmp(data, "ANIM FILE UNREADABLE", 20) == 0)
-        n = snprintf(buf, sizeof(buf), "动图文件无法读取");
+        n = snprintf(buf, sizeof(buf), "%s", app_text("动图文件无法读取", "Cannot read animation"));
     else
         n = snprintf(buf, sizeof(buf), "%s - %.*s",
-                     MENU_ITEMS[m_sel].name, (int)len, (const char *)data);
+                     menu_item(m_sel)->name, (int)len, (const char *)data);
     if(n >= sizeof(buf))
     {
         sys_logw(APP_MENU_TAG, "notice truncated (%u chars)", (unsigned)n);
@@ -339,7 +356,7 @@ static void menu_notice_set(const void *data, uint8_t len)
  */
 static void menu_apply_sel(void)
 {
-    const menu_item_t *it = &MENU_ITEMS[m_sel];
+    const menu_item_t *it = menu_item(m_sel);
     uint8_t i;
 
     /* 换了选中项，上一条"进入失败"提示就指向别人了 —— 作废 */
@@ -374,12 +391,19 @@ static void menu_apply_sel(void)
     }
     if(m_panel_line1 != NULL)
     {
-        lv_label_set_text_fmt(m_panel_line1, "%02u  /  %s",
+        lv_label_set_text_fmt(m_panel_line1, app_text("%02u  /  %s", "APP %02u   LAYER %s"),
                               (unsigned)(m_sel + 1), it->layer);
     }
     if(m_panel_line2 != NULL)
     {
-        lv_label_set_text(m_panel_line2, it->entry);
+        if(app_language_get() == APP_LANGUAGE_EN)
+        {
+            lv_label_set_text_fmt(m_panel_line2, "ENTRY %s", it->entry);
+        }
+        else
+        {
+            lv_label_set_text(m_panel_line2, it->entry);
+        }
     }
 
     /* 状态栏顺手刷一次：换选中项本来就要整屏重绘，这次请求不额外付刷新代价。
@@ -406,7 +430,8 @@ static void menu_ui_create(lv_obj_t *root)
     sys_logi(APP_MENU_TAG, "create menu page (%u entries)", (unsigned)APP_MENU_ENTRY_NUM);
 
     /* ============ 外壳：顶部状态栏 + 底部提示行 ============ */
-    app_shell_build(root, "上下选择  确认进入  长按休眠", "菜单", &m_shell);
+    app_shell_build(root, app_text("上下选择  确认进入  长按休眠", "UP/DOWN SELECT   ENTER OPEN   HOLD SLEEP"),
+                    app_text("菜单", "MENU"), &m_shell);
 
     /* ============ 正文：夹在状态栏与提示行之间 ============ */
     body = lv_obj_create(root);
@@ -435,7 +460,8 @@ static void menu_ui_create(lv_obj_t *root)
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 8, LV_PART_MAIN);
-    menu_label(header, &ui_font_18, lv_color_black(), "选择应用");
+    menu_label(header, app_language_get() ? &lv_font_unscii_8 : &ui_font_18,
+               lv_color_black(), app_text("选择应用", "SELECT APPLICATION"));
     {
         /* 中间的弹性横线：宽度全交给 flex 分配（显式给宽度会与分配到的空间叠加而溢出） */
         lv_obj_t *sp = menu_rule(header, lv_color_black());
@@ -506,11 +532,12 @@ static void menu_ui_create(lv_obj_t *root)
         lv_obj_set_style_bg_color(tab, lv_color_black(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(tab, LV_OPA_COVER, LV_PART_MAIN);
         {
-            lv_obj_t *t = menu_label(tab, &ui_font_18, lv_color_white(), "当前");
+            lv_obj_t *t = menu_label(tab, app_language_get() ? &lv_font_unscii_8 : &ui_font_18,
+                                     lv_color_white(), app_text("当前", "ACTIVE"));
 
             lv_obj_center(t);
         }
-        m_name_label = menu_label(row, &ui_font_24, lv_color_black(), "图片");
+        m_name_label = menu_label(row, &ui_font_24, lv_color_black(), app_text("图片", "Image"));
     }
 
     /* ---- 一句话说明 ---- */
@@ -558,7 +585,7 @@ static void menu_ui_create(lv_obj_t *root)
         lv_obj_set_size(tag, NOTICE_TAG_W, NOTICE_TAG_H);
         lv_obj_set_style_bg_color(tag, lv_color_black(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(tag, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_center(menu_label(tag, &ui_font_18, lv_color_white(), "提示"));
+        lv_obj_center(menu_label(tag, &ui_font_18, lv_color_white(), app_text("提示", "FAILED")));
 
         m_notice_label = menu_label(m_notice_row, &ui_font_18, lv_color_black(), "");
     }

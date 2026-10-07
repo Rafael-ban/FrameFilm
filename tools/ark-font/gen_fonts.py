@@ -21,8 +21,8 @@ SIZES = (14, 18, 24, 36)
 # Large fonts only serve these headings. Keep their explicit glyph set small:
 # Ark has two 1900-KiB OTA slots; duplicating every small-text glyph wastes flash.
 LARGE_TEXT = {
-    24: "图片通行证模板时钟动图设置",
-    36: "通行证已休眠",
+    24: "图片通行证模板时钟动图设置IMAGEPASSTEMPLATECLOCKANIMATIONSETTINGS",
+    36: "通行证已休眠PASSSTANDBY",
 }
 
 

@@ -40,6 +40,7 @@
 
 #include "ui_core.h"
 #include "app_shell.h"
+#include "app_language.h"
 #include "ui_fonts.h"
 #include "app_manager.h"
 
@@ -219,6 +220,7 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
     if(out != NULL)
     {
         memset(out, 0, sizeof(*out));
+        out->language = app_language_get();
     }
 
     /* ============ 顶部状态栏：品牌 + 电量 / WiFi / 蓝牙 ============ */
@@ -263,16 +265,16 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
         shell_time_update(out);
     }
     {
-        lv_obj_t *bat = shell_label(status, lv_color_black(), "电量 --%");
+        lv_obj_t *bat = shell_label(status, lv_color_black(), app_text("电量 --%", "BAT --%"));
         lv_obj_t *bat_pip = shell_pip(status);
         lv_obj_t *wifi_label;
         lv_obj_t *wifi_pip;
         lv_obj_t *bt_label;
         lv_obj_t *bt_pip;
 
-        wifi_label = shell_label(status, lv_color_black(), "无线");
+        wifi_label = shell_label(status, lv_color_black(), app_text("无线", "WIFI"));
         wifi_pip = shell_pip(status);
-        bt_label = shell_label(status, lv_color_black(), "蓝牙");
+        bt_label = shell_label(status, lv_color_black(), app_text("蓝牙", "BT"));
         bt_pip = shell_pip(status);
 
         if(out != NULL)
@@ -298,9 +300,31 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
     lv_obj_set_style_border_color(foot, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_flex_flow(foot, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(foot, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    shell_label(foot, lv_color_black(), (hint != NULL) ? hint : "");
+    lv_obj_t *hint_label = shell_label(foot, lv_color_black(), (hint != NULL) ? hint : "");
     shell_spacer(foot);
-    shell_label(foot, lv_color_black(), (page != NULL) ? page : "");
+    lv_obj_t *page_label = shell_label(foot, lv_color_black(), (page != NULL) ? page : "");
+    if(out != NULL)
+    {
+        out->hint_label = hint_label;
+        out->page_label = page_label;
+    }
+}
+
+void app_shell_set_text(app_shell_t *s, const char *hint, const char *page)
+{
+    if(s == NULL) return;
+    if(s->hint_label != NULL) lv_label_set_text(s->hint_label, hint);
+    if(s->page_label != NULL) lv_label_set_text(s->page_label, page);
+    if(s->language != app_language_get())
+    {
+        app_status_t last = s->last_status;
+        uint8_t valid = s->status_valid;
+        s->language = app_language_get();
+        if(s->wifi_label != NULL) lv_label_set_text(s->wifi_label, app_text("无线", "WIFI"));
+        if(s->bt_label != NULL) lv_label_set_text(s->bt_label, app_text("蓝牙", "BT"));
+        s->status_valid = 0;
+        if(valid) app_shell_apply(s, &last);
+    }
 }
 
 void app_shell_request_status(void)
@@ -326,7 +350,7 @@ lv_obj_t *app_shell_brandmark(lv_obj_t *parent)
     lv_obj_set_style_text_align(word, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(word, "RHODES\nISLAND");
     lv_obj_center(word);
-    word = shell_label(mark, lv_color_black(), "罗德岛 · 个人终端");
+    word = shell_label(mark, lv_color_black(), app_text("罗德岛 · 个人终端", "RHODES ISLAND · PERSONAL TERMINAL"));
     lv_obj_align(word, LV_ALIGN_TOP_MID, 0, 224);
     return mark;
 }
@@ -381,7 +405,7 @@ void app_shell_apply(app_shell_t *s, const app_status_t *st)
 
     if(s->bat_label != NULL)
     {
-        lv_label_set_text_fmt(s->bat_label, "电量 %u%%", (unsigned)st->bat_pct);
+        lv_label_set_text_fmt(s->bat_label, app_text("电量 %u%%", "BAT %u%%"), (unsigned)st->bat_pct);
     }
     /* 电量块只有"实心/留空"两态（低电量留空），不参与隐藏逻辑 */
     if(s->bat_pip != NULL)

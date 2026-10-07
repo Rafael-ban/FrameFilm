@@ -61,10 +61,13 @@ typedef struct {
     lv_obj_t *bt_label;     // "BT"
     lv_obj_t *bt_pip;
     lv_obj_t *time_label;   // 居中 "HH:MM"（由 tick 维护）
+    lv_obj_t *hint_label;
+    lv_obj_t *page_label;
 
     /* ---- 以下为内部状态，页面不要写 ---- */
     app_status_t last_status;   // 上次已上屏的数据（用于变更检测，避免无谓全帧刷新）
     uint8_t      status_valid;
+    uint8_t      language;
     char         last_time[6];  // 上次已上屏的 "HH:MM"
     lv_timer_t  *tick;
     app_shell_tick_cb_t tick_cb;
@@ -86,6 +89,7 @@ typedef struct {
  * @param out  输出：状态栏里需要动态刷新的控件（可为 NULL）
  */
 void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_shell_t *out);
+void app_shell_set_text(app_shell_t *s, const char *hint, const char *page);
 
 /**
  * @brief 请求刷新状态栏数据（页面 create 时调用一次即可）

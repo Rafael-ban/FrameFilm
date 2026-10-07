@@ -18,8 +18,10 @@ extern "C" {
 /*********************************************************************
  * MACROS
  */
-/* 布局版本：字段变更时 +1，旧数据自动作废回落默认值 */
-#define APP_BOOT_CFG_VER        (1)
+/* 布局版本：v2 增加语言；读取时兼容 v1 两字节开机配置 */
+#define APP_BOOT_CFG_VER        (2)
+#define APP_LANGUAGE_ZH_CN     (0)
+#define APP_LANGUAGE_EN        (1)
 
 /* BOOT PAGE：上电是否先画开机画面（首帧顺带完成整屏清场） */
 #define APP_BOOT_PAGE_SHOW      (0)     // 显示（默认，与加此参数前的行为一致）
@@ -54,6 +56,7 @@ typedef enum {
 typedef struct {
     uint8_t boot_page;      // APP_BOOT_PAGE_SHOW / SKIP
     uint8_t start_app;      // app_start_t
+    uint8_t language;       // APP_LANGUAGE_ZH_CN / EN
 } app_boot_cfg_t;
 
 /*********************************************************************
@@ -75,6 +78,8 @@ const app_boot_cfg_t *app_boot_cfg_get(void);
  * 调用上下文：app 任务（与其它参数写入同一串行约定）。
  */
 void app_boot_cfg_set(uint8_t boot_page, uint8_t start_app);
+void app_language_set(uint8_t language);
+uint8_t app_language_get(void);
 
 /**
  * @brief 解析 START APP 得到真正要进入的 app
