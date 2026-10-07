@@ -116,6 +116,8 @@ void app_shell_start_tick(app_shell_t *s, app_shell_tick_cb_t cb);
  * 控件上的野指针定时器。
  */
 void app_shell_release(app_shell_t *s);
+/* 罗德岛主题字标（304x272），仅 ui_task 使用；不加载旧终末地徽章。 */
+lv_obj_t *app_shell_brandmark(lv_obj_t *parent);
 
 /**
  * @brief 把状态栏数据落到控件（页面 on_msg 里调用）

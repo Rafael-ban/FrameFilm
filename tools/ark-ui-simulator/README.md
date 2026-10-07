@@ -18,10 +18,21 @@ cmake --build tools/ark-ui-simulator/build -j4
 
 操作：↑/↓ 切换菜单项或设置行；Enter 进入页面、修改设置；双击 Enter 返回菜单并高亮刚离开的应用；按住 Enter 一秒预览休眠卡。数字 1–6 依次直接预览开机、菜单、设置、休眠卡、通行证、时钟。Esc 关闭窗口。图片、模板、动图走固件直绘路径，尚未接入此模拟器。
 
-当前六个页面及状态栏的功能文案已适配中文，保留原版轮播、图标、反白卡片、切角与信息面板；设置页保留原 17 行单页布局。品牌、版本号和硬件标识保留。模拟器始终链接最新页面源码，通行证内容仍是开发中的占位页。
+当前六个页面及状态栏的功能文案已适配中文，保留原版轮播、图标、反白卡片、切角与信息面板；设置页保留原 17 行单页布局。主题为明日方舟本体的罗德岛方向，开机和休眠使用文字标识。模拟器始终链接最新页面源码。
+
+通行证支持读取网页编辑器导出的 `profile.bin`。在 WSL/Linux 中设置环境变量为文件的绝对路径，再启动模拟器：
+
+```sh
+ARK_PASS_PROFILE="$PWD/.output/ark/logs/pass-preview/profile.bin" \
+  ./tools/ark-ui-simulator/build/ark-ui-simulator
+```
+
+上例指向本机验证用样例文件；使用自己的资料时换成实际导出路径。按数字 5 打开通行证，单击 Enter 重新加载同一路径；没有配置文件时显示空状态，加载失败保留当前通行证。主体图必须为 440×608、1bit FFUI，格式见 [`ark-pass-editor`](../ark-pass-editor/README.md)。这模拟的是设备读取显示资源，不模拟蓝牙或 SD 硬件。
 
 模拟器把 LVGL 的内存分配接到桌面 C `malloc`，供快速切页预览；固件使用自己的 ESP-IDF heap 配置。两者的可用内存和分配失败行为不能互推。
 
 使用的是 [LVGL 官方 SDL 桌面驱动](https://docs.lvgl.io/master/integration/pc/sdl.html)。逻辑窗口为 480×720，符合 Ark `ui_conf.h`；实际电子纸仍需上机验证。
 
 本机中文页面版 `--smoke` 已通过：验证菜单选通行证、双击返回后仍选中原图标并再次进入，设置修改、设置及时钟返回索引，以及休眠卡唤醒。截图在项目根目录 `.output/ark/logs/full-cn-preview/`：`boot.bmp`、`menu.bmp`、`menu-return.bmp`、`pass.bmp`、`settings.bmp`、`clock.bmp`、`sleep.bmp`。这些截图验证页面渲染与最小导航，不代表实体屏幕验收。模拟器目前长按统一展示休眠卡，不能据此判断实机 app 内休眠的留屏行为；固件 app 内休眠会保留当前画面。
+
+个人通行证版设置 `ARK_PASS_PROFILE` 后的 `--smoke` 也已通过，包含重载失败时保留旧图与恢复文件后重试，截图在 `.output/ark/logs/pass-device-preview/`，新增 `pass-reload-failed.bmp` 和 `pass-reload-retry.bmp`。

@@ -5,7 +5,7 @@
 本文档定义 FrameFilm 设备与上位机之间的 BLE（蓝牙低功耗）通信协议。协议采用 GATT 方式进行数据传输，支持 FILM 文件传输、OTA 固件升级、设备控制、WiFi 网络配置等功能。
 
 > **同源说明**：两套冰箱贴固件 —— `firmware/frame_film/`（三机型）与 `firmware/frame_film_ark/`（通行证版，单机型）—— 的 BLE 协议**完全同源**：命令值、数据格式与回包结构一致。
-> app 框架与 UI 层（`film_app` + `film_ui`）**只存在于 `frame_film_ark`**；app 通道（`0x45~0x4E`，App 控制 / App 参数 / 时间同步 / 远程按键）也只有 `frame_film_ark` 实现，`frame_film`（三机型）是经典固件、会直接忽略这些命令。
+> app 框架与 UI 层（`film_app` + `film_ui`）**只存在于 `frame_film_ark`**；app 通道（`0x45~0x4E`，App 控制 / App 参数 / 时间同步 / 远程按键）及通行证资料读取 `0x53` 只有 `frame_film_ark` 实现，`frame_film`（三机型）是经典固件、会直接忽略这些命令。
 > 底座固件 `firmware/frame_film_dock/` 在其基础上另有专属通道（见 §3.8 键盘键值），差异以各节标注为准。
 
 ## 2. 协议框架
@@ -264,6 +264,14 @@
 | 0x50 | DIRECT_START | `SSID\0PASSWORD\0URL\0` | 1B：0 接受 / 1 忙 / 2 参数错误 / 3 资源不足 |
 | 0x51 | DIRECT_STATUS | 空 | 11B：state、progress、error、received(u32 BE)、total(u32 BE) |
 | 0x52 | DIRECT_CANCEL | 空 | 1B：0 已接受取消请求（幂等） |
+
+### 3.12 Ark 通行证资料读取 (0x53)
+
+仅 `frame_film_ark` 实现，读取固定的 `/sdcard/app/pass/profile.json`；经典固件和 Dock 不支持。
+
+| 通道 | 命令 | 请求 DATA | 同通道响应 DATA |
+|------|------|-----------|----------------|
+| 0x53 | PROFILE_READ | offset(u32 BE) + count(u8，1–128) | status(1) + offset(u32 BE) + total(u32 BE) + bytes(0–128) |
 
 ## 4. 命令详解
 
@@ -1362,7 +1370,7 @@ SUM  = (0x55 + 0x4E + 0x01 + 0x02) & 0xFF = 0xA6
 
 `DIRECT_START` 的三个字段为 ASCII，各自以 NUL 结尾，不带版本字节或额外尾部数据。SSID 为 1–32 字节，密码最多 63 字节，URL 使用 `http://`，URL 的文件名应为有效且唯一的 `.film` 名称。DATA 总长不得超过 **192 字节**。当前固件的 GATT 特征最大长度为 200，客户端请求 ATT MTU 200，并检查整帧 `DATA长度+4 <= MTU-3`；不足时应报错，不能截断发送。
 
-开始前应排除其他 BLE 文件、OTA、WiFi 下载会话。接受开始仅表示任务已建立。直传期间固件拒绝冲突的文件写入、删除、OTA、重置、重启、格式化、网络配置与下载命令，并返回同通道 1B `1`（忙）；只读查询仍可用。自动休眠在会话中暂缓，手动休眠先请求取消，等待清理后再入睡。BLE 断开也会请求取消。
+开始前应排除其他 BLE 文件、OTA、WiFi 下载会话。接受开始仅表示任务已建立。直传期间固件拒绝冲突的文件写入、删除、OTA、重置、重启、格式化、网络配置与下载命令，并返回同通道 1B `1`（忙）；通行证资料读取返回自己的状态码 `3`（忙），其他只读查询仍可用。自动休眠在会话中暂缓，手动休眠先请求取消，等待清理后再入睡。BLE 断开也会请求取消。
 
 `DIRECT_STATUS` 固定返回 11 字节，多字节值为**大端**，不可直接复制 C 结构体：
 
@@ -1377,6 +1385,22 @@ SUM  = (0x55 + 0x4E + 0x01 + 0x02) & 0xFF = 0xA6
 临时网络凭据只存 RAM，不修改已保存的 WiFi 开关、SSID、密码和 API 地址。文件复用现有 SD 保存事务：中断撤销未提交文件，完成后提交并通知图片播放。成功提交之后仍有 RESTORING 阶段，用于恢复之前的 WiFi 配置和连接状态；恢复失败为 ERROR/error=5。只有 DONE 才表示本次保存及网络恢复成功。终态保留到下一次开始，客户端可约每 800 ms 查询一次。
 
 `DIRECT_CANCEL` 的确认包仅表示已请求取消。客户端应继续查询至 DONE/ERROR/CANCELLED，之后关闭手机 HTTP 服务并释放 GO。已完成提交的文件不因迟到的取消而删除。连接与恢复各最多等待 25 s，HTTP 单次操作超时 5 s、下载循环总限时 120 s；既有 SD 文件任务若卡死，同步保存接口仍可能等待，不能把这些网络超时当作整个会话的绝对上限。
+
+### 4.12 Ark 通行证资料读取（0x53）
+
+请求 `DATA=[offset(4B，大端), count(1B)]`，`count` 必须为 1–128。设备每次只读取固定路径 `/sdcard/app/pass/profile.json`，请求结束即关闭文件；文件最大 350000 字节。资料可以通过现有 FILE_START/FILE_NAME/FILE_LEN/FILE_DATA/FILE_STOP 上传，FILE_NAME 固定用 `app/pass/profile.json`。显式路径上传不会自动刷新页面，回到通行证页或单击确认键刷新。
+
+响应 `DATA=[status(1B), offset(4B，大端), total(4B，大端), bytes(0–128B)]`，`LEN=9+实际读取字节数`。`offset` 回显请求位置，`total` 是已成功取得的文件长度；状态码：
+
+| status | 含义 |
+|--------|------|
+| 0 | 成功；`offset==total` 时为 EOF，bytes 为空 |
+| 1 | 未配置（文件不存在） |
+| 2 | 读取失败（含文件超过 350000B） |
+| 3 | 忙（BLE 文件/OTA 上传或临时 WiFi 直传进行中） |
+| 4 | 参数错误（请求长度、count 或 offset 不合法） |
+
+`offset` 可等于 `total`；大于 `total` 返回状态 4。错误响应没有 bytes；文件尚未打开时 `total=0`。读取整份资料时按响应中的实际 bytes 长度推进 offset，直至 `offset==total`。单帧最大 `137B DATA + 4B 帧头尾 = 141B`，客户端需协商 ATT MTU 至少 144；推荐沿用现有 200 MTU。设备入睡门闸期间同其他普通命令一样不应答。
 
 ## 5. 校验和计算
 
@@ -1538,6 +1562,7 @@ int parse_response(uint8_t* in_buf, int in_len, uint8_t* out_ch, uint8_t* out_da
 
 | 版本 | 日期 | 描述 |
 |------|------|------|
+| 1.12 | 2026-10-07 | Ark 通行证固定资料读取 0x53：分块读取 SD 上的 profile.json，不改变既有上传或其他固件命令 |
 | 1.11 | 2026-10-07 | 新增 Ark 临时 WiFi 直传 0x50–0x52：RAM 网络会话、下载进度、取消与恢复；Android GO 提供临时 HTTP 文件服务 |
 | 1.10 | 2026-09-22 | 新增 §3.10 / §4.10 远程按键注入通道 (0x4E，仅通行证版 `frame_film_ark`)：1B 键值（确认/长按/上/下/双击），设备映射为 HAL 同构输入事件并回显该字节；app_id 表补 `0x06 通行证 pass`（`FULL` 模式注册项 6 → 7） |
 | 1.9 | 2026-09-20 | 新增 §3.9 时间同步通道 (0x4D)：4B 大端 Unix 秒（UTC）+ 2B 大端时区（距 UTC 分钟数，东为正），设备回显同样 6 字节；配套固件新增 `service_time` 模块，时区随 `tz_min` 落盘（`SERVICE_PARAM_VER` 升至 3），时间不落盘 |

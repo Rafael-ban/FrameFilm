@@ -245,7 +245,7 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
         lv_obj_set_style_bg_opa(mark, LV_OPA_COVER, LV_PART_MAIN);
     }
     {
-        lv_obj_t *brand = shell_label(status, lv_color_black(), "ENDFIELD");
+        lv_obj_t *brand = shell_label(status, lv_color_black(), "RHODES ISLAND");
 
         lv_obj_set_style_text_letter_space(brand, 1, LV_PART_MAIN);
     }
@@ -306,6 +306,29 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
 void app_shell_request_status(void)
 {
     (void)app_manager_post_ui_msg(APP_UI_REQ_STATUS_SYNC, NULL, 0);
+}
+
+lv_obj_t *app_shell_brandmark(lv_obj_t *parent)
+{
+    lv_obj_t *mark = lv_obj_create(parent);
+    lv_obj_remove_style_all(mark);
+    lv_obj_set_scrollable(mark, false);
+    lv_obj_set_size(mark, 304, 272);
+    lv_obj_t *band = lv_obj_create(mark);
+    lv_obj_remove_style_all(band);
+    lv_obj_set_pos(band, 0, 54);
+    lv_obj_set_size(band, 304, 150);
+    lv_obj_set_style_bg_color(band, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(band, LV_OPA_COVER, 0);
+    lv_obj_t *word = lv_label_create(band);
+    lv_obj_set_style_text_font(word, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(word, lv_color_white(), 0);
+    lv_obj_set_style_text_align(word, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(word, "RHODES\nISLAND");
+    lv_obj_center(word);
+    word = shell_label(mark, lv_color_black(), "罗德岛 · 个人终端");
+    lv_obj_align(word, LV_ALIGN_TOP_MID, 0, 224);
+    return mark;
 }
 
 void app_shell_start_tick(app_shell_t *s, app_shell_tick_cb_t cb)

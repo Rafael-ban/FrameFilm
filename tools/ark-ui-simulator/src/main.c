@@ -1,5 +1,6 @@
 #include <SDL2/SDL.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "lvgl.h"
 #include "app_boot.h"
@@ -102,6 +103,20 @@ int main(int argc, char **argv)
         press_key(INPUT_PRESS_SHORT);
         if(simulator_current_entry() != &g_app_pass_entry) result = -1;
         result |= save_frame(display, argv[2], "pass");
+        const char *profile_path = getenv("ARK_PASS_PROFILE");
+        if(profile_path && profile_path[0]) {
+            char *saved_path = strdup(profile_path);
+            if(!saved_path) return 1;
+            setenv("ARK_PASS_PROFILE", "/missing-ark-pass-test.bin", 1);
+            press_key(INPUT_PRESS_SHORT);
+            simulator_process_requests();
+            result |= save_frame(display, argv[2], "pass-reload-failed");
+            setenv("ARK_PASS_PROFILE", saved_path, 1);
+            free(saved_path);
+            press_key(INPUT_PRESS_SHORT);
+            simulator_process_requests();
+            result |= save_frame(display, argv[2], "pass-reload-retry");
+        }
         press_key(INPUT_PRESS_DOUBLE);
         if(simulator_current_entry() != &g_app_menu_entry || menu_sel != 1) result = -1;
         result |= save_frame(display, argv[2], "menu-return");

@@ -51,7 +51,7 @@ typedef enum {
     APP_ID_ANIMATION,      // 动图
     APP_ID_SETTINGS,       // 系统设置（UI 层：设备信息 + 系统参数）
     APP_ID_MENU,           // 主菜单（UI 层：调度器的"根"状态，本身不在轮播列表里）
-    APP_ID_PASS,           // 通行证（UI 层占位页：菜单里有卡，功能待开发）
+    APP_ID_PASS,           // 通行证（SD 个人档案，UI 层显示）
                            // ⚠ 追加在末尾而不是插进中间：这些 id 会落盘
                            // （service_param_app_current_set / app 参数 blob），
                            // 中间插入会让老设备上的 id 含义整体错位

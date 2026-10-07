@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FrameFilm Ark · 通行证编辑器</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="mastline"><strong>ARKNIGHTS</strong><span>个人档案 — 01</span></div>
+    <h1>个人通行证</h1>
+    <p>以罗德岛终端档案为视觉参考，本地编辑个人资料并生成设备主体图。头像和资料仅在此浏览器页面处理。</p>
+  </header>
+
+  <main class="workspace">
+    <section class="editor" aria-labelledby="edit-title">
+      <div class="section-head"><span>01 / 档案资料</span><h2 id="edit-title">编辑资料</h2></div>
+      <div class="fields">
+        <div class="field avatar-field">
+          <label for="avatar">头像</label>
+          <input id="avatar" type="file" accept="image/*">
+          <button id="remove-avatar" type="button" class="text-button">移除头像</button>
+          <p class="hint">自动居中裁剪为 128 × 160，保持图片比例。</p>
+        </div>
+        <div class="field">
+          <label for="codename">代号 <span class="required">必填</span></label>
+          <input id="codename" type="text" maxlength="32" autocomplete="off" placeholder="输入代号">
+          <label class="unset"><input id="codename-unset" type="checkbox"> 代号尚未设置</label>
+          <p class="validation" id="codename-error" aria-live="polite"></p>
+        </div>
+        <div class="field">
+          <label for="number">编号 <span class="required">必填</span></label>
+          <input id="number" type="text" maxlength="36" autocomplete="off" placeholder="输入编号">
+          <label class="unset"><input id="number-unset" type="checkbox"> 编号尚未设置</label>
+          <p class="validation" id="number-error" aria-live="polite"></p>
+        </div>
+        <div class="field">
+          <label for="affiliation">所属</label>
+          <input id="affiliation" type="text" maxlength="60" autocomplete="off" placeholder="可留空">
+          <p class="validation" id="affiliation-error" aria-live="polite"></p>
+        </div>
+        <div class="field">
+          <label for="signature">签名</label>
+          <textarea id="signature" rows="3" maxlength="200" placeholder="可留空；最多三行"></textarea>
+          <p class="validation" id="signature-error" aria-live="polite"></p>
+        </div>
+      </div>
+      <div class="section-head actions-head"><span>02 / 本地文件</span><h2>保存与导入</h2></div>
+      <div class="actions">
+        <button id="export-json" type="button" class="secondary">导出编辑数据 JSON</button>
+        <label class="file-button secondary" for="import-json">导入 JSON<input id="import-json" type="file" accept="application/json,.json"></label>
+        <button id="download-png" type="button" class="secondary">下载 PNG 预览</button>
+        <button id="download-bin" type="button" class="primary">下载 profile.bin</button>
+      </div>
+      <p id="file-status" class="status" role="status"></p>
+
+      <div class="section-head actions-head"><span>03 / 设备连接</span><h2>发送到 Ark</h2></div>
+      <p class="hint">通过浏览器手动选择 FRAMEFILMARK。发送到固定路径 app/pass/profile.bin 与 app/pass/profile.json；读取会替换当前本地草稿。</p>
+      <div class="actions">
+        <button id="connect" type="button" class="secondary">连接 Ark</button>
+        <button id="send" type="button" class="primary" disabled>发送到设备</button>
+        <button id="read-device" type="button" class="secondary" disabled>读取设备资料（替换当前草稿）</button>
+        <button id="cancel" type="button" class="secondary" disabled>取消操作</button>
+      </div>
+      <progress id="progress" value="0" max="100" aria-label="传输进度"></progress>
+      <p id="device-status" class="status" role="status">未连接。浏览器需支持 Web Bluetooth，并在 localhost 或 HTTPS 打开。</p>
+    </section>
+
+    <section class="preview-panel" aria-labelledby="preview-title">
+      <div class="section-head"><span>440 × 608 / 黑白</span><h2 id="preview-title">设备主体预览</h2></div>
+      <div class="preview-frame"><canvas id="preview" width="440" height="608" role="img" aria-label="通行证主体预览"></canvas></div>
+      <p class="hint">预览即 1bit 导出效果。设备状态栏（30 px）与脚注（28 px）由固件绘制，不包含在文件内。</p>
+    </section>
+  </main>
+</body>
+</html>

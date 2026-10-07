@@ -43,6 +43,7 @@
 #include "ui_assets.h"
 #include "ui_fonts.h"
 #include "ui_ops.h"
+#include "app_shell.h"
 #include "app_manager.h"
 #include "app_sleep.h"
 
@@ -173,19 +174,13 @@ static void sleep_foot_text(char *buf)
 static void sleep_ui_create(lv_obj_t *root)
 {
     lv_obj_t *o;
-    const void *src;
     char buf[SP_FOOT_BUF_LEN];
 
     sys_logi(APP_SLEEP_TAG, "create sleep card (auto_wake=%u, %u min)",
              (unsigned)m_auto_on, (unsigned)m_minutes);
 
-    /* ---- 徽章：与开机页同一份资源（SD 可替换） ---- */
-    src = ui_assets_badge();
-    o = lv_image_create(root);
-    if(src != NULL)
-    {
-        lv_image_set_src(o, src);
-    }
+    /* 与开机页保持同一罗德岛主题字标。 */
+    o = app_shell_brandmark(root);
     lv_obj_align(o, LV_ALIGN_TOP_MID, 0, SP_BADGE_Y);
 
     /* ---- 细线 + 状态字 + 细线：与开机页同一套骨架，大字换成"我现在怎样" ---- */

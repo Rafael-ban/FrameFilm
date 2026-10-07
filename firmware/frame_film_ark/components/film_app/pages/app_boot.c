@@ -346,7 +346,6 @@ static void boot_ui_create(lv_obj_t *root)
 {
     lv_obj_t *body;
     lv_obj_t *badge;
-    const void *src;
     lv_obj_t *segs;
     lv_obj_t *tele_box;
     uint8_t i;
@@ -396,13 +395,8 @@ static void boot_ui_create(lv_obj_t *root)
         lv_obj_set_pos(r, 0, 22);
     }
 
-    /* ---- 身份徽章（可由 SD 卡 /app/_ui/badge.bin 替换） ---- */
-    src = ui_assets_badge();
-    badge = lv_image_create(body);
-    if(src != NULL)
-    {
-        lv_image_set_src(badge, src);
-    }
+    /* 明日方舟本体主题字标，避免 SD 上遗留的终末地徽章覆盖新主题。 */
+    badge = app_shell_brandmark(body);
     lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, badge_top);
 
     /* ---- 品牌字标 ---- */

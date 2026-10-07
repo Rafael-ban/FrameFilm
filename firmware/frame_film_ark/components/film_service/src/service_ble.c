@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <errno.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -57,7 +58,10 @@
 /*********************************************************************
  * MACROS
  */
-#define BLE_RESP_DATA_MAX          (60)   /* 回包数据长度上限（含 TLV），用于栈上组帧 */
+#define BLE_RESP_DATA_MAX          (137)  /* PROFILE_READ: 9B 元数据 + 最多 128B 数据 */
+#define BLE_PROFILE_PATH           "/sdcard/app/pass/profile.json"
+#define BLE_PROFILE_FILE_MAX       (350000L)
+#define BLE_PROFILE_CHUNK_MAX      (128u)
 
 
 /*********************************************************************
@@ -507,6 +511,96 @@ static uint8_t ble_direct_start(const ble_cmd_t *cmd)
     return service_wifi_direct_start(fields[0], fields[1], fields[2]);
 }
 
+/*
+ * 固定资源的分块读取：每个请求独立开关文件，不保留跨请求句柄。
+ * 响应 DATA = status(1) + offset(4 BE) + total(4 BE) + bytes(0..128)。
+ */
+static void ble_profile_read(const ble_cmd_t *cmd)
+{
+    uint8_t out[9 + BLE_PROFILE_CHUNK_MAX] = {0};
+    uint32_t offset = 0;
+    uint32_t total = 0;
+    uint8_t count = 0;
+    size_t actual = 0;
+    FILE *fp = NULL;
+
+    if(cmd->len != 5 || cmd->pdata == NULL)
+    {
+        out[0] = 4;  /* 参数错误 */
+        goto reply;
+    }
+    offset = ((uint32_t)cmd->pdata[0] << 24) |
+             ((uint32_t)cmd->pdata[1] << 16) |
+             ((uint32_t)cmd->pdata[2] << 8) |
+             (uint32_t)cmd->pdata[3];
+    count = cmd->pdata[4];
+    if(count == 0 || count > BLE_PROFILE_CHUNK_MAX)
+    {
+        out[0] = 4;
+        goto reply;
+    }
+    if((m_film_trans_state != BLE_FILM_TRANS_IDLE &&
+        m_film_trans_state != BLE_FILM_TRANS_STOPPED) ||
+       (m_ota_trans_state != BLE_OTA_TRANS_IDLE &&
+        m_ota_trans_state != BLE_OTA_TRANS_STOPPED) ||
+       service_wifi_direct_busy())
+    {
+        out[0] = 3;  /* 文件写入/直传进行中 */
+        goto reply;
+    }
+
+    fp = fopen(BLE_PROFILE_PATH, "rb");
+    if(fp == NULL)
+    {
+        out[0] = errno == ENOENT ? 1 : 2;
+        goto reply;
+    }
+    if(fseek(fp, 0, SEEK_END) != 0)
+    {
+        out[0] = 2;
+        goto reply;
+    }
+    long size = ftell(fp);
+    if(size < 0 || size > BLE_PROFILE_FILE_MAX)
+    {
+        out[0] = 2;
+        goto reply;
+    }
+    total = (uint32_t)size;
+    if(offset > total)
+    {
+        out[0] = 4;
+        goto reply;
+    }
+    if(fseek(fp, (long)offset, SEEK_SET) != 0)
+    {
+        out[0] = 2;
+        goto reply;
+    }
+    if(count > total - offset) count = (uint8_t)(total - offset);
+    if(count > 0)
+    {
+        actual = fread(&out[9], 1, count, fp);
+        if(actual != count)
+        {
+            actual = 0;
+            out[0] = 2;
+        }
+    }
+
+reply:
+    if(fp != NULL) fclose(fp);
+    out[1] = (uint8_t)(offset >> 24);
+    out[2] = (uint8_t)(offset >> 16);
+    out[3] = (uint8_t)(offset >> 8);
+    out[4] = (uint8_t)offset;
+    out[5] = (uint8_t)(total >> 24);
+    out[6] = (uint8_t)(total >> 16);
+    out[7] = (uint8_t)(total >> 8);
+    out[8] = (uint8_t)total;
+    service_ble_send_resp(BLE_FILM_TRANS_CH_PROFILE_READ, out, (uint8_t)(9 + actual));
+}
+
 static void ble_cmd_process(ble_cmd_t *cmd)
 {
     if(cmd == NULL)
@@ -560,6 +654,9 @@ static void ble_cmd_process(ble_cmd_t *cmd)
             service_ble_send_resp(cmd->ch, &accepted, 1);
             break;
         }
+        case BLE_FILM_TRANS_CH_PROFILE_READ:
+            ble_profile_read(cmd);
+            break;
         case BLE_FILM_TRANS_CH_FILE_START :
         {
             if(ble_file_reset() != 0)
