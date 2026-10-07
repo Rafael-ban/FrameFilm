@@ -38,6 +38,7 @@
 #include "ui_conf.h"    /* UI_CALIB_FRAME：上机标定帧开关 */
 #include "ui_ops.h"
 #include "ui_fonts.h"
+#include "ui_boot_typography.h"
 #include "app_shell.h"
 #include "app_language.h"
 #include "app_manager.h"    /* app_manager_post_ui_msg：进度走完上报切页 */
@@ -402,10 +403,9 @@ static void boot_ui_create(lv_obj_t *root)
 
     /* ---- 品牌字标 ---- */
     {
-        lv_obj_t *brand = boot_label(body, &lv_font_montserrat_48, lv_color_black(), "ARKNIGHTS");
-
-        lv_obj_set_style_text_letter_space(brand, 6, LV_PART_MAIN);
-        lv_obj_align(brand, LV_ALIGN_TOP_MID, 0, badge_bot + 12);
+        lv_obj_t *brand = lv_image_create(body);
+        lv_image_set_src(brand, &ui_boot_title);
+        lv_obj_align(brand, LV_ALIGN_TOP_MID, 0, badge_bot + 20);
     }
     {
         lv_obj_t *r = boot_rule(body);
@@ -414,9 +414,9 @@ static void boot_ui_create(lv_obj_t *root)
         lv_obj_set_width(r, 320);
     }
     {
-        lv_obj_t *sub = boot_label(body, &ui_font_14, lv_color_black(), "PRTS SYNTHESIZE INFORMATION ANALYSIS OS");
-
-        lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, badge_bot + 92);
+        lv_obj_t *sub = lv_image_create(body);
+        lv_image_set_src(sub, &ui_boot_subtitle);
+        lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, badge_bot + 95);
     }
 
     /* ---- 分段进度条 ---- */

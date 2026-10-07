@@ -35,6 +35,7 @@ add_executable(ark-ui-simulator
     "${ARK_ROOT}/components/film_ui/src/ui_defaults.c"
     "${ARK_ROOT}/components/film_ui/src/ui_fonts.c"
     "${ARK_ROOT}/components/film_ui/src/ui_boot_logo.c"
+    "${ARK_ROOT}/components/film_ui/src/ui_boot_typography.c"
 )
 target_include_directories(ark-ui-simulator PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/stubs"

@@ -118,25 +118,26 @@ static int save_prts_preview(lv_display_t *display, const char *dir)
         fprintf(stderr, "Cannot create preview directory: %s\n", dir);
         return 1;
     }
-    for(int i = 0; i <= 5; i++) {
-        egg[0] = (char)('0' + i);
-        egg[1] = '\0';
-        if(setenv("ARK_BOOT_EGG", egg, 1) != 0) return 1;
-        show_boot();
-        if(i == 0) snprintf(name, sizeof(name), "boot-normal");
-        else snprintf(name, sizeof(name), "boot-egg-%d", i);
-        result |= save_frame(display, dir, name);
-        show_sleep();
-        if(i == 0) snprintf(name, sizeof(name), "sleep-normal");
-        else snprintf(name, sizeof(name), "sleep-egg-%d", i);
-        result |= save_frame(display, dir, name);
+    for(int lang = 0; lang < 2; lang++) {
+        int english = lang == 1;
+        app_language_set(english ? APP_LANGUAGE_EN : APP_LANGUAGE_ZH_CN);
+        for(int i = 0; i <= 5; i++) {
+            if(english && i == 1) continue; /* no verified English quote 1 */
+            egg[0] = (char)('0' + i);
+            egg[1] = '\0';
+            if(setenv("ARK_BOOT_EGG", egg, 1) != 0) return 1;
+            show_boot();
+            if(i == 0) snprintf(name, sizeof(name), english ? "boot-normal-en" : "boot-normal");
+            else snprintf(name, sizeof(name), english ? "boot-egg-%d-en" : "boot-egg-%d", i);
+            result |= save_frame(display, dir, name);
+            show_sleep();
+            if(i == 0) snprintf(name, sizeof(name), english ? "sleep-normal-en" : "sleep-normal");
+            else snprintf(name, sizeof(name), english ? "sleep-egg-%d-en" : "sleep-egg-%d", i);
+            result |= save_frame(display, dir, name);
+        }
+        show_menu();
+        result |= save_frame(display, dir, english ? "menu-en" : "menu-zh");
     }
-    app_language_set(APP_LANGUAGE_ZH_CN);
-    show_menu();
-    result |= save_frame(display, dir, "menu-zh");
-    app_language_set(APP_LANGUAGE_EN);
-    show_menu();
-    result |= save_frame(display, dir, "menu-en");
     fprintf(stderr, "PRTS preview %s\n", result == 0 ? "PASS" : "FAIL");
     return result == 0 ? 0 : 1;
 }

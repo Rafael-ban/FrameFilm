@@ -55,7 +55,6 @@ typedef void (*app_shell_tick_cb_t)(void);
  */
 typedef struct {
     lv_obj_t *bat_label;    // "82%"，位于状态栏最右侧
-    lv_obj_t *bat_pip;      // 电量指示块（低于 20% 留空）
     lv_obj_t *wifi_label;   // "WIFI"（关闭时整项隐藏）
     lv_obj_t *wifi_pip;
     lv_obj_t *bt_label;     // "BT"

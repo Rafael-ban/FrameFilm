@@ -24,7 +24,7 @@ cmake --build tools/ark-ui-simulator/build -j4
 ./tools/ark-ui-simulator/build/ark-ui-simulator --prts-preview .output/ark/prts-preview
 ```
 
-输出 `boot-normal.bmp`、`sleep-normal.bmp`、`boot-egg-1.bmp` 至 `boot-egg-5.bmp`、`sleep-egg-1.bmp` 至 `sleep-egg-5.bmp`，以及 `menu-zh.bmp`、`menu-en.bmp`。该模式将彩蛋逐条强制显示以便检查；普通启动仍按固件概率随机显示。
+共输出 24 张：中文的 `boot-normal.bmp`、`sleep-normal.bmp`、`boot-egg-1.bmp` 至 `boot-egg-5.bmp`、`sleep-egg-1.bmp` 至 `sleep-egg-5.bmp`；英文文件在 `.bmp` 前加 `-en`，只有普通状态和第 2–5 句（第 1 句暂无核实的英文）；另有 `menu-zh.bmp` 和 `menu-en.bmp`。该模式将彩蛋逐条强制显示以便检查；普通启动在中英文模式下均以 10% 总概率显示彩蛋。
 
 当前六个页面及状态栏支持简体中文 / English，英文文案参照汉化前的 `515b9b0`；个人档案是后增功能。设置页语言项位于“系统参数”分组，18 行单页保留原版轮播、图标、反白卡片、切角与信息面板。开机和休眠共用用户提供的完整 logo 的 1-bit 转换资源、PRTS 文案和 10% 概率彩蛋，详见 [资源说明](../ui-assets/boot-logo.md)。状态栏统一显示 WIFI / BT，电量百分比位于最右侧。模拟器始终链接最新页面源码。
 

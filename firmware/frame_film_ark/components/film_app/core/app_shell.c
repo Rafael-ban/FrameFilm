@@ -271,7 +271,6 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
     }
     {
         lv_obj_t *bat;
-        lv_obj_t *bat_pip;
         lv_obj_t *wifi_label;
         lv_obj_t *wifi_pip;
         lv_obj_t *bt_label;
@@ -281,13 +280,11 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
         wifi_pip = shell_pip(status);
         bt_label = shell_label(status, lv_color_black(), "BT");
         bt_pip = shell_pip(status);
-        bat_pip = shell_pip(status);
         bat = shell_label(status, lv_color_black(), "--%");
 
         if(out != NULL)
         {
             out->bat_label = bat;
-            out->bat_pip = bat_pip;
             out->wifi_label = wifi_label;
             out->wifi_pip = wifi_pip;
             out->bt_label = bt_label;
@@ -331,24 +328,42 @@ void app_shell_request_status(void)
 
 lv_obj_t *app_shell_brandmark(lv_obj_t *parent)
 {
-    static const char *const quotes[] = {
+    static const char *const quotes_zh[] = {
         "博士，你还在和你的小动物一起玩吗？",
         "这里万籁俱寂……太安静了，别留下我。",
         "深陷长梦的混沌之时，你会想起----",
         "关闭PRTS，然后闭上眼睛。等你醒来，我会履行我们的约定。",
         "你没有忘记我",
     };
-    /* One draw per page creation: 5 of 50 buckets show one quote (10%).
+    /* English game loading-screen text, source recorded in boot-logo.md.
+       The first Chinese quote has no verified English counterpart yet. */
+    static const char *const quotes_en[] = {
+        "All is quiet here... too quiet. Don't leave me here.",
+        "In the void of the long dream, you will remember—",
+        "Close PRTS and close your eyes. I will fulfill our promise when you wake up.",
+        "You did not forget me.",
+    };
+    const uint8_t english = app_language_get() == APP_LANGUAGE_EN;
+    const unsigned count = english ? 4u : 5u;
+    const char *const *quotes = english ? quotes_en : quotes_zh;
+    /* One draw per creation: 4/40 or 5/50 buckets, both 10% overall.
        Timer updates never reroll it. Preview overrides do not enter firmware. */
 #ifdef ARK_UI_SIMULATOR
     static unsigned preview_seeded;
     if(!preview_seeded) { srand((unsigned)time(NULL)); preview_seeded = 1; }
-    unsigned pick = (unsigned)rand() % 50u;
+    unsigned pick = (unsigned)rand() % (10u * count);
+#else
+    unsigned pick = esp_random() % (10u * count);
+#endif
+    const char *quote = pick < count ? quotes[pick] : NULL;
+#ifdef ARK_UI_SIMULATOR
     const char *forced = getenv("ARK_BOOT_EGG");
     if(forced && forced[0] >= '0' && forced[0] <= '5' && forced[1] == '\0')
-        pick = forced[0] == '0' ? 49u : (unsigned)(forced[0] - '1');
-#else
-    unsigned pick = esp_random() % 50u;
+    {
+        /* Preview IDs match Chinese entries; English ID 1 is unavailable. */
+        unsigned id = (unsigned)(forced[0] - '0');
+        quote = id == 0 || (english && id == 1) ? NULL : quotes[id - (english ? 2u : 1u)];
+    }
 #endif
     lv_obj_t *mark = lv_obj_create(parent);
     lv_obj_remove_style_all(mark);
@@ -357,9 +372,10 @@ lv_obj_t *app_shell_brandmark(lv_obj_t *parent)
     lv_obj_t *logo = lv_image_create(mark);
     lv_image_set_src(logo, &ui_boot_logo);
     lv_obj_align(logo, LV_ALIGN_TOP_MID, 0, 0);
-    if(pick < sizeof(quotes) / sizeof(quotes[0]))
+    if(quote != NULL)
     {
-        lv_obj_t *word = shell_label(mark, lv_color_black(), quotes[pick]);
+        lv_obj_t *word = shell_label(mark, lv_color_black(), quote);
+        lv_obj_set_style_text_font(word, &ui_font_14, 0);
         lv_obj_set_width(word, 440);
         lv_obj_set_style_text_align(word, LV_TEXT_ALIGN_CENTER, 0);
         lv_label_set_long_mode(word, LV_LABEL_LONG_WRAP);
@@ -419,11 +435,6 @@ void app_shell_apply(app_shell_t *s, const app_status_t *st)
     if(s->bat_label != NULL)
     {
         lv_label_set_text_fmt(s->bat_label, "%u%%", (unsigned)st->bat_pct);
-    }
-    /* 电量块只有"实心/留空"两态（低电量留空），不参与隐藏逻辑 */
-    if(s->bat_pip != NULL)
-    {
-        lv_obj_set_style_bg_opa(s->bat_pip, (st->bat_pct > 20) ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
     }
     shell_ind_set(s->wifi_label, s->wifi_pip, st->wifi_on, st->wifi_conn);
     shell_ind_set(s->bt_label, s->bt_pip, st->bt_on, st->bt_conn);
