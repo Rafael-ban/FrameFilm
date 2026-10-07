@@ -1,0 +1,4 @@
+$ErrorActionPreference = 'Stop'
+$simDir = $PSScriptRoot
+& wsl.exe --cd $simDir --exec sh -lc 'if [ ! -f build/CMakeCache.txt ]; then cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug || exit; fi; cmake --build build -j4 && ./build/ark-ui-simulator'
+exit $LASTEXITCODE
