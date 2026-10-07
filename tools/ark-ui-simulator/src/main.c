@@ -2,7 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include "lvgl.h"
+#include "sys_cfg.h"
 #include "app_boot.h"
 #include "app_menu.h"
 #include "app_settings.h"
@@ -36,7 +39,7 @@ static void show_boot(void)
 {
     static const app_boot_tele_t tele[] = {
         {"PANEL", "720x480 E6"}, {"PSRAM", "1824 KB FREE"},
-        {"STORAGE", "SD MOUNTED"}, {"FIRMWARE", "1.0.0"}
+        {"STORAGE", "SD MOUNTED"}, {"FIRMWARE", SYS_FIRMWARE_VERSION}
     };
     app_boot_set_telemetry(tele, 4);
     simulator_show(app_boot_ops(), NULL);
@@ -88,12 +91,65 @@ static int save_frame(lv_display_t *display, const char *dir, const char *name)
     return result;
 }
 
+static int ensure_preview_dir(const char *dir)
+{
+    char path[1024];
+    size_t len = strlen(dir);
+    if(len == 0 || len >= sizeof(path)) return -1;
+    memcpy(path, dir, len + 1);
+    for(char *p = path + 1; ; p++) {
+        if(*p != '/' && *p != '\\' && *p != '\0') continue;
+        char saved = *p;
+        *p = '\0';
+        if(mkdir(path, 0777) != 0 && errno != EEXIST) return -1;
+        if(saved == '\0') break;
+        *p = saved;
+    }
+    return 0;
+}
+
+static int save_prts_preview(lv_display_t *display, const char *dir)
+{
+    char name[32];
+    char egg[2];
+    int result = 0;
+
+    if(ensure_preview_dir(dir) != 0) {
+        fprintf(stderr, "Cannot create preview directory: %s\n", dir);
+        return 1;
+    }
+    for(int i = 0; i <= 5; i++) {
+        egg[0] = (char)('0' + i);
+        egg[1] = '\0';
+        if(setenv("ARK_BOOT_EGG", egg, 1) != 0) return 1;
+        show_boot();
+        if(i == 0) snprintf(name, sizeof(name), "boot-normal");
+        else snprintf(name, sizeof(name), "boot-egg-%d", i);
+        result |= save_frame(display, dir, name);
+        show_sleep();
+        if(i == 0) snprintf(name, sizeof(name), "sleep-normal");
+        else snprintf(name, sizeof(name), "sleep-egg-%d", i);
+        result |= save_frame(display, dir, name);
+    }
+    app_language_set(APP_LANGUAGE_ZH_CN);
+    show_menu();
+    result |= save_frame(display, dir, "menu-zh");
+    app_language_set(APP_LANGUAGE_EN);
+    show_menu();
+    result |= save_frame(display, dir, "menu-en");
+    fprintf(stderr, "PRTS preview %s\n", result == 0 ? "PASS" : "FAIL");
+    return result == 0 ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
     lv_init();
     lv_display_t *display = lv_sdl_window_create(480, 720);
     if(!display) { fputs("LVGL SDL window failed\n", stderr); return 1; }
     lv_sdl_window_set_title(display, "FrameFilm Ark UI simulator");
+    if(argc == 3 && strcmp(argv[1], "--prts-preview") == 0) {
+        return save_prts_preview(display, argv[2]);
+    }
     show_boot();
 
     if(argc == 3 && strcmp(argv[1], "--smoke") == 0) {

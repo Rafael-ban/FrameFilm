@@ -54,7 +54,7 @@ typedef void (*app_shell_tick_cb_t)(void);
  * @brief 状态栏里需要动态刷新的控件
  */
 typedef struct {
-    lv_obj_t *bat_label;    // "BAT 82%"
+    lv_obj_t *bat_label;    // "82%"，位于状态栏最右侧
     lv_obj_t *bat_pip;      // 电量指示块（低于 20% 留空）
     lv_obj_t *wifi_label;   // "WIFI"（关闭时整项隐藏）
     lv_obj_t *wifi_pip;
@@ -67,7 +67,6 @@ typedef struct {
     /* ---- 以下为内部状态，页面不要写 ---- */
     app_status_t last_status;   // 上次已上屏的数据（用于变更检测，避免无谓全帧刷新）
     uint8_t      status_valid;
-    uint8_t      language;
     char         last_time[6];  // 上次已上屏的 "HH:MM"
     lv_timer_t  *tick;
     app_shell_tick_cb_t tick_cb;
@@ -120,7 +119,8 @@ void app_shell_start_tick(app_shell_t *s, app_shell_tick_cb_t cb);
  * 控件上的野指针定时器。
  */
 void app_shell_release(app_shell_t *s);
-/* 罗德岛主题字标（304x272），仅 ui_task 使用；不加载旧终末地徽章。 */
+/* 共用 logo + 10% 概率彩蛋，仅 ui_task 使用。 */
+#define APP_SHELL_BRAND_H 304
 lv_obj_t *app_shell_brandmark(lv_obj_t *parent);
 
 /**

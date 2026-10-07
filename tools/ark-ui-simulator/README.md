@@ -18,7 +18,15 @@ cmake --build tools/ark-ui-simulator/build -j4
 
 操作：↑/↓ 切换菜单项或设置行；Enter 进入页面、修改设置；双击 Enter 返回菜单并高亮刚离开的应用；按住 Enter 一秒预览休眠卡。数字 1–6 依次直接预览开机、菜单、设置、休眠卡、通行证、时钟。Esc 关闭窗口。图片、模板、动图走固件直绘路径，尚未接入此模拟器。
 
-当前六个页面及状态栏支持简体中文 / English，英文文案参照汉化前的 `515b9b0`；个人档案是后增功能。设置页语言项位于“系统参数”分组，18 行单页保留原版轮播、图标、反白卡片、切角与信息面板。主题为明日方舟本体的罗德岛方向，开机和休眠使用文字标识。模拟器始终链接最新页面源码。
+只生成 PRTS 主题截图时，用 `--prts-preview <目录>`，无需运行完整的 `--smoke` 导航：
+
+```sh
+./tools/ark-ui-simulator/build/ark-ui-simulator --prts-preview .output/ark/prts-preview
+```
+
+输出 `boot-normal.bmp`、`sleep-normal.bmp`、`boot-egg-1.bmp` 至 `boot-egg-5.bmp`、`sleep-egg-1.bmp` 至 `sleep-egg-5.bmp`，以及 `menu-zh.bmp`、`menu-en.bmp`。该模式将彩蛋逐条强制显示以便检查；普通启动仍按固件概率随机显示。
+
+当前六个页面及状态栏支持简体中文 / English，英文文案参照汉化前的 `515b9b0`；个人档案是后增功能。设置页语言项位于“系统参数”分组，18 行单页保留原版轮播、图标、反白卡片、切角与信息面板。开机和休眠共用用户提供的完整 logo 的 1-bit 转换资源、PRTS 文案和 10% 概率彩蛋，详见 [资源说明](../ui-assets/boot-logo.md)。状态栏统一显示 WIFI / BT，电量百分比位于最右侧。模拟器始终链接最新页面源码。
 
 通行证支持读取网页编辑器导出的 `profile.bin`。在 WSL/Linux 中设置环境变量为文件的绝对路径，再启动模拟器：
 

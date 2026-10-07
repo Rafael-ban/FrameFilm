@@ -57,7 +57,7 @@ static lv_obj_t *m_pct_label = NULL;
 static lv_obj_t *m_tele_ok[8] = {0};
 
 /* 开机页不是 app（不参与切换、也没有 app 任务侧的 on_event），
-   故状态栏取不到实时数据，保持初始的 "BAT --%" 与空指示块。
+   故状态栏取不到实时数据，保持初始的 "--%" 与空指示块。
    真实数值在紧接着的主菜单页即刻可见。
    居中时间是唯一例外：它由 app_shell 自己问 libc 得到，不需要跨任务采集
    （此时多半还没校时，会显示 "--:--"）。 */
@@ -350,10 +350,9 @@ static void boot_ui_create(lv_obj_t *root)
     lv_obj_t *segs;
     lv_obj_t *tele_box;
     uint8_t i;
-    /* 徽章尺寸来自资源规格（ui_assets.h 的 UI_BADGE_W/H），下面所有内容的 y 都从
-       徽章底部推算，换徽章尺寸时只改资源规格即可，不用逐个挪坐标 */
+    /* logo 与彩蛋占位共用固定高度，后续内容由其底部推算。 */
     const int32_t badge_top = 44;
-    const int32_t badge_bot = badge_top + (int32_t)UI_BADGE_H;
+    const int32_t badge_bot = badge_top + APP_SHELL_BRAND_H;
 
     sys_logi(APP_BOOT_TAG, "create boot page, %u telemetry lines", (unsigned)m_tele_num);
 
@@ -397,7 +396,7 @@ static void boot_ui_create(lv_obj_t *root)
         lv_obj_set_pos(r, 0, 22);
     }
 
-    /* 明日方舟本体主题字标，避免 SD 上遗留的终末地徽章覆盖新主题。 */
+    /* 与休眠卡共用用户提供的单色 logo 和概率彩蛋。 */
     badge = app_shell_brandmark(body);
     lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, badge_top);
 
@@ -415,7 +414,7 @@ static void boot_ui_create(lv_obj_t *root)
         lv_obj_set_width(r, 320);
     }
     {
-        lv_obj_t *sub = boot_label(body, &ui_font_14, lv_color_black(), app_text("彩色电子纸终端", "COLOR E-PAPER TERMINAL"));
+        lv_obj_t *sub = boot_label(body, &ui_font_14, lv_color_black(), "PRTS SYNTHESIZE INFORMATION ANALYSIS OS");
 
         lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, badge_bot + 92);
     }

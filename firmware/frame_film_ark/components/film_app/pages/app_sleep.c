@@ -57,9 +57,8 @@
  * 整屏 480x720，**不带外壳**（没有状态栏与提示行），故坐标就是屏幕坐标。
  * 与设计稿 tools/ui-mockup §08 的表格逐行对应；构图块高 448、垂直居中于 y=136。
  *
- * 改这里等于改那张表。徽章尺寸取自资源规格（ui_assets.h 的 UI_BADGE_H），
- * 所以换徽章尺寸时下面的相对间距需要复核。 */
-#define SP_BADGE_Y          (136)    // 徽章顶部（304x272，水平居中）
+ * logo + 彩蛋使用 APP_SHELL_BRAND_H；底部状态与唤醒说明保持原位置。 */
+#define SP_BADGE_Y          (104)    // logo 与彩蛋顶部（440x304，水平居中）
 #define SP_RULE1_Y          (452)    // 徽章下 44px
 #define SP_WORD_Y           (473)    // 细线下 20px
 #define SP_RULE2_Y          (551)    // 状态字下 20px
@@ -180,9 +179,15 @@ static void sleep_ui_create(lv_obj_t *root)
     sys_logi(APP_SLEEP_TAG, "create sleep card (auto_wake=%u, %u min)",
              (unsigned)m_auto_on, (unsigned)m_minutes);
 
-    /* 与开机页保持同一罗德岛主题字标。 */
+    /* 与开机页共用 logo 和每次展示独立抽取的 10% 概率彩蛋。 */
     o = app_shell_brandmark(root);
     lv_obj_align(o, LV_ALIGN_TOP_MID, 0, SP_BADGE_Y);
+
+    o = lv_label_create(root);
+    lv_obj_set_style_text_font(o, &ui_font_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(o, lv_color_black(), LV_PART_MAIN);
+    lv_label_set_text(o, "PRTS SYNTHESIZE INFORMATION ANALYSIS OS");
+    lv_obj_align(o, LV_ALIGN_TOP_MID, 0, SP_BADGE_Y + APP_SHELL_BRAND_H + 12);
 
     /* ---- 细线 + 状态字 + 细线：与开机页同一套骨架，大字换成"我现在怎样" ---- */
     sleep_rule(root, SP_RULE1_Y);

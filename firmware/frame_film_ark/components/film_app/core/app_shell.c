@@ -31,6 +31,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#ifdef ARK_UI_SIMULATOR
+#include <stdlib.h>
+#else
+#include "esp_random.h"
+#endif
 
 #include "sys_log.h"
 #include "hal_bat.h"
@@ -42,6 +47,7 @@
 #include "app_shell.h"
 #include "app_language.h"
 #include "ui_fonts.h"
+#include "ui_boot_logo.h"
 #include "app_manager.h"
 
 /*********************************************************************
@@ -186,7 +192,7 @@ static void shell_ind_set(lv_obj_t *label, lv_obj_t *pip, uint8_t on, uint8_t co
 {
     if(label != NULL)
     {
-        /* 用 HIDDEN 而不是透明：隐藏的 flex 子项不占位，关闭时右侧直接收成 "BAT 82%" */
+        /* 用 HIDDEN 而不是透明：隐藏的 flex 子项不占位，关闭时右侧直接收成电量百分比 */
         lv_obj_set_hidden(label, on ? false : true);
     }
     if(pip == NULL)
@@ -220,10 +226,9 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
     if(out != NULL)
     {
         memset(out, 0, sizeof(*out));
-        out->language = app_language_get();
     }
 
-    /* ============ 顶部状态栏：品牌 + 电量 / WiFi / 蓝牙 ============ */
+    /* ============ 顶部状态栏：品牌 + WiFi / 蓝牙 / 电量 ============ */
     status = lv_obj_create(root);
     lv_obj_remove_style_all(status);
     lv_obj_set_scrollable(status, false);
@@ -265,17 +270,19 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
         shell_time_update(out);
     }
     {
-        lv_obj_t *bat = shell_label(status, lv_color_black(), app_text("电量 --%", "BAT --%"));
-        lv_obj_t *bat_pip = shell_pip(status);
+        lv_obj_t *bat;
+        lv_obj_t *bat_pip;
         lv_obj_t *wifi_label;
         lv_obj_t *wifi_pip;
         lv_obj_t *bt_label;
         lv_obj_t *bt_pip;
 
-        wifi_label = shell_label(status, lv_color_black(), app_text("无线", "WIFI"));
+        wifi_label = shell_label(status, lv_color_black(), "WIFI");
         wifi_pip = shell_pip(status);
-        bt_label = shell_label(status, lv_color_black(), app_text("蓝牙", "BT"));
+        bt_label = shell_label(status, lv_color_black(), "BT");
         bt_pip = shell_pip(status);
+        bat_pip = shell_pip(status);
+        bat = shell_label(status, lv_color_black(), "--%");
 
         if(out != NULL)
         {
@@ -315,16 +322,6 @@ void app_shell_set_text(app_shell_t *s, const char *hint, const char *page)
     if(s == NULL) return;
     if(s->hint_label != NULL) lv_label_set_text(s->hint_label, hint);
     if(s->page_label != NULL) lv_label_set_text(s->page_label, page);
-    if(s->language != app_language_get())
-    {
-        app_status_t last = s->last_status;
-        uint8_t valid = s->status_valid;
-        s->language = app_language_get();
-        if(s->wifi_label != NULL) lv_label_set_text(s->wifi_label, app_text("无线", "WIFI"));
-        if(s->bt_label != NULL) lv_label_set_text(s->bt_label, app_text("蓝牙", "BT"));
-        s->status_valid = 0;
-        if(valid) app_shell_apply(s, &last);
-    }
 }
 
 void app_shell_request_status(void)
@@ -334,24 +331,40 @@ void app_shell_request_status(void)
 
 lv_obj_t *app_shell_brandmark(lv_obj_t *parent)
 {
+    static const char *const quotes[] = {
+        "博士，你还在和你的小动物一起玩吗？",
+        "这里万籁俱寂……太安静了，别留下我。",
+        "深陷长梦的混沌之时，你会想起----",
+        "关闭PRTS，然后闭上眼睛。等你醒来，我会履行我们的约定。",
+        "你没有忘记我",
+    };
+    /* One draw per page creation: 5 of 50 buckets show one quote (10%).
+       Timer updates never reroll it. Preview overrides do not enter firmware. */
+#ifdef ARK_UI_SIMULATOR
+    static unsigned preview_seeded;
+    if(!preview_seeded) { srand((unsigned)time(NULL)); preview_seeded = 1; }
+    unsigned pick = (unsigned)rand() % 50u;
+    const char *forced = getenv("ARK_BOOT_EGG");
+    if(forced && forced[0] >= '0' && forced[0] <= '5' && forced[1] == '\0')
+        pick = forced[0] == '0' ? 49u : (unsigned)(forced[0] - '1');
+#else
+    unsigned pick = esp_random() % 50u;
+#endif
     lv_obj_t *mark = lv_obj_create(parent);
     lv_obj_remove_style_all(mark);
     lv_obj_set_scrollable(mark, false);
-    lv_obj_set_size(mark, 304, 272);
-    lv_obj_t *band = lv_obj_create(mark);
-    lv_obj_remove_style_all(band);
-    lv_obj_set_pos(band, 0, 54);
-    lv_obj_set_size(band, 304, 150);
-    lv_obj_set_style_bg_color(band, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(band, LV_OPA_COVER, 0);
-    lv_obj_t *word = lv_label_create(band);
-    lv_obj_set_style_text_font(word, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_text_color(word, lv_color_white(), 0);
-    lv_obj_set_style_text_align(word, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(word, "RHODES\nISLAND");
-    lv_obj_center(word);
-    word = shell_label(mark, lv_color_black(), app_text("罗德岛 · 个人终端", "RHODES ISLAND · PERSONAL TERMINAL"));
-    lv_obj_align(word, LV_ALIGN_TOP_MID, 0, 224);
+    lv_obj_set_size(mark, 440, APP_SHELL_BRAND_H);
+    lv_obj_t *logo = lv_image_create(mark);
+    lv_image_set_src(logo, &ui_boot_logo);
+    lv_obj_align(logo, LV_ALIGN_TOP_MID, 0, 0);
+    if(pick < sizeof(quotes) / sizeof(quotes[0]))
+    {
+        lv_obj_t *word = shell_label(mark, lv_color_black(), quotes[pick]);
+        lv_obj_set_width(word, 440);
+        lv_obj_set_style_text_align(word, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(word, LV_LABEL_LONG_WRAP);
+        lv_obj_align(word, LV_ALIGN_TOP_MID, 0, 268);
+    }
     return mark;
 }
 
@@ -405,7 +418,7 @@ void app_shell_apply(app_shell_t *s, const app_status_t *st)
 
     if(s->bat_label != NULL)
     {
-        lv_label_set_text_fmt(s->bat_label, app_text("电量 %u%%", "BAT %u%%"), (unsigned)st->bat_pct);
+        lv_label_set_text_fmt(s->bat_label, "%u%%", (unsigned)st->bat_pct);
     }
     /* 电量块只有"实心/留空"两态（低电量留空），不参与隐藏逻辑 */
     if(s->bat_pip != NULL)
