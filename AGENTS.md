@@ -52,7 +52,7 @@ FrameFilm 项目 AI 开发指南。
 
 | 项 | 固定值 |
 |---|---|
-| BLE 设备名 / 厂商名 | `FRAMEFILMARK` |
+| BLE 设备名 / 厂商名 | `FRAMEFILMARK-<后缀>`（默认完整 BLE MAC；0x54/0x55 查询/修改）/ `FRAMEFILMARK` |
 | 屏幕 | E6 3.70" **720×480**，面板 ID `0x02`，驱动 `hal_epd_370.c` |
 | 输入 | 三按键：上 GPIO6 / 下 GPIO4 / 确认 GPIO5（**低有效**） |
 | LED / 电池 / SD | 有 WS2812（白=未连接、绿=已连、红=低电，呼吸）、有电池检测、SD 有检测脚 |
@@ -182,7 +182,7 @@ film_service → film_hal → film_sys → ESP-IDF
 1. **不要只在 service 层调 esp_wifi_init 等 ESP-IDF driver** — 必须通过 HAL
 2. **不要只改一个机型的宏分支** — 机型差异代码需覆盖 `FRAMEFILM_STD/PRO/MAX`（EPD 驱动、输入设备、SD 等按宏隔离）。**此条仅 `frame_film` 适用**：`frame_film_ark` 是刻意的单机型设计，不要往它里面引入机型宏或 `#if` 分支
 3. **不要改 BLE 命令值** — 值一旦定义就固定，新增命令先核对协议表，避免复用已分配通道
-4. **不要假设字符串编码** — BLE 传输一律 ASCII + `\0` 结尾
+4. **不要假设字符串编码** — 普通 BLE 字符串为 ASCII + `\0`；Ark 设备名称 0x54/0x55 为 UTF-8 + `\0`，具体以协议文档为准
 5. **不要忘记更新 blecmd_protocol.md** — 协议文档必须与实际实现一致
 6. **不要在 service 层直接操作 GPIO** — 所有硬件操作走 film_hal
 7. **不要机型宏与 sdkconfig 不匹配** — 编译前确认 `sys_cfg.h` 机型宏与 `sdkconfig_{std,pro,max}` 对应一致（**仅 `frame_film`**；`frame_film_ark` 只有一份 `sdkconfig`，无机型宏）

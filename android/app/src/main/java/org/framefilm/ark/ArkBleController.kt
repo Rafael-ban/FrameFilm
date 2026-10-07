@@ -38,6 +38,7 @@ class ArkBleController(context: Context, private val listener: Listener) {
     private val characteristicUuid = UUID.fromString("00002001-0000-1000-8000-00805f9b34fb")
     private val cccdUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     private val devices = linkedMapOf<String, BluetoothDevice>()
+    private val deviceNames = linkedMapOf<String, String>()
     private var scanCallback: ScanCallback? = null
     private var gatt: BluetoothGatt? = null
     private var characteristic: BluetoothGattCharacteristic? = null
@@ -90,14 +91,16 @@ class ArkBleController(context: Context, private val listener: Listener) {
         }
         stopScan(false)
         devices.clear()
+        deviceNames.clear()
         listener.onDevices(emptyList())
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 onMain {
                     if (scanCallback !== this) return@onMain
                     val name = result.scanRecord?.deviceName ?: result.device.name
-                    if (name == "FRAMEFILMARK") {
+                    if (name == "FRAMEFILMARK" || name?.startsWith("FRAMEFILMARK-") == true) {
                         devices[result.device.address] = result.device
+                        deviceNames[result.device.address] = name
                         listener.onDevices(devices.values.toList())
                     }
                 }
@@ -238,6 +241,7 @@ class ArkBleController(context: Context, private val listener: Listener) {
     }
 
     val isReady: Boolean get() = ready
+    fun scannedName(address: String): String? = deviceNames[address]
     val isBusy: Boolean get() = pending != null || writeOnly != null
     val negotiatedMtu: Int get() = mtu
 

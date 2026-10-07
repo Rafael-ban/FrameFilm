@@ -66,6 +66,14 @@
       </div>
       <progress id="progress" value="0" max="100" aria-label="传输进度"></progress>
       <p id="device-status" class="status" role="status">未连接。浏览器需支持 Web Bluetooth，并在 localhost 或 HTTPS 打开。</p>
+      <div class="device-name-panel" aria-labelledby="device-name-title">
+        <h3 id="device-name-title">设备名称</h3>
+        <p class="hint">用于区分多台 Ark。名称前缀固定为 FRAMEFILMARK-；保存后重启设备生效。</p>
+        <p>已配置：<strong id="device-name-current">连接后读取</strong></p>
+        <label for="device-name-suffix">名称后缀（1–16 个 UTF-8 字节）</label>
+        <div class="device-name-actions"><span>FRAMEFILMARK-</span><input id="device-name-suffix" type="text" autocomplete="off" disabled><button id="device-name-read" type="button" class="secondary" disabled>读取名称</button><button id="device-name-save" type="button" class="secondary" disabled>保存名称</button></div>
+        <p id="device-name-status" class="status" role="status"></p>
+      </div>
     </section>
 
     <section class="preview-panel" aria-labelledby="preview-title">

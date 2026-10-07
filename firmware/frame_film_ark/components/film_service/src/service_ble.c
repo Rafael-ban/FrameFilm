@@ -45,6 +45,7 @@
 
 #include "service_ble_gatts.h"
 #include "service_ble.h"
+#include "service_ble_name.h"
 #include "service_file.h"
 #include "service_film.h"
 #include "service_ota.h"
@@ -657,6 +658,27 @@ static void ble_cmd_process(ble_cmd_t *cmd)
         case BLE_FILM_TRANS_CH_PROFILE_READ:
             ble_profile_read(cmd);
             break;
+        case BLE_FILM_TRANS_CH_DEVICE_NAME_GET:
+        case BLE_FILM_TRANS_CH_DEVICE_NAME_SET:
+        {
+            uint8_t status = 0;
+            if(cmd->ch == BLE_FILM_TRANS_CH_DEVICE_NAME_GET)
+                status = cmd->len == 0 ? 0 : 1;
+            else
+                status = service_ble_name_set(cmd->pdata, cmd->len);
+
+            uint8_t response[1 + BLE_DEVICE_NAME_MAX_BYTES + 1] = {status};
+            uint8_t response_len = 1;
+            if(status == 0)
+            {
+                const char *name = service_ble_name_get();
+                size_t name_len = strlen(name) + 1;
+                memcpy(&response[1], name, name_len);
+                response_len += (uint8_t)name_len;
+            }
+            service_ble_send_resp(cmd->ch, response, response_len);
+            break;
+        }
         case BLE_FILM_TRANS_CH_FILE_START :
         {
             if(ble_file_reset() != 0)

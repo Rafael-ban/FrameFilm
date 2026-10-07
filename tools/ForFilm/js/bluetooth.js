@@ -80,6 +80,10 @@ const BLE_FILM_TRANS_CH_CTRL_KEYBOARD_KEY_SET = 0x43;
 const BLE_FILM_TRANS_CH_CTRL_KEYBOARD_KEY_GET = 0x44;
 const BLE_FILM_TRANS_CH_CTRL_TIME_SYNC = 0x4D;
 const BLE_FILM_TRANS_CH_CTRL_KEY_INJECT = 0x4E;
+const BLE_FILM_TRANS_CH_DEVICE_NAME_GET = 0x54;
+const BLE_FILM_TRANS_CH_DEVICE_NAME_SET = 0x55;
+const ARK_DEVICE_NAME_PREFIX = 'FRAMEFILMARK-';
+let arkNamePending = null;
 
 // App 控制通道（仅通行证版 / FRAMEFILMARK 实现）：
 // 0x4B 切换 app（1 字节 app_id，设备不回包）；0x4C 查询当前 app
@@ -169,7 +173,7 @@ async function processQueue() {
 async function onDeviceConnected(deviceName) {
     // 根据设备名称检测设备类型（USB 无名称时，随后会由屏幕参数查询纠正）
     var upperName = (deviceName || '').toUpperCase();
-    if (upperName.indexOf('ARK') !== -1) {
+    if (upperName.indexOf('FRAMEFILMARK') === 0) {
         // 通行证版（FRAMEFILMARK）：单机型，屏固定 720×480；与 PRO 同屏但功能集不同
         setDeviceType('FRAMEFILMARK');
     } else if (upperName.indexOf('MAX') !== -1) {
@@ -245,6 +249,10 @@ async function onDeviceConnected(deviceName) {
         }
     }, 5800);
 
+    if (currentDeviceType === 'FRAMEFILMARK' && device && device.gatt) {
+        setTimeout(() => { loadArkDeviceName(); }, 1200);
+    }
+
     // 显示网络配置面板（默认折叠，wifi使能后自动展开）
     var netSection = document.getElementById('network-section');
     if (netSection) netSection.style.display = 'block';
@@ -306,6 +314,7 @@ function initBluetooth() {
 }
 
 function onDisconnected(event) {
+    finishArkNameRequest(new Error('设备已断开'));
     filmTransState = BLE_FILM_TRANS_STATE_IDLE;
     setDeviceType('FRAMEFILM');
     var status = document.getElementById('connection-status');
@@ -319,6 +328,8 @@ function onDisconnected(event) {
     }
     var netSection = document.getElementById('network-section');
     if (netSection) netSection.style.display = 'none';
+    const nameCurrent = document.getElementById('ark-device-name-current');
+    if (nameCurrent) nameCurrent.textContent = '未连接';
 }
 
 async function disconnectDevice() {
@@ -945,6 +956,103 @@ function syncTimeSyncAvailability() {
     }
 }
 
+function syncArkDeviceNameAvailability() {
+    const section = document.getElementById('ark-device-name-section');
+    if (section) section.style.display = currentDeviceType === 'FRAMEFILMARK' ? '' : 'none';
+}
+
+function finishArkNameRequest(error, name) {
+    const pending = arkNamePending;
+    if (!pending) return;
+    arkNamePending = null;
+    clearTimeout(pending.timer);
+    if (error) pending.reject(error); else pending.resolve(name);
+}
+
+function parseArkNameResponse(payload) {
+    if (!payload.length) throw new Error('设备名称回包为空');
+    if (payload[0] === 1) throw new Error('名称参数无效');
+    if (payload[0] === 2) throw new Error('设备保存失败，请重试');
+    if (payload[0] !== 0) throw new Error('设备返回未知状态 ' + payload[0]);
+    const nameBytes = payload.slice(1);
+    if (!nameBytes.length || nameBytes[nameBytes.length - 1] !== 0) throw new Error('设备名称回包缺少结束符');
+    const name = new TextDecoder('utf-8', { fatal: true }).decode(nameBytes.slice(0, -1));
+    if (name.indexOf(ARK_DEVICE_NAME_PREFIX) !== 0) throw new Error('设备返回的名称前缀无效');
+    return name;
+}
+
+function requestArkDeviceName(channel, suffix) {
+    if (!device || !server || !characteristic || !device.gatt || !device.gatt.connected)
+        return Promise.reject(new Error('请先通过蓝牙连接 Ark'));
+    if (arkNamePending) return Promise.reject(new Error('上一条名称命令尚未完成'));
+    if (filmTransState !== BLE_FILM_TRANS_STATE_IDLE && filmTransState !== BLE_FILM_TRANS_STATE_STOPPED ||
+        otaTransState !== BLE_OTA_TRANS_STATE_IDLE && otaTransState !== BLE_OTA_TRANS_STATE_STOPPED)
+        return Promise.reject(new Error('文件传输期间不能修改设备名称'));
+    const encoded = channel === BLE_FILM_TRANS_CH_DEVICE_NAME_SET ? new TextEncoder().encode(suffix) : new Uint8Array();
+    const payload = channel === BLE_FILM_TRANS_CH_DEVICE_NAME_SET ? new Uint8Array(encoded.length + 1) : encoded;
+    if (channel === BLE_FILM_TRANS_CH_DEVICE_NAME_SET) payload.set(encoded);
+    const packet = new Uint8Array(payload.length + 4);
+    packet[0] = BLE_CMD_HEAD; packet[1] = channel; packet[2] = payload.length;
+    packet.set(payload, 3);
+    packet[packet.length - 1] = calculateChecksum(packet, packet.length - 1);
+    const nameCharacteristic = characteristic;
+    return new Promise((resolve, reject) => {
+        const pending = { channel, resolve, reject, timer: null };
+        arkNamePending = pending;
+        queueBleCmd(async () => {
+            if (arkNamePending !== pending) return;
+            if (!device || !device.gatt || !device.gatt.connected || characteristic !== nameCharacteristic) {
+                finishArkNameRequest(new Error('设备已断开'));
+                return;
+            }
+            if (filmTransState !== BLE_FILM_TRANS_STATE_IDLE && filmTransState !== BLE_FILM_TRANS_STATE_STOPPED ||
+                otaTransState !== BLE_OTA_TRANS_STATE_IDLE && otaTransState !== BLE_OTA_TRANS_STATE_STOPPED) {
+                finishArkNameRequest(new Error('文件传输期间不能修改设备名称'));
+                return;
+            }
+            try {
+                await nameCharacteristic.writeValue(packet);
+                if (arkNamePending === pending) {
+                    pending.timer = setTimeout(() => finishArkNameRequest(new Error('设备未响应；可能需要 Ark 固件 3.2.5 或更新版本')), 5000);
+                }
+                await delay(BLE_CTRL_DELAY);
+            } catch (error) {
+                if (arkNamePending === pending) finishArkNameRequest(error);
+            }
+        });
+    });
+}
+
+async function loadArkDeviceName() {
+    const status = document.getElementById('ark-device-name-status');
+    if (currentDeviceType !== 'FRAMEFILMARK' || !status) return;
+    status.textContent = '正在读取设备名称…';
+    try {
+        const name = await requestArkDeviceName(BLE_FILM_TRANS_CH_DEVICE_NAME_GET);
+        document.getElementById('ark-device-name-current').textContent = name;
+        document.getElementById('ark-device-name-suffix').value = name.slice(ARK_DEVICE_NAME_PREFIX.length);
+        status.textContent = '已读取设备当前配置。';
+    } catch (error) { status.textContent = '读取失败：' + error.message; }
+}
+
+async function saveArkDeviceName() {
+    const status = document.getElementById('ark-device-name-status');
+    const button = document.getElementById('ark-device-name-save');
+    const suffix = document.getElementById('ark-device-name-suffix').value;
+    const byteLength = new TextEncoder().encode(suffix).length;
+    if (byteLength < 1 || byteLength > 16 || !suffix.trim() || /[\x00-\x1f\x7f-\x9f]/.test(suffix)) {
+        status.textContent = '后缀须为 1–16 个 UTF-8 字节，不能全为空白或包含控制字符。';
+        return;
+    }
+    button.disabled = true; status.textContent = '正在保存名称…';
+    try {
+        const name = await requestArkDeviceName(BLE_FILM_TRANS_CH_DEVICE_NAME_SET, suffix);
+        document.getElementById('ark-device-name-current').textContent = name;
+        status.textContent = '已保存 ' + name + '。重启设备后广播名称生效。';
+    } catch (error) { status.textContent = '保存失败：' + error.message; }
+    finally { button.disabled = false; }
+}
+
 // ==================== App 控制 / 动画参数（仅通行证版） ====================
 // 0x4B 切换 app：设备收到后由 app 调度器消费，不回包。
 // 动画上传靠它把设备切到「动画」页（数据目录随之切到 /sdcard/animation）。
@@ -1234,11 +1342,22 @@ function setupBluetoothListener() {
         const value = event.target.value;
         if (!value || value.byteLength < 4) return;
 
-        const data = new Uint8Array(value.buffer);
+        const data = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
         console.log('收到蓝牙数据:', Array.from(data).map(b => b.toString(16)).join(' '));
 
         const cmdType = data[1];
         const cmdLen = data[2];
+
+        if (arkNamePending && cmdType === arkNamePending.channel) {
+            if (data.length !== cmdLen + 4 || data[0] !== BLE_CMD_HEAD ||
+                calculateChecksum(data, data.length - 1) !== data[data.length - 1]) {
+                finishArkNameRequest(new Error('设备名称回包格式或校验和无效'));
+            } else {
+                try { finishArkNameRequest(null, parseArkNameResponse(data.slice(3, -1))); }
+                catch (error) { finishArkNameRequest(error); }
+            }
+            return;
+        }
 
         if (data[0] === BLE_CMD_HEAD && cmdType === BLE_FILM_TRANS_CH_CTRL_PWRREAD && cmdLen === 1) {
             const batteryLevel = data[3];

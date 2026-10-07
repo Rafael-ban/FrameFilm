@@ -52,6 +52,7 @@
 #include "sys_event.h"
 #include "service_ble_gatts.h"
 #include "service_ble.h"
+#include "service_ble_name.h"
 
 /*********************************************************************
  * MACROS
@@ -190,7 +191,7 @@ static const esp_gatts_attr_db_t m_service_gatt_db[DEV_M_IDX_NB] =
 
 };
 
-static const esp_gatts_attr_db_t dev_info_gatt_db[DEV_IDX_NB] =
+static esp_gatts_attr_db_t dev_info_gatt_db[DEV_IDX_NB] =
 {
     // Service Declaration
     [IDX_SVC_DEV]     =
@@ -212,7 +213,7 @@ static const esp_gatts_attr_db_t dev_info_gatt_db[DEV_IDX_NB] =
     [IDX_CHAR_VAL_1] =
     {   {ESP_GATT_AUTO_RSP}, {
             ESP_UUID_LEN_16, (uint8_t *) &DEVICE_NAME_CHAR_UUID, ESP_GATT_PERM_READ,
-            GATTS_CHAR_VAL_LEN_MAX, sizeof(SYS_DEVICE_NAME), (uint8_t *)SYS_DEVICE_NAME
+            GATTS_CHAR_VAL_LEN_MAX, 0, NULL
         }
     },
 
@@ -330,6 +331,8 @@ static uint8_t ble_gatt_mode = BLE_GATT_MODE_S;
 static uint8_t ble_gatts_init = BLE_GATTS_UNINIT;
 static uint8_t ble_gatts_connect = BLE_GATTS_DISCONNECT;
 static uint8_t sys_ble_mac[6] = {0};
+/* A name change is advertised only after the next BLE initialization. */
+static char m_active_name[BLE_DEVICE_NAME_MAX_BYTES + 1];
 
 #ifdef CONFIG_SET_RAW_ADV_DATA
 static uint8_t raw_adv_data[] =
@@ -357,10 +360,8 @@ static uint8_t adv_service_uuid128[16] =
 static esp_ble_adv_data_t adv_data =
 {
     .set_scan_rsp = false,
-    .include_name = true,
+    .include_name = false,
     .include_txpower = false,
-    .min_interval = BLE_DEFAULT_MIN_INT, //slave connection min interval, Time = min_interval * 1.25 msec
-    .max_interval = BLE_DEFAULT_MAX_INT, //slave connection max interval, Time = max_interval * 1.25 msec
     .appearance = 0x00,
     .manufacturer_len = TEST_MANUFACTURER_DATA_LEN,
     .p_manufacturer_data =  (uint8_t *)sys_ble_mac,
@@ -375,7 +376,7 @@ static esp_ble_adv_data_t scan_rsp_data =
 {
     .set_scan_rsp = true,
     .include_name = true,
-    .include_txpower = true,
+    .include_txpower = false,
     //.min_interval = 0x0006,
     //.max_interval = 0x0010,
     .appearance = 0x00,
@@ -383,9 +384,9 @@ static esp_ble_adv_data_t scan_rsp_data =
     .p_manufacturer_data =  NULL, //&test_manufacturer[0],
     .service_data_len = 0,
     .p_service_data = NULL,
-    .service_uuid_len = sizeof(adv_service_uuid128),
-    .p_service_uuid = adv_service_uuid128,
-    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
+    .service_uuid_len = 0,
+    .p_service_uuid = NULL,
+    .flag = 0,
 };
 
 #endif /* CONFIG_SET_RAW_ADV_DATA */
@@ -529,7 +530,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
     case ESP_GATTS_REG_EVT:
         sys_logi(GATTS_TAG, "REGISTER_APP_EVT, status %d, app_id %d", param->reg.status, param->reg.app_id);
 
-        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(SYS_DEVICE_NAME);
+        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(m_active_name);
         if (set_dev_name_ret)
         {
             sys_loge(GATTS_TAG, "set device name failed, error code = %x", set_dev_name_ret);
@@ -548,20 +549,22 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         }
         adv_config_done |= SCAN_RSP_CONFIG_FLAG;
 #else
+        // Both operations are asynchronous. Mark both pending before either can complete.
+        adv_config_done = ADV_CONGIG_FLAG | SCAN_RSP_CONFIG_FLAG;
         //config adv data
         esp_err_t ret = esp_ble_gap_config_adv_data(&adv_data);
         if (ret)
         {
             sys_loge(GATTS_TAG, "config adv data failed, error code = %x", ret);
         }
-        adv_config_done |= ADV_CONGIG_FLAG;
+        if (ret) adv_config_done &= ~ADV_CONGIG_FLAG;
         //config scan response data
         ret = esp_ble_gap_config_adv_data(&scan_rsp_data);
         if (ret)
         {
             sys_loge(GATTS_TAG, "config scan response data failed, error code = %x", ret);
         }
-        adv_config_done |= SCAN_RSP_CONFIG_FLAG;
+        if (ret) adv_config_done &= ~SCAN_RSP_CONFIG_FLAG;
 
 #endif
         sys_logi(GATTS_TAG, "REGISTER_APP_EVT_A, status %d, app_id %d, gatts_if %d", param->reg.status, param->reg.app_id, gatts_if);
@@ -746,6 +749,8 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
     switch (event)
     {
     case ESP_GATTS_REG_EVT:
+        dev_info_gatt_db[IDX_CHAR_VAL_1].att_desc.length = strlen(m_active_name);
+        dev_info_gatt_db[IDX_CHAR_VAL_1].att_desc.value = (uint8_t *)m_active_name;
         sys_logi(GATTS_TAG, "REGISTER_APP_EVT, status %d, app_id %d", param->reg.status, param->reg.app_id);
         esp_err_t create_attr_ret = esp_ble_gatts_create_attr_tab(dev_info_gatt_db, gatts_if, DEV_IDX_NB, PROFILE_B_APP_ID);
         if (create_attr_ret)
@@ -892,6 +897,9 @@ void service_ble_gatt_server_init(void)
     ble_gatts_init = BLE_GATTS_UNINIT;
     ble_gatts_connect = BLE_GATTS_DISCONNECT;
     ble_gatts_notify_mask = 0x00;
+
+    service_ble_name_init();
+    strcpy(m_active_name, service_ble_name_get());
 
     esp_read_mac((uint8_t *)sys_ble_mac, ESP_MAC_BT);
     sys_logi(GATTS_TAG, "ble mac:%02x %02x %02x %02x %02x %02x", sys_ble_mac[0], sys_ble_mac[1],   
@@ -1058,6 +1066,9 @@ void service_ble_gatt_server_reinit(void)
     ble_gatts_init = BLE_GATTS_UNINIT;
     ble_gatts_connect = BLE_GATTS_DISCONNECT;
     ble_gatts_notify_mask = 0x00;
+
+    service_ble_name_init();
+    strcpy(m_active_name, service_ble_name_get());
 
     //gatts 初始化
     p_ret = 0;

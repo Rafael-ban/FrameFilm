@@ -99,6 +99,8 @@ extern "C"{
 #define BLE_FILM_TRANS_CH_DIRECT_STATUS                    (0x51)
 #define BLE_FILM_TRANS_CH_DIRECT_CANCEL                    (0x52)
 #define BLE_FILM_TRANS_CH_PROFILE_READ                     (0x53) // Ark 通行证资料 JSON 分块读取
+#define BLE_FILM_TRANS_CH_DEVICE_NAME_GET                  (0x54) // 查询已配置完整名称
+#define BLE_FILM_TRANS_CH_DEVICE_NAME_SET                  (0x55) // 设置 UTF-8 后缀 + NUL，下次 BLE 初始化生效
 #define BLE_DIRECT_START_DATA_MAX                         (192)
 
 /* KEY_INJECT 的键值。与 input_press_type_t 无关：协议层不依赖 HAL 枚举，

@@ -61,6 +61,7 @@ class ArkSession(context: Context, private val listener: Listener) {
     })
 
     val isReady: Boolean get() = ble.isReady
+    fun scannedName(address: String): String? = ble.scannedName(address)
     val transferActive: Boolean get() = pendingStart != null || settling || coordinator?.isActive == true
 
     private fun onMain(block: () -> Unit) {

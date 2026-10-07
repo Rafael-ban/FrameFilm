@@ -997,6 +997,16 @@
                     </button>
                 </div>
                 <div id="debug-log" class="debug-log"></div>
+                <div class="action-item" id="ark-device-name-section" style="display:none;">
+                    <div class="action-header"><span>Ark 设备名称</span></div>
+                    <div class="switch-row__hint">固定前缀 FRAMEFILMARK-；后缀限 1–16 个 UTF-8 字节。保存后重启设备生效。</div>
+                    <div class="action-controls">
+                        <span id="ark-device-name-current">连接后读取</span>
+                        <input id="ark-device-name-suffix" type="text" aria-label="Ark 设备名称后缀" autocomplete="off" placeholder="名称后缀">
+                        <button class="secondary-button" id="ark-device-name-save" onclick="saveArkDeviceName()">保存名称</button>
+                    </div>
+                    <div id="ark-device-name-status" class="switch-row__hint" role="status"></div>
+                </div>
                 <div class="action-item">
                     <div class="action-header">
                         <svg class="ic" viewBox="0 0 24 24"><use href="#i-upload"/></svg>

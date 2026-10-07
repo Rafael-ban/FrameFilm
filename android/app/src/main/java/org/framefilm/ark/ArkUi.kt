@@ -54,6 +54,8 @@ class ArkUi(private val activity: Activity, private val actions: Actions) {
         fun onDeleteFile(id: Int)
         fun onSetting(channel: Int, data: ByteArray)
         fun onReadSettings()
+        fun onReadDeviceName()
+        fun onSaveDeviceName(suffix: String)
         fun onPickFilm()
         fun onQuote(text: String, author: String)
     }
@@ -84,6 +86,8 @@ class ArkUi(private val activity: Activity, private val actions: Actions) {
     private lateinit var wifiSwitch: Switch
     private lateinit var wifiSsid: EditText
     private lateinit var wifiPassword: EditText
+    private lateinit var deviceNameSuffix: EditText
+    private lateinit var deviceNameStatus: TextView
     private lateinit var transferCard: LinearLayout
     private lateinit var transferTitle: TextView
     private lateinit var transferCount: TextView
@@ -434,6 +438,17 @@ class ArkUi(private val activity: Activity, private val actions: Actions) {
 
     private fun buildSettingsPage() {
         val body = page()
+        body.addCard(card("蓝牙设备名", "00") {
+            addView(text("固定前缀 FRAMEFILMARK- · 后缀最多 16 个 UTF-8 字节", 13f, muted))
+            addView(space(10))
+            deviceNameSuffix = field("设备名后缀")
+            addField("FRAMEFILMARK-", deviceNameSuffix)
+            addButtons(button("读取设备名") { actions.onReadDeviceName() },
+                button("保存设备名", true) { actions.onSaveDeviceName(deviceNameSuffix.text.toString()) })
+            addView(space(8))
+            deviceNameStatus = text("保存后重启设备或重新初始化蓝牙才会生效", 12f, muted)
+            addView(deviceNameStatus)
+        })
         body.addCard(card("设备文件", "01") {
             addView(button("刷新文件列表") { actions.onRefreshFiles() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)))
             addView(space(12))
@@ -610,6 +625,13 @@ class ArkUi(private val activity: Activity, private val actions: Actions) {
     }
 
     fun showBattery(level: Int) { battery.text = "${level.coerceIn(0, 100)}%" }
+
+    fun showDeviceName(name: String, saved: Boolean) {
+        deviceNameSuffix.setText(name.removePrefix("FRAMEFILMARK-"))
+        deviceNameStatus.text = if (saved) "已保存 $name；重启设备或重新初始化蓝牙后生效" else "当前配置：$name"
+    }
+
+    fun showDeviceNameStatus(message: String) { deviceNameStatus.text = message }
 
     fun showSetting(channel: Int, data: ByteArray) {
         if (channel == 0x26 && data.isNotEmpty()) {

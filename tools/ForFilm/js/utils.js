@@ -115,6 +115,9 @@ function onDeviceTypeChanged() {
     if (typeof syncRemoteAvailability === 'function') {
         syncRemoteAvailability();
     }
+    if (typeof syncArkDeviceNameAvailability === 'function') {
+        syncArkDeviceNameAvailability();
+    }
     // 动画工坊：设备播放能力随机型变化（仅 ARK 可播）
     if (typeof animSyncDeviceAvailability === 'function') {
         animSyncDeviceAvailability();

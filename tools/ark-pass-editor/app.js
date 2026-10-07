@@ -7,6 +7,8 @@
   const SERVICE_UUID = '00002000-0000-1000-8000-00805f9b34fb';
   const CHARACTERISTIC_UUID = '00002001-0000-1000-8000-00805f9b34fb';
   const CH = { start: 0x03, name: 0x00, length: 0x01, data: 0x02, stop: 0x04 };
+  const DEVICE_NAME_PREFIX = 'FRAMEFILMARK-';
+  const NAME_GET = 0x54, NAME_SET = 0x55;
   const $ = (id) => document.getElementById(id);
   const canvas = $('preview');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -17,7 +19,8 @@
   let profile = emptyProfile();
   let avatarImage = null;
   let valid = false;
-  let device = null, characteristic = null, transfer = null, readJob = null, readWaiter = null;
+  let device = null, characteristic = null, transfer = null, readJob = null, readWaiter = null, nameWaiter = null;
+  let nameWriteInProgress = false;
 
   function emptyProfile() {
     return { version: PROFILE_VERSION, codename: '', codenameUnset: false,
@@ -215,10 +218,51 @@
     readWaiter = null; clearTimeout(waiter.timer);
     if (error) waiter.reject(error); else waiter.resolve(response);
   }
+  function finishNameWaiter(error, response) {
+    const waiter = nameWaiter;
+    if (!waiter) return;
+    nameWaiter = null; clearTimeout(waiter.timer);
+    if (error) waiter.reject(error); else waiter.resolve(response);
+  }
+  function updateNameControls() {
+    const available = !!characteristic && !!device?.gatt?.connected && !transfer && !readJob &&
+      !nameWaiter && !nameWriteInProgress;
+    $('device-name-read').disabled = !available;
+    $('device-name-save').disabled = !available;
+    $('device-name-suffix').disabled = !available;
+  }
+  function prepareProfileOperation() {
+    if (nameWriteInProgress || nameWaiter?.channel === NAME_SET) {
+      setDeviceStatus('名称命令正在保存或写入；请稍候再操作资料。');
+      return false;
+    }
+    if (nameWaiter) finishNameWaiter(new Error('已开始资料操作，名称查询已中止。'));
+    return true;
+  }
+  function nameResponse(payload) {
+    const errors = { 1: '名称参数无效。', 2: '设备保存失败，请重试。' };
+    if (!payload.length) throw new Error('设备名称回包为空。');
+    if (payload[0] !== 0) throw new Error(errors[payload[0]] || `设备返回未知状态 ${payload[0]}。`);
+    const nameBytes = payload.subarray(1);
+    if (!nameBytes.length || nameBytes[nameBytes.length - 1] !== 0) throw new Error('设备名称回包缺少结束符。');
+    const name = new TextDecoder('utf-8', { fatal: true }).decode(nameBytes.subarray(0, -1));
+    if (!name.startsWith(DEVICE_NAME_PREFIX)) throw new Error('设备返回的名称前缀无效。');
+    return name;
+  }
   function onNotification(event) {
-    if (!readWaiter) return;
     const value = event.target.value;
     const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    if (nameWaiter && bytes.length >= 2 && bytes[1] === nameWaiter.channel) {
+      if (bytes.length < 4 || bytes[0] !== 0x55 || bytes[2] !== bytes.length - 4 ||
+          bytes.subarray(0, -1).reduce((sum, byte) => (sum + byte) & 255, 0) !== bytes[bytes.length - 1]) {
+        finishNameWaiter(new Error('设备名称回包格式或校验和无效。'));
+      } else {
+        try { finishNameWaiter(null, nameResponse(bytes.subarray(3, -1))); }
+        catch (error) { finishNameWaiter(error); }
+      }
+      return;
+    }
+    if (!readWaiter) return;
     if (bytes.length < 2 || bytes[1] !== 0x53) return; // 其它命令的通知不属于本次读取。
     if (bytes.length < 4 || bytes[0] !== 0x55 || bytes[2] !== bytes.length - 4 ||
         bytes.subarray(0, bytes.length - 1).reduce((sum, byte) => (sum + byte) & 255, 0) !== bytes[bytes.length - 1]) {
@@ -242,6 +286,65 @@
     }
     finishReadWaiter(null, { offset, total, data: new Uint8Array(data) });
   }
+  function requestName(channel, suffix = '') {
+    if (!characteristic || !device?.gatt?.connected || transfer || readJob || nameWaiter || nameWriteInProgress)
+      return Promise.reject(new Error('设备未连接或正在执行其他操作。'));
+    const encoded = channel === NAME_SET ? new TextEncoder().encode(suffix) : new Uint8Array();
+    const payload = channel === NAME_SET ? new Uint8Array(encoded.length + 1) : encoded;
+    if (channel === NAME_SET) payload.set(encoded);
+    return new Promise((resolve, reject) => {
+      const waiter = { channel, resolve, reject, timer: null };
+      nameWaiter = waiter;
+      nameWriteInProgress = true;
+      characteristic.writeValue(packet(channel, payload)).then(() => {
+        nameWriteInProgress = false;
+        if (nameWaiter === waiter) waiter.timer = setTimeout(() =>
+          finishNameWaiter(new Error('读取或保存超时；设备可能需要 Ark 固件 3.2.5 或更新版本。')), 5000);
+        updateNameControls();
+      }, (error) => {
+        nameWriteInProgress = false;
+        if (nameWaiter === waiter) finishNameWaiter(error);
+        updateNameControls();
+      });
+    });
+  }
+  async function loadName() {
+    if (nameWaiter || nameWriteInProgress || transfer || readJob) {
+      $('device-name-status').textContent = '设备正在执行其他操作，请稍候再读取名称。';
+      return;
+    }
+    $('device-name-status').textContent = '正在读取设备名称…';
+    try {
+      const result = requestName(NAME_GET);
+      updateNameControls();
+      const name = await result;
+      $('device-name-current').textContent = name;
+      $('device-name-suffix').value = name.slice(DEVICE_NAME_PREFIX.length);
+      $('device-name-status').textContent = '已读取设备当前配置。';
+    } catch (error) { $('device-name-status').textContent = `读取失败：${error.message}`; }
+    finally { updateNameControls(); }
+  }
+  async function saveName() {
+    if (nameWaiter || nameWriteInProgress || transfer || readJob) {
+      $('device-name-status').textContent = '设备正在执行其他操作，请稍候再保存名称。';
+      return;
+    }
+    const suffix = $('device-name-suffix').value;
+    const byteLength = new TextEncoder().encode(suffix).length;
+    if (byteLength < 1 || byteLength > 16 || !suffix.trim() || /[\x00-\x1f\x7f-\x9f]/.test(suffix)) {
+      $('device-name-status').textContent = '后缀须为 1–16 个 UTF-8 字节，不能全为空白或包含控制字符。';
+      return;
+    }
+    $('device-name-status').textContent = '正在保存名称…';
+    try {
+      const result = requestName(NAME_SET, suffix);
+      updateNameControls();
+      const name = await result;
+      $('device-name-current').textContent = name;
+      $('device-name-status').textContent = `已保存 ${name}。重启设备后广播名称生效。`;
+    } catch (error) { $('device-name-status').textContent = `保存失败：${error.message}`; }
+    finally { updateNameControls(); }
+  }
   function requestReadChunk(offset, count, job) {
     if (readJob !== job || job.cancelled || !characteristic || !device?.gatt?.connected)
       return Promise.reject(new Error('读取已取消或设备已断开。'));
@@ -258,7 +361,9 @@
   }
   async function readFromDevice() {
     if (!characteristic || transfer || readJob) return;
+    if (!prepareProfileOperation()) return;
     const job = { cancelled: false }; readJob = job;
+    updateNameControls();
     setEditingLocked(true);
     $('connect').disabled = true; $('send').disabled = true; $('read-device').disabled = true; $('cancel').disabled = false;
     $('progress').value = 0; setDeviceStatus('正在读取设备上的 profile.json；当前草稿会在完整校验后替换。');
@@ -284,6 +389,7 @@
       if (readWaiter) finishReadWaiter(new Error('读取已结束。'));
       readJob = null; setEditingLocked(false); $('connect').disabled = false; $('cancel').disabled = true;
       validate(); $('read-device').disabled = !characteristic;
+      updateNameControls();
     }
   }
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -315,6 +421,9 @@
     characteristic = null;
     if (transfer) transfer.interrupted = true;
     if (readJob) finishReadWaiter(new Error('设备已断开。'));
+    finishNameWaiter(new Error('设备已断开。'));
+    updateNameControls();
+    $('device-name-current').textContent = '未连接';
     $('send').disabled = true; $('read-device').disabled = true; $('cancel').disabled = true;
     $('connect').disabled = false;
     setDeviceStatus(transfer ? transferFailureText(transfer, transfer.cancelled ? '已取消' : '设备已断开') :
@@ -333,7 +442,7 @@
     if (!navigator.bluetooth) { setDeviceStatus('浏览器不支持 Web Bluetooth。请使用受支持的浏览器与 localhost/HTTPS。'); return; }
     $('connect').disabled = true; setDeviceStatus('等待手动选择 FRAMEFILMARK…');
     try {
-      const selected = await navigator.bluetooth.requestDevice({ filters: [{ name: 'FRAMEFILMARK' }], optionalServices: [SERVICE_UUID] });
+      const selected = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'FRAMEFILMARK' }], optionalServices: [SERVICE_UUID] });
       if (device) {
         device.removeEventListener('gattserverdisconnected', disconnected);
         if (characteristic) characteristic.removeEventListener('characteristicvaluechanged', onNotification);
@@ -345,18 +454,23 @@
       await nextCharacteristic.startNotifications();
       nextCharacteristic.addEventListener('characteristicvaluechanged', onNotification);
       characteristic = nextCharacteristic;
+      updateNameControls();
       setDeviceStatus(`已连接 ${device.name || 'FRAMEFILMARK'}，可以发送或读取。`);
       $('send').disabled = !valid;
       $('read-device').disabled = false;
+      loadName();
     } catch (error) {
       characteristic = null;
       $('read-device').disabled = true;
+      updateNameControls();
       setDeviceStatus(error.name === 'NotFoundError' ? '已取消设备选择；可再次连接。' : `连接失败或无法启用通知：${error.message}。可重试。`);
     } finally { $('connect').disabled = false; }
   }
   async function send() {
     if (!validate() || !characteristic || transfer || readJob) return;
+    if (!prepareProfileOperation()) return;
     const job = { cancelled: false, interrupted: false, binDone: false, jsonDone: false }; transfer = job;
+    updateNameControls();
     setEditingLocked(true);
     $('send').disabled = true; $('read-device').disabled = true; $('connect').disabled = true; $('cancel').disabled = false;
     $('progress').value = 0;
@@ -377,6 +491,7 @@
     } finally {
       transfer = null; setEditingLocked(false); $('cancel').disabled = true; $('connect').disabled = false;
       validate(); $('read-device').disabled = !characteristic;
+      updateNameControls();
     }
   }
   function init() {
@@ -413,6 +528,8 @@
     $('connect').addEventListener('click', connect);
     $('send').addEventListener('click', send);
     $('read-device').addEventListener('click', readFromDevice);
+    $('device-name-read').addEventListener('click', loadName);
+    $('device-name-save').addEventListener('click', saveName);
     $('cancel').addEventListener('click', () => {
       if (!transfer && !readJob) return;
       if (transfer) transfer.cancelled = true;

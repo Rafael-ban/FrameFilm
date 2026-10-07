@@ -1,6 +1,7 @@
 set(srcs "src/service_init.c"
          "src/service_ble.c"
          "src/service_ble_gatts.c"
+         "src/service_ble_name.c"
          "src/service_ota.c"
          "src/service_param.c"
          "src/service_time.c"

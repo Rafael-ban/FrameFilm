@@ -44,6 +44,12 @@ class MainActivity : Activity(), ArkUi.Actions {
     private var displayWhenListed: String? = null
     private var destroyed = false
     private var wasConnected = false
+    private class NameRequest(val channel: Int) {
+        var writeDone = false
+        var response: ByteArray? = null
+        var timeout: Runnable? = null
+    }
+    private var nameRequest: NameRequest? = null
     private var permissionAction: (() -> Unit)? = null
     private var exportFile: File? = null
     private var convertPending: Runnable? = null
@@ -60,10 +66,11 @@ class MainActivity : Activity(), ArkUi.Actions {
         session = ArkSession(this, object : ArkSession.Listener {
             override fun onDevices(devices: List<BluetoothDevice>) {
                 discoveredDevices = devices.map { it.address }
-                ui.showDevices(devices.map { it.address to "FRAMEFILMARK" })
+                ui.showDevices(devices.map { it.address to (session.scannedName(it.address) ?: "FRAMEFILMARK") })
             }
             override fun onConnection(connected: Boolean, message: String) {
                 ui.updateConnection(connected, message)
+                if (!connected && nameRequest != null) finishNameRequest("蓝牙已断开，请重新连接后重试")
                 if (connected && !wasConnected) main.postDelayed({ if (!session.transferActive) onReadSettings() }, 250)
                 wasConnected = connected
             }
@@ -179,6 +186,7 @@ class MainActivity : Activity(), ArkUi.Actions {
     }
 
     override fun onUpload(fileName: String) {
+        if (nameRequest != null) { ui.showMessage("请等待设备名称操作完成后再传输"); return }
         if (converting) { ui.showMessage("图片仍在转换，请稍候"); return }
         val file = currentFile
         if (file == null || !file.exists()) { ui.showMessage("请先选择图片或导入 film 文件"); return }
@@ -204,7 +212,10 @@ class MainActivity : Activity(), ArkUi.Actions {
         return name
     }
     override fun onCancel() = session.cancelTransfer()
-    override fun onRetry() = devicePermission { session.retryTransfer() }
+    override fun onRetry() {
+        if (nameRequest != null) { ui.showMessage("请等待设备名称操作完成后再重试传输"); return }
+        devicePermission { session.retryTransfer() }
+    }
     override fun onClear() {
         if (!canReplace()) return
         imageGeneration.incrementAndGet(); converting = false
@@ -223,6 +234,78 @@ class MainActivity : Activity(), ArkUi.Actions {
         main.postDelayed({ onRefreshFiles() }, 700)
     }
     override fun onSetting(channel: Int, data: ByteArray) { send(channel, data) }
+    override fun onReadDeviceName() = sendNameCommand(0x54)
+    override fun onSaveDeviceName(suffix: String) {
+        if (suffix.isBlank() || !Charsets.UTF_8.newEncoder().canEncode(suffix) ||
+            suffix.toByteArray(Charsets.UTF_8).size !in 1..16 ||
+            suffix.any { Character.isISOControl(it) }) {
+            ui.showDeviceNameStatus("后缀须为 1–16 个 UTF-8 字节，且不能包含控制字符")
+            return
+        }
+        sendNameCommand(0x55, suffix.toByteArray(Charsets.UTF_8) + byteArrayOf(0))
+    }
+
+    private fun sendNameCommand(channel: Int, payload: ByteArray = byteArrayOf()) {
+        if (!session.isReady || session.transferActive) {
+            ui.showDeviceNameStatus("请先连接 Ark，并等待传输结束")
+            return
+        }
+        if (nameRequest != null) {
+            ui.showDeviceNameStatus("上一条设备名命令仍在等待响应")
+            return
+        }
+        val request = NameRequest(channel)
+        nameRequest = request
+        ui.showDeviceNameStatus(if (channel == 0x54) "正在读取设备名…" else "正在保存设备名…")
+        val frame = byteArrayOf(0x55, channel.toByte(), payload.size.toByte()) + payload
+        val packet = frame + byteArrayOf((frame.sumOf { it.toInt() and 255 } and 255).toByte())
+        session.writePacket(packet) { result ->
+            if (nameRequest !== request) return@writePacket
+            val error = result.exceptionOrNull()
+            if (error != null) {
+                finishNameRequest(error.message ?: "设备名命令发送失败")
+            } else {
+                request.writeDone = true
+                request.response?.let { completeNameRequest(request, it) } ?: run {
+                    request.timeout = Runnable {
+                        if (nameRequest === request) finishNameRequest("设备未响应；可能需要更新固件，请重试")
+                    }.also { main.postDelayed(it, 7_000) }
+                }
+            }
+        }
+    }
+
+    private fun finishNameRequest(message: String) {
+        nameRequest?.timeout?.let(main::removeCallbacks)
+        nameRequest = null
+        ui.showDeviceNameStatus(message)
+    }
+
+    private fun completeNameRequest(request: NameRequest, data: ByteArray) {
+        if (nameRequest !== request || !request.writeDone) return
+        if (data.size == 1 && data[0].toInt() != 0) {
+            finishNameRequest(when (data[0].toInt() and 255) {
+                1 -> "设备名参数无效，请检查后缀"
+                2 -> "设备保存失败，请重试"
+                else -> "设备返回未知状态"
+            })
+            return
+        }
+        if (data.size !in 3..31 || data[0].toInt() != 0 || data.last() != 0.toByte()) {
+            finishNameRequest("设备名响应格式错误")
+            return
+        }
+        val nameBytes = data.copyOfRange(1, data.lastIndex)
+        val name = String(nameBytes, Charsets.UTF_8)
+        if (!nameBytes.contentEquals(name.toByteArray(Charsets.UTF_8)) ||
+            !name.startsWith("FRAMEFILMARK-") || nameBytes.size > 29) {
+            finishNameRequest("设备名响应格式错误")
+            return
+        }
+        request.timeout?.let(main::removeCallbacks)
+        nameRequest = null
+        ui.showDeviceName(name, saved = request.channel == 0x55)
+    }
     override fun onReadSettings() {
         listOf(0x42, 0x23, 0x26, 0x28, 0x2A, 0x31, 0x33, 0x35).forEach { send(it) }
         onRefreshFiles()
@@ -239,6 +322,14 @@ class MainActivity : Activity(), ArkUi.Actions {
         val size = packet[2].toInt() and 255
         if (packet.size < size + 4) return
         val data = packet.copyOfRange(3, 3 + size)
+        if (channel == 0x54 || channel == 0x55) {
+            val request = nameRequest
+            if (request?.channel == channel) {
+                request.response = data
+                completeNameRequest(request, data)
+            }
+            return
+        }
         when {
             channel == 0x23 && size == 1 -> ui.showBattery(data[0].toInt() and 255)
             channel == 0x06 && size >= 2 -> {
