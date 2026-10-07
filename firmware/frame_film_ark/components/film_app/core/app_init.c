@@ -41,6 +41,7 @@
 #include "hal_epd.h"
 #include "hal_sd.h"
 #include "service_ble.h"
+#include "service_monitor.h"
 #include "ui_conf.h"    /* UI_CALIB_FRAME：标定帧模式下开机页暂停自动前进 */
 #include "app_init.h"
 #include "app_manager.h"
@@ -108,6 +109,7 @@ void film_app_init(void)
     {
         sys_logw(APP_INIT_TAG, "ui core init failed, ui layer unavailable");
     }
+    service_monitor_set_sleep_prepare_cb(app_manager_prepare_sleep);
 
     /* 3. 注册 app：图片/模板为通用底座（模板承接蓝牙/WiFi 的任意实时推送内容）；
           仅全功能模式额外注册其余 app，简易/关闭模式省下这部分 flash 与运行开销。

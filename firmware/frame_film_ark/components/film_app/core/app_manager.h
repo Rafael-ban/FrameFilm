@@ -1,6 +1,8 @@
 #ifndef __APP_MANAGER_H__
 #define __APP_MANAGER_H__
 
+#include <stdbool.h>
+
 /*********************************************************************
  * INCLUDES
  */
@@ -32,6 +34,8 @@ typedef enum {
  * 由 film_app_init() 调用。
  */
 void app_manager_init(void);
+/* monitor 注册的休眠屏障回调；仅返回已真正停止 app/UI 的结果。 */
+bool app_manager_prepare_sleep(void);
 
 /**
  * @brief 注册一个 app 到调度器

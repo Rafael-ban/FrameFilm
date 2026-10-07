@@ -40,6 +40,7 @@
 #include "sys_log.h"
 #include "hal_api.h"
 #include "service_ble_gatts.h"
+#include "service_ble.h"
 #include "service_monitor.h"
 #include "service_param.h"
 #include "service_wifi.h"
@@ -111,6 +112,7 @@ static QueueHandle_t m_monitor_msg_hdl = NULL;
 static TimerHandle_t m_monitor_timer = NULL;
 static monitor_state_t m_monitor_state;
 static atomic_bool m_sleep_pending = false;
+static service_monitor_sleep_prepare_cb_t m_sleep_prepare_cb = NULL;
 
 /*********************************************************************
  * GLOBAL VARIABLES
@@ -197,6 +199,11 @@ bool service_monitor_sleep_pending(void)
     return atomic_load(&m_sleep_pending);
 }
 
+void service_monitor_set_sleep_prepare_cb(service_monitor_sleep_prepare_cb_t cb)
+{
+    m_sleep_prepare_cb = cb;
+}
+
 static void monitor_task_handle(void *pvParameters)
 {
     m_monitor_msg_hdl = xQueueCreate( MONITOR_MSG_QUEUE_LENGTH, MONITOR_MSG_QUEUE_ITEM_SIZE );
@@ -254,19 +261,19 @@ static void monitor_timer_callback(TimerHandle_t xTimer)
     if((m_monitor_state.tick_counter % MONITOR_LED_TICK_COUNT) == 0)
     {
         msg.ID = MSG_LED_MANAGER;
-        monitor_msg_send(&msg, 0);
+        if(m_monitor_msg_hdl) (void)xQueueSend(m_monitor_msg_hdl, &msg, 0);
     }
 
     if((m_monitor_state.tick_counter % MONITOR_BAT_TICK_COUNT) == 0)
     {
         msg.ID = MSG_BATTERY_MANAGER;
-        monitor_msg_send(&msg, 0);
+        if(m_monitor_msg_hdl) (void)xQueueSend(m_monitor_msg_hdl, &msg, 0);
     }
 
     if((m_monitor_state.tick_counter % MONITOR_SLEEP_TICK_COUNT) == 0)
     {
         msg.ID = MSG_AUTO_SLEEP_MANAGER;
-        monitor_msg_send(&msg, 0);
+        if(m_monitor_msg_hdl) (void)xQueueSend(m_monitor_msg_hdl, &msg, 0);
     }
 }
 
@@ -401,6 +408,16 @@ static void monitor_enter_low_power(void)
        按键仍按下时保留 pending，由 200ms 心跳重试，不阻塞 monitor。 */
     if(hal_pwr_wake_condition_met())
     {
+        return;
+    }
+    if(m_sleep_prepare_cb == NULL || !m_sleep_prepare_cb())
+    {
+        sys_logw(MONITOR_TAG, "sleep deferred: app/UI not stopped");
+        return;
+    }
+    if(!service_ble_prepare_sleep())
+    {
+        sys_logw(MONITOR_TAG, "sleep deferred: BLE file transfer not closed");
         return;
     }
     /* 网络写入和会话恢复完成后才允许卸载 SD、切断外设供电。 */

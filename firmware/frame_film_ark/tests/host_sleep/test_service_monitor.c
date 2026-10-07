@@ -13,6 +13,16 @@ static int timer_stop_count;
 static int peripheral_deinit_count;
 static int sleep_count;
 static int timer_wakeup_count;
+static bool app_ready;
+static bool ble_file_closed;
+static int app_prepare_count;
+static int ble_prepare_count;
+
+static bool prepare_app(void)
+{
+    ++app_prepare_count;
+    return app_ready;
+}
 
 static void reset_case(void)
 {
@@ -24,6 +34,9 @@ static void reset_case(void)
     wake_pressed = false;
     cancel_count = wifi_deinit_count = timer_stop_count = 0;
     peripheral_deinit_count = sleep_count = timer_wakeup_count = 0;
+    app_ready = ble_file_closed = false;
+    app_prepare_count = ble_prepare_count = 0;
+    service_monitor_set_sleep_prepare_cb(prepare_app);
 }
 
 static void assert_no_teardown(void)
@@ -69,9 +82,37 @@ static void test_manual_sleep_waits_for_transfer_and_release(void)
 
     wake_pressed = false;
     monitor_auto_sleep_manage_event();
+    assert(app_prepare_count == 1);
+    assert(ble_prepare_count == 0);
+    assert_no_teardown(); /* app/UI 尚未确认停屏，不得关闭 EPD。 */
+
+    app_ready = true;
+    monitor_auto_sleep_manage_event();
+    assert(ble_prepare_count == 1);
+    assert_no_teardown(); /* BLE 暂存文件仍打开，不得卸载 SD。 */
+
+    ble_file_closed = true;
+    monitor_auto_sleep_manage_event();
     assert(wifi_deinit_count == 1);
     assert(timer_stop_count == 1);
     assert(peripheral_deinit_count == 6);
+    assert(sleep_count == 1);
+}
+
+static void test_auto_sleep_requires_both_barriers(void)
+{
+    reset_case();
+    g_service_param.sleep.sleep_mode = 1;
+    m_monitor_state.wakeup_ticks = 1;
+    monitor_auto_sleep_manage_event();
+    assert(service_monitor_sleep_pending());
+    assert(app_prepare_count == 1);
+    assert_no_teardown();
+    app_ready = true;
+    monitor_auto_sleep_manage_event();
+    assert_no_teardown();
+    ble_file_closed = true;
+    monitor_auto_sleep_manage_event();
     assert(sleep_count == 1);
 }
 
@@ -79,7 +120,8 @@ int main(void)
 {
     test_disabled_auto_sleep();
     test_manual_sleep_waits_for_transfer_and_release();
-    puts("host_sleep: 2 tests passed");
+    test_auto_sleep_requires_both_barriers();
+    puts("host_sleep: 3 tests passed");
     return 0;
 }
 
@@ -118,6 +160,7 @@ void hal_input_deinit(void) { ++peripheral_deinit_count; }
 void hal_pwr_enter_sleep(void) { ++sleep_count; }
 bool service_ble_gatts_get_connect(void) { return false; }
 void service_ble_gatt_server_uninit(void) { ++peripheral_deinit_count; }
+bool service_ble_prepare_sleep(void) { ++ble_prepare_count; return ble_file_closed; }
 bool service_wifi_direct_busy(void) { return direct_busy; }
 void service_wifi_direct_cancel(void) { ++cancel_count; }
 void service_wifi_deinit(void) { ++wifi_deinit_count; }

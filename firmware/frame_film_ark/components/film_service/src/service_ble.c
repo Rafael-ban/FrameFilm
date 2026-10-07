@@ -30,6 +30,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -98,6 +99,8 @@ static uint32_t m_film_trans_file_size = 0;
 static uint32_t m_film_trans_received = 0;
 static volatile uint8_t m_ble_link_epoch = 0;
 static volatile uint8_t m_ble_abort_pending = 0;
+static atomic_bool m_ble_sleep_stop_sent = false;
+static atomic_bool m_ble_sleep_done = false;
 static uint8_t m_ota_trans_state = BLE_OTA_TRANS_IDLE;
 static uint32_t m_ota_trans_file_size = 0;
 static uint32_t m_ota_trans_received = 0;
@@ -115,7 +118,7 @@ static service_ble_app_id_get_cb_t m_app_id_get_cb = NULL;
 static void ble_task_handle(void *pvParameters);
 static uint8_t ble_checksum(uint8_t arr[], int len);
 static void ble_cmd_process(ble_cmd_t *cmd);
-static void ble_file_reset(void);
+static int ble_file_reset(void);
 
 void service_ble_transfer_disconnected(void)
 {
@@ -129,14 +132,42 @@ void service_ble_transfer_disconnected(void)
     }
 }
 
-static void ble_file_reset(void)
+static int ble_file_reset(void)
 {
     if(m_film_trans_state != BLE_FILM_TRANS_IDLE && m_film_trans_state != BLE_FILM_TRANS_STOPPED)
-        service_file_save_abort(FILE_SAVE_BLE);
+    {
+        /* START/NAME 尚未打开文件；LEN/DATA 才有待关闭的暂存文件。 */
+        if((m_film_trans_state == BLE_FILM_TRANS_RECV_LEN ||
+            m_film_trans_state == BLE_FILM_TRANS_RECV_DATA) &&
+           service_file_save_abort(FILE_SAVE_BLE) != 0) return -1;
+    }
     m_film_trans_state = BLE_FILM_TRANS_IDLE;
     m_film_trans_received = 0;
     m_film_trans_file_size = 0;
     m_film_trans_filename[0] = '\0';
+    return 0;
+}
+
+bool service_ble_prepare_sleep(void)
+{
+    if(m_ble_task_hdl == NULL) return true; /* BLE 从未启用，无文件写入者。 */
+    if(atomic_load(&m_ble_sleep_done)) return true;
+    if(m_ble_msg_hdl == NULL) return false;
+
+    if(!atomic_exchange(&m_ble_sleep_stop_sent, true))
+    {
+        /* 排到队首：正在执行的文件调用先完成，旧队列命令在入睡门闸下丢弃。 */
+        ble_msg_t msg = {.ID = MSG_BLE_FILE_ABORT, .subID = 1};
+        if(xQueueSendToFront(m_ble_msg_hdl, &msg, 0) != pdPASS)
+        {
+            atomic_store(&m_ble_sleep_stop_sent, false);
+            return false;
+        }
+    }
+    for(unsigned i = 0; i < 500 && atomic_load(&m_ble_sleep_stop_sent) &&
+        !atomic_load(&m_ble_sleep_done); i++)
+        vTaskDelay(pdMS_TO_TICKS(20));
+    return atomic_load(&m_ble_sleep_done);
 }
 
 /*********************************************************************
@@ -409,7 +440,12 @@ static void ble_task_handle(void *pvParameters)
             service_ble_gatts_dev_disconnect();
             break;
         case MSG_BLE_FILE_ABORT:
-            break; // 队首统一执行 m_ble_abort_pending 撤销
+            if(msg.subID == 1)
+            {
+                if(ble_file_reset() == 0) atomic_store(&m_ble_sleep_done, true);
+                else atomic_store(&m_ble_sleep_stop_sent, false);
+            }
+            break; // 普通断连在队首统一执行 m_ble_abort_pending 撤销
         default :
         {
             if( msg.len )
@@ -479,6 +515,14 @@ static void ble_cmd_process(ble_cmd_t *cmd)
         return;
     }
 
+    /* 入睡期间阻止新的写入，但手机仍须能查询/取消正在恢复的直传。 */
+    if(service_monitor_sleep_pending() &&
+       cmd->ch != BLE_FILM_TRANS_CH_DIRECT_STATUS &&
+       cmd->ch != BLE_FILM_TRANS_CH_DIRECT_CANCEL)
+    {
+        return;
+    }
+
     if(service_wifi_direct_busy() && ble_cmd_conflicts_with_direct(cmd->ch))
     {
         const uint8_t busy = 1;
@@ -518,7 +562,11 @@ static void ble_cmd_process(ble_cmd_t *cmd)
         }
         case BLE_FILM_TRANS_CH_FILE_START :
         {
-            ble_file_reset();
+            if(ble_file_reset() != 0)
+            {
+                sys_loge(BEL_SERVICE_TAG, "FILE_START: previous transfer abort failed");
+                break;
+            }
             m_film_trans_state = BLE_FILM_TRANS_STARTED;
             sys_logi(BEL_SERVICE_TAG, "Film transfer started");
             break;

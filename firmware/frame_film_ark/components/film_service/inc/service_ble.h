@@ -186,6 +186,8 @@ extern void service_ble_apply_enable(uint8_t on);
 extern void service_ble_msg_send(void *p_msg, bool in_isr);
 extern void service_ble_msg_gatts_cmd_send( uint8_t const *p_data, uint16_t len );
 extern void service_ble_transfer_disconnected(void); // GATT 回调中仅标记，不阻塞
+/* 入睡屏障：拒收新命令，等待 BLE 任务取消并关闭其文件写入。 */
+extern bool service_ble_prepare_sleep(void);
 extern void service_ble_msg_gatts_data_send( uint8_t const *p_data, uint16_t len, uint8_t ch);
 
 /**

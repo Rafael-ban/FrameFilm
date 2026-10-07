@@ -323,6 +323,7 @@ int main(void)
     assert(service_file_save_stop(FILE_SAVE_BLE, 0) == -1);
     expect_bytes(target, old_film, film_size);
     expect_absent(part);
+    assert(service_file_save_abort(FILE_SAVE_BLE) == 0); /* STOP 已丢弃后取消仍成功。 */
     remove_traces("short.film");
 
     /* A partial fwrite poisons this upload but leaves the previous file. */

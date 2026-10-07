@@ -30,6 +30,7 @@
  * INCLUDES
  */
 #include <string.h>
+#include <stdatomic.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -101,6 +102,9 @@ static uint8_t m_menu_sel = 0;   // 主菜单当前选中索引
 static uint8_t m_boot_page = 0;  // 开机画面占屏中（此期间不进入任何 app，按键丢弃）
 static app_id_t m_boot_next_app = APP_ID_MENU;  // 开机画面结束后切到哪（START APP 决定）
 static uint8_t m_sleep_page = 0; // 休眠卡占屏中（同上；此后设备就断电了）
+static atomic_bool m_sleep_stop_sent = false;
+static atomic_bool m_sleep_stopped = false;
+#define APP_SLEEP_STOP_CMD 0xFFFFFFFEu
 
 /* 参数通道反查表：param_ch / param_ch+1 → 归属 app。注册时构建，与“当前 app”无关，
    手机可在显示图片时预设动图参数，事件照样送达目标 app */
@@ -448,6 +452,22 @@ void app_manager_param_set(uint8_t app_id, const uint8_t *tlv, uint8_t len)
 
 static void app_handle_event(const app_event_t *e)
 {
+    if(e->type == APP_EVT_UI_MSG && e->cmd == APP_SLEEP_STOP_CMD)
+    {
+        const bool was_sleep_page = m_sleep_page != 0;
+        m_sleep_page = 1;
+        if(!was_sleep_page && m_app_running)
+        {
+            const app_entry_t *app = m_app_registry[m_current_app];
+            if(app && app->layer != APP_LAYER_UI && app->on_exit) app->on_exit();
+            app_state_save();
+        }
+        if(ui_core_stop_for_sleep() == 0)
+            atomic_store(&m_sleep_stopped, true);
+        else
+            atomic_store(&m_sleep_stop_sent, false);
+        return;
+    }
     /* 入睡后可能还要等直传恢复网络；这期间不能被排队事件重新启动 app。 */
     if(m_sleep_page)
     {
@@ -890,6 +910,28 @@ void app_manager_init(void)
     m_switch_mode = app_switch_effective_mode();
     sys_logi(APP_MANAGER_TAG, "app switch mode cfg=%d effective=%d app_menu=%d",
              (int)SYS_APP_SWITCH_MODE, (int)m_switch_mode, app_render_has_app_menu());
+}
+
+bool app_manager_prepare_sleep(void)
+{
+    if(m_app_queue_hdl == NULL || m_app_task_hdl == NULL) return false;
+    if(atomic_load(&m_sleep_stopped)) return true;
+    if(!atomic_exchange(&m_sleep_stop_sent, true))
+    {
+        app_event_t e = {0};
+        e.type = APP_EVT_UI_MSG;
+        e.cmd = APP_SLEEP_STOP_CMD;
+        /* 抢在普通输入/切页前面，当前 app 回调仍须先自然返回。 */
+        if(xQueueSendToFront(m_app_queue_hdl, &e, 0) != pdPASS)
+        {
+            atomic_store(&m_sleep_stop_sent, false);
+            return false;
+        }
+    }
+    for(unsigned i = 0; i < 750 && atomic_load(&m_sleep_stop_sent) &&
+        !atomic_load(&m_sleep_stopped); i++)
+        vTaskDelay(pdMS_TO_TICKS(20));
+    return atomic_load(&m_sleep_stopped);
 }
 
 void app_manager_register(const app_entry_t *app)

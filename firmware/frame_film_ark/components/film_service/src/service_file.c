@@ -459,6 +459,11 @@ save_start_done:
                     file_save_discard();
                     m_save_result = 0;
                 }
+                else if(m_file_state.save_owner == 0)
+                {
+                    /* STOP 失败可能已丢弃暂存文件；重复取消应视为已完成。 */
+                    m_save_result = 0;
+                }
                 xSemaphoreGive(m_save_done);
                 break;
             default:

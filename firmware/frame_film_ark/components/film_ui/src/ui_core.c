@@ -29,6 +29,7 @@
  * INCLUDES
  */
 #include <string.h>
+#include <stdatomic.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -53,6 +54,7 @@ int ui_core_init(void)                                              { return -1;
 int ui_core_is_ready(void)                                          { return 0; }
 void ui_core_page_enter(uint8_t app_id, const app_ui_ops_t *ops)    { (void)app_id; (void)ops; }
 void ui_core_page_exit(void)                                        { }
+int ui_core_stop_for_sleep(void)                                    { return 0; }
 void ui_core_pause(void)                                            { }
 void ui_core_resume(void)                                           { }
 
@@ -103,6 +105,7 @@ typedef enum {
     UI_CMD_NONE = 0,
     UI_CMD_PAGE_ENTER,
     UI_CMD_PAGE_EXIT,
+    UI_CMD_SLEEP_STOP,
     UI_CMD_PAUSE,
     UI_CMD_RESUME,
     UI_CMD_APP_MSG,
@@ -132,6 +135,8 @@ static ui_state_t    m_state = UI_STATE_OFF;
 static lv_obj_t     *m_root  = NULL;   // 当前页面根对象
 static const app_ui_ops_t *m_ops = NULL;
 static uint32_t      m_drop_count = 0; // 投递失败计数（仅用于告警节流）
+static atomic_bool m_sleep_stop_sent = false;
+static atomic_bool m_sleep_stopped = false;
 
 /*********************************************************************
  * LOCAL FUNCTIONS
@@ -332,6 +337,13 @@ static void ui_handle_cmd(const ui_cmd_t *c)
         }
         break;
 
+    case UI_CMD_SLEEP_STOP:
+        ui_display_set_output(0);
+        ui_page_teardown();
+        m_state = UI_STATE_IDLE;
+        atomic_store(&m_sleep_stopped, true);
+        break;
+
     case UI_CMD_PAUSE:
         ui_display_set_output(0);
         /* 面板马上要被直绘占用：先关会话断电，避免 DC/DC 带着电跨到直绘期间 */
@@ -524,6 +536,28 @@ void ui_core_page_exit(void)
     {
         ui_wait_stopped(UI_ACK_TIMEOUT_MS);
     }
+}
+
+int ui_core_stop_for_sleep(void)
+{
+    if(m_queue == NULL) return 0; /* UI 未启用。 */
+    if(atomic_load(&m_sleep_stopped)) return 0;
+
+    if(!atomic_exchange(&m_sleep_stop_sent, true))
+    {
+        ui_cmd_t cmd = {0};
+        cmd.id = UI_CMD_SLEEP_STOP;
+        /* 排在既有 page_enter 后面，不能把旧切页留到停屏命令之后。 */
+        if(ui_cmd_send(&cmd) != 0)
+        {
+            atomic_store(&m_sleep_stop_sent, false);
+            return -1;
+        }
+        ui_display_set_output(0);
+    }
+    for(unsigned i = 0; i < 500 && !atomic_load(&m_sleep_stopped); i++)
+        vTaskDelay(pdMS_TO_TICKS(20));
+    return atomic_load(&m_sleep_stopped) ? 0 : -1;
 }
 
 void ui_core_pause(void)

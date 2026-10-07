@@ -66,6 +66,8 @@ void ui_core_page_enter(uint8_t app_id, const app_ui_ops_t *ops);
  * 异步。display 与显存保留，便于下次快速进入。
  */
 void ui_core_page_exit(void);
+/* 休眠专用同步屏障：确认 ui_task 已处理完此前全部命令和在途刷屏。 */
+int ui_core_stop_for_sleep(void);
 
 /**
  * @brief 暂停 UI 输出（保留页面）

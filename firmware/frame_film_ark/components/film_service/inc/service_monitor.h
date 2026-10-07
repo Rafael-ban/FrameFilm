@@ -76,6 +76,10 @@ extern void service_monitor_request_sleep(void);
 /* 入睡已请求时不再接受新的临时文件传输。 */
 extern bool service_monitor_sleep_pending(void);
 
+/* app 层注册：返回 true 仅表示 app 与 UI 已同步停止输出。 */
+typedef bool (*service_monitor_sleep_prepare_cb_t)(void);
+extern void service_monitor_set_sleep_prepare_cb(service_monitor_sleep_prepare_cb_t cb);
+
 #ifdef __cplusplus
 }
 #endif
