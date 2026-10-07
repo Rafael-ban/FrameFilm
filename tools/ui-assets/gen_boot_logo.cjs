@@ -26,10 +26,21 @@ async function main() {
   // Keep this deterministic black/white result free of grey dithering.
   const master = await sharp(Buffer.from(blackSvg), { density: 144 })
     .png().toBuffer();
-  const { data: pixels, info } = await sharp(master)
+  const base = await sharp(master)
     .resize(width, height, { fit: 'contain', background: '#ffffff' })
     .flatten({ background: '#ffffff' })
-    .greyscale().threshold(210).raw().toBuffer({ resolveWithObject: true });
+    .greyscale().threshold(210).png().toBuffer();
+  // Only the two diagonal phrases are re-typeset for the final pixel size.
+  // Fixed outlines avoid platform font substitution; white strips cover the
+  // original serif text, leaving the tower, base and corner ornaments intact.
+  const lettering = await sharp(path.join(__dirname, 'boot_logo_side_text.svg'),
+    { density: 576 }).resize(width, height).png().toBuffer();
+  // Materialize the composite before thresholding: sharp can otherwise apply
+  // threshold before composite and leave grey letters that I1 packing drops.
+  const composed = await sharp(base).composite([{ input: lettering }])
+    .png().toBuffer();
+  const { data: pixels, info } = await sharp(composed)
+    .greyscale().threshold(170).raw().toBuffer({ resolveWithObject: true });
   if (info.width !== width || info.height !== height || info.channels !== 1) {
     throw new Error('Unexpected logo raster format');
   }
