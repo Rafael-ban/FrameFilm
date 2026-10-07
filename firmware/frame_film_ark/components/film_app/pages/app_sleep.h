@@ -47,8 +47,8 @@ void app_sleep_set_info(uint8_t auto_on, uint16_t minutes);
  *
  * @param show_card 是否出示休眠卡；0 表示"就着当前画面睡"
  *
- * 正常路径下本函数不返回：设备随即进入 deep sleep（唤醒 = 复位重启 → BOOT）。
- * 只有 UI 层不可用（仅 show_card=1 时）/ monitor 任务没起来时才会退化或返回。
+ * 提交休眠请求后返回；monitor 等待网络恢复和唤醒脚释放再进入 deep sleep。
+ * 调用方须保持 app 的休眠门闸，不能在等待期间恢复绘制。
  */
 void app_sleep_run(uint8_t show_card);
 

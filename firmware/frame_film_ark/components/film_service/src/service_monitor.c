@@ -397,6 +397,12 @@ static void monitor_enter_low_power(void)
         service_wifi_direct_cancel();
         return;
     }
+    /* ext0 是电平唤醒。覆盖自动/低电入睡及页面等待超时的路径，
+       按键仍按下时保留 pending，由 200ms 心跳重试，不阻塞 monitor。 */
+    if(hal_pwr_wake_condition_met())
+    {
+        return;
+    }
     /* 网络写入和会话恢复完成后才允许卸载 SD、切断外设供电。 */
     service_wifi_deinit();
     xTimerStop(m_monitor_timer, 0);

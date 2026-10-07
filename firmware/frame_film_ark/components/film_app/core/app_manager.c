@@ -448,6 +448,12 @@ void app_manager_param_set(uint8_t app_id, const uint8_t *tlv, uint8_t len)
 
 static void app_handle_event(const app_event_t *e)
 {
+    /* 入睡后可能还要等直传恢复网络；这期间不能被排队事件重新启动 app。 */
+    if(m_sleep_page)
+    {
+        return;
+    }
+
     /* BLE app 参数通道：先于菜单态闸门处理，保证目标 app 即便不是当前 app 也能收到 */
     if(e->type == APP_EVT_SYS && (uint16_t)e->cmd == SYS_EVT_BLE_APP_CMD && e->len >= 1)
     {
@@ -465,12 +471,8 @@ static void app_handle_event(const app_event_t *e)
         return;
     }
 
-    /* 开机画面 / 休眠卡占屏期间：除“切换 app”外，任何事件都不驱动 app —— 此刻没有 app
-       处于运行态，放行会让 on_tick / on_event（进而 app_ensure_running）直接刷屏，
-       与 ui_task 的 flush 抢 SPI。
-       休眠卡更紧：它之后设备就断电了，那一帧是**唯一**一帧，绝不能被别的内容盖掉。
-       BLE 参数通道已在前面处理（手机仍可预设参数）；BLE 切换 app 走上面的 SWITCH 分支，
-       并在 app_do_switch() 里结束开机画面。 */
+    /* 开机占屏期间不驱动 app，避免与 ui_task 的 flush 抢 SPI。
+       BLE 参数与切换仍可提前处理；休眠则已在函数入口拦截全部事件。 */
     if(m_boot_page || m_sleep_page)
     {
         if(m_boot_page)
@@ -591,6 +593,11 @@ static void app_menu_notice(const char *why)
 
 static void app_do_switch(app_id_t id)
 {
+    if(m_sleep_page)
+    {
+        return;
+    }
+
     /* 未注册的 app 不可切换：BLE 传来的非法 id 或按模式裁剪掉的 app 会走到这里，
        若无此守卫会切到空注册项 → 无 on_enter → 屏幕停在上一帧，看起来像卡死 */
     if(!app_is_registered(id))
@@ -681,6 +688,8 @@ static void app_do_switch(app_id_t id)
  */
 static void app_manager_sleep_from_app(void)
 {
+    /* 即使不画休眠卡，也必须冻结后续事件直到 deep sleep。 */
+    m_sleep_page = 1;
     app_stop_current();
     if(m_app_running)
     {
@@ -719,7 +728,7 @@ static app_input_result_t app_manager_process_input(input_press_type_t key)
             }
         }
         /* 长按 = 手动休眠：菜单里**画休眠卡**（这张卡会一直留在屏上，直到按下确认键唤醒）。
-           本调用不返回：画完卡就进 deep sleep。
+           请求后保持休眠门闸，直到 monitor 完成网络恢复并进入 deep sleep。
            注意**不看休眠模式开关** —— 那个开关管的是自动休眠，用户明确按下的动作就该执行。
            双击在菜单里没有语义：菜单就是调度器的"根"，没有上一层可退。 */
         else if(key == INPUT_PRESS_LONG)
@@ -738,7 +747,7 @@ static app_input_result_t app_manager_process_input(input_press_type_t key)
     }
 
     /* 长按确认键 = 手动休眠，且**不出示休眠卡**：屏上保持当前 app 的画面。
-       本调用正常不返回（设备随即断电） */
+       请求返回后仍冻结 app，等待 monitor 进入 deep sleep。 */
     if(key == INPUT_PRESS_LONG)
     {
         app_manager_sleep_from_app();

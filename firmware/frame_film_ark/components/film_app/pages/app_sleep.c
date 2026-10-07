@@ -86,7 +86,7 @@
 
 /* 除地板时间外，还要等唤醒条件解除（ext0 电平触发，长按期间它一直是成立的）。
  * 这条只会让入睡**更晚**、不会更早，所以与地板时间是叠加关系而非二选一。 */
-#define SP_RELEASE_MAX_MS   (15000)  // 一直按着不放的兜底上限
+#define SP_RELEASE_MAX_MS   (15000)  // app 阻塞等待上限；超时后由 monitor 继续等松手
 #define SP_POLL_MS          (50)
 
 /*********************************************************************
@@ -248,7 +248,7 @@ static void sleep_wait_ready(uint8_t wait_frame)
         }
         if(elapsed >= limit)
         {
-            sys_logw(APP_SLEEP_TAG, "wake pin still active after %u ms, sleep anyway",
+            sys_logw(APP_SLEEP_TAG, "wake pin still active after %u ms, monitor will wait for release",
                      (unsigned)SP_RELEASE_MAX_MS);
             return;
         }
