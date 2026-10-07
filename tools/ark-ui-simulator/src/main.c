@@ -7,6 +7,7 @@
 #include "app_settings.h"
 #include "app_sleep.h"
 #include "app_pass.h"
+#include "app_clock.h"
 #include "app_interface.h"
 #include "simulator.h"
 
@@ -14,17 +15,28 @@ static uint8_t menu_sel;
 
 static void show_menu(void)
 {
+    /* 与固件 app_menu_open 一致：返回时对齐刚离开的应用。 */
+    static const app_id_t entries[APP_MENU_ENTRY_NUM] = {
+        APP_ID_IMAGE, APP_ID_PASS, APP_ID_TEMPLATE,
+        APP_ID_CLOCK, APP_ID_ANIMATION, APP_ID_SETTINGS
+    };
+    const app_entry_t *previous = simulator_current_entry();
+    if(previous)
+    {
+        for(uint8_t i = 0; i < APP_MENU_ENTRY_NUM; i++)
+            if(entries[i] == previous->id) { menu_sel = i; break; }
+    }
     simulator_show(g_app_menu_entry.ui_ops, &g_app_menu_entry);
-    menu_sel = 0;
     g_app_menu_entry.ui_ops->on_msg(APP_UI_MSG_MENU_SEL, &menu_sel, 1);
 }
 
 static void show_boot(void)
 {
     static const app_boot_tele_t tele[] = {
-        {"PANEL", "OK"}, {"STORAGE", "OK"}, {"RADIO", "OK"}
+        {"PANEL", "720x480 E6"}, {"PSRAM", "1824 KB FREE"},
+        {"STORAGE", "SD MOUNTED"}, {"FIRMWARE", "1.0.0"}
     };
-    app_boot_set_telemetry(tele, 3);
+    app_boot_set_telemetry(tele, 4);
     simulator_show(app_boot_ops(), NULL);
 }
 
@@ -37,6 +49,7 @@ static void show_sleep(void)
 static void activate_menu_selection(void)
 {
     if(menu_sel == 1) simulator_show(g_app_pass_entry.ui_ops, &g_app_pass_entry);
+    else if(menu_sel == 3) simulator_show(g_app_clock_entry.ui_ops, &g_app_clock_entry);
     else if(menu_sel == 5) simulator_show(g_app_settings_entry.ui_ops, &g_app_settings_entry);
     else fprintf(stderr, "Entry %u is not connected to this first desktop preview.\n", menu_sel);
 }
@@ -90,13 +103,22 @@ int main(int argc, char **argv)
         if(simulator_current_entry() != &g_app_pass_entry) result = -1;
         result |= save_frame(display, argv[2], "pass");
         press_key(INPUT_PRESS_DOUBLE);
-        if(simulator_current_entry() != &g_app_menu_entry) result = -1;
+        if(simulator_current_entry() != &g_app_menu_entry || menu_sel != 1) result = -1;
+        result |= save_frame(display, argv[2], "menu-return");
+        press_key(INPUT_PRESS_SHORT);
+        if(simulator_current_entry() != &g_app_pass_entry) result = -1;
         simulator_show(g_app_settings_entry.ui_ops, &g_app_settings_entry);
         simulator_process_requests();
         press_key(INPUT_PRESS_UP);
         press_key(INPUT_PRESS_SHORT);
         simulator_process_requests();
         result |= save_frame(display, argv[2], "settings");
+        press_key(INPUT_PRESS_DOUBLE);
+        if(menu_sel != 5) result = -1;
+        simulator_show(g_app_clock_entry.ui_ops, &g_app_clock_entry);
+        result |= save_frame(display, argv[2], "clock");
+        press_key(INPUT_PRESS_DOUBLE);
+        if(menu_sel != 3) result = -1;
         show_sleep();
         result |= save_frame(display, argv[2], "sleep");
         press_key(INPUT_PRESS_SHORT);
@@ -137,13 +159,14 @@ int main(int argc, char **argv)
         }
         int shortcut = keys[SDL_SCANCODE_1] ? 1 : keys[SDL_SCANCODE_2] ? 2 :
                        keys[SDL_SCANCODE_3] ? 3 : keys[SDL_SCANCODE_4] ? 4 :
-                       keys[SDL_SCANCODE_5] ? 5 : 0;
+                       keys[SDL_SCANCODE_5] ? 5 : keys[SDL_SCANCODE_6] ? 6 : 0;
         if(shortcut && shortcut != old_shortcut) {
             if(shortcut == 1) show_boot();
             if(shortcut == 2) show_menu();
             if(shortcut == 3) simulator_show(g_app_settings_entry.ui_ops, &g_app_settings_entry);
             if(shortcut == 4) show_sleep();
             if(shortcut == 5) simulator_show(g_app_pass_entry.ui_ops, &g_app_pass_entry);
+            if(shortcut == 6) simulator_show(g_app_clock_entry.ui_ops, &g_app_clock_entry);
         }
         if(keys[SDL_SCANCODE_ESCAPE]) running = 0;
         old_up = up; old_down = down; old_enter = enter; old_shortcut = shortcut;

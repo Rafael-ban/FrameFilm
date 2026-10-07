@@ -37,6 +37,7 @@
 #include "ui_assets.h"
 #include "ui_conf.h"    /* UI_CALIB_FRAME：上机标定帧开关 */
 #include "ui_ops.h"
+#include "ui_fonts.h"
 #include "app_shell.h"
 #include "app_manager.h"    /* app_manager_post_ui_msg：进度走完上报切页 */
 #include "app_boot.h"
@@ -233,6 +234,33 @@ static lv_obj_t *boot_rule(lv_obj_t *parent)
     return r;
 }
 
+static const char *boot_tele_name(const char *name)
+{
+    if(strcmp(name, "PANEL") == 0) return "屏幕";
+    if(strcmp(name, "PSRAM") == 0 || strcmp(name, "MEMORY") == 0) return "内存";
+    if(strcmp(name, "STORAGE") == 0) return "存储";
+    if(strcmp(name, "FIRMWARE") == 0) return "固件";
+    if(strcmp(name, "RADIO") == 0) return "无线";
+    if(strcmp(name, "WIFI") == 0) return "网络";
+    if(strcmp(name, "BLE") == 0) return "蓝牙";
+    return name;
+}
+
+static const char *boot_tele_value(const char *value, char *buf, size_t len)
+{
+    unsigned kb;
+    int end = 0;
+
+    if(strcmp(value, "SD MOUNTED") == 0) return "已挂载";
+    if(strcmp(value, "NO SD") == 0) return "未插卡";
+    if(sscanf(value, "%u KB FREE%n", &kb, &end) == 1 && end > 0 && value[end] == '\0')
+    {
+        snprintf(buf, len, "%u KB 可用", kb);
+        return buf;
+    }
+    return value;
+}
+
 /**
  * @brief 按"已点亮格数"刷新进度条、百分比标签与遥测行的 OK/--
  *
@@ -275,7 +303,7 @@ static void boot_apply_progress(uint8_t seg_on)
             /* 各项依次点亮：单调推进，不回退 */
             uint32_t due = (uint32_t)(i + 1) * 100u / (uint32_t)m_tele_num;
 
-            lv_label_set_text(m_tele_ok[i], (pct >= due) ? "OK" : "--");
+            lv_label_set_text(m_tele_ok[i], (pct >= due) ? "完成" : "等待");
         }
     }
 }
@@ -334,8 +362,8 @@ static void boot_ui_create(lv_obj_t *root)
     hal_epd_mono_session_begin();
 
     /* 外壳：与主菜单/设置页同一套版式（顶部状态栏 + 底部提示行） */
-    app_shell_build(root, "MODEL " SYS_HAREWARE_VERSION " / FW " SYS_FIRMWARE_VERSION,
-                    "BOOT", &m_shell);
+    app_shell_build(root, "机型 " SYS_HAREWARE_VERSION " / 固件 " SYS_FIRMWARE_VERSION,
+                    "启动", &m_shell);
 
     /* 正文：夹在状态栏与提示行之间，左右留安全边距 */
     body = lv_obj_create(root);
@@ -358,9 +386,9 @@ static void boot_ui_create(lv_obj_t *root)
 
         lv_obj_remove_style_all(row);
         lv_obj_set_scrollable(row, false);
-        lv_obj_set_size(row, LV_PCT(100), 14);
+        lv_obj_set_size(row, LV_PCT(100), 22);
         lv_obj_set_pos(row, 0, 0);
-        boot_label(row, &lv_font_unscii_8, lv_color_black(), "BOOT SEQ A-01");
+        boot_label(row, &ui_font_14, lv_color_black(), "启动序列 A-01");
     }
     {
         lv_obj_t *r = boot_rule(body);
@@ -391,7 +419,7 @@ static void boot_ui_create(lv_obj_t *root)
         lv_obj_set_width(r, 320);
     }
     {
-        lv_obj_t *sub = boot_label(body, &lv_font_unscii_8, lv_color_black(), "COLOR E-PAPER TERMINAL");
+        lv_obj_t *sub = boot_label(body, &ui_font_14, lv_color_black(), "彩色电子纸终端");
 
         lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, badge_bot + 92);
     }
@@ -422,11 +450,11 @@ static void boot_ui_create(lv_obj_t *root)
 
         lv_obj_remove_style_all(row);
         lv_obj_set_scrollable(row, false);
-        lv_obj_set_size(row, LV_PCT(100), 14);
+        lv_obj_set_size(row, LV_PCT(100), 22);
         lv_obj_set_pos(row, 0, badge_bot + 152);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        boot_label(row, &lv_font_unscii_8, lv_color_black(), "SYSTEM INIT");
+        boot_label(row, &ui_font_14, lv_color_black(), "系统初始化");
         {
             lv_obj_t *sp = lv_obj_create(row);
 
@@ -435,7 +463,7 @@ static void boot_ui_create(lv_obj_t *root)
             lv_obj_set_size(sp, 1, 1);
             lv_obj_set_flex_grow(sp, 1);
         }
-        m_pct_label = boot_label(row, &lv_font_unscii_8, lv_color_black(), "0%");
+        m_pct_label = boot_label(row, &ui_font_14, lv_color_black(), "0%");
     }
 
     /* ---- 自检遥测（左名 / 右值 / 尾 OK） ---- */
@@ -446,13 +474,14 @@ static void boot_ui_create(lv_obj_t *root)
     lv_obj_set_pos(tele_box, 0, badge_bot + 180);
     for(i = 0; i < m_tele_num && i < 8; i++)
     {
+        char localized[40];
         int32_t y = (int32_t)i * 22;
-
-        lv_obj_t *n = boot_label(tele_box, &lv_font_unscii_8, lv_color_black(), m_tele[i].name);
+        const char *value = boot_tele_value(m_tele[i].value, localized, sizeof(localized));
+        lv_obj_t *n = boot_label(tele_box, &ui_font_14, lv_color_black(), boot_tele_name(m_tele[i].name));
         lv_obj_set_pos(n, 0, y);
-        lv_obj_t *v = boot_label(tele_box, &lv_font_unscii_8, lv_color_black(), m_tele[i].value);
-        lv_obj_align(v, LV_ALIGN_TOP_RIGHT, -34, y);
-        m_tele_ok[i] = boot_label(tele_box, &lv_font_unscii_8, lv_color_black(), "--");
+        lv_obj_t *v = boot_label(tele_box, &ui_font_14, lv_color_black(), value);
+        lv_obj_align(v, LV_ALIGN_TOP_RIGHT, -48, y);
+        m_tele_ok[i] = boot_label(tele_box, &ui_font_14, lv_color_black(), "等待");
         lv_obj_align(m_tele_ok[i], LV_ALIGN_TOP_RIGHT, 0, y);
     }
 

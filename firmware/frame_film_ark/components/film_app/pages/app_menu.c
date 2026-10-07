@@ -36,6 +36,7 @@
 #include "ui_assets.h"
 #include "ui_conf.h"    /* UI_LOGICAL_W/H：正文宽度按屏宽算，不写死 */
 #include "ui_ops.h"
+#include "ui_fonts.h"
 #include "app_shell.h"
 #include "app_menu.h"
 /*********************************************************************
@@ -50,7 +51,7 @@
 #define CONTENT_W           (UI_LOGICAL_W - 2 * SHELL_BODY_PAD_X)
 #define SHELL_W             (UI_LOGICAL_W)
 
-#define ROW_HEADER_H        (14)     // SELECT APPLICATION --- 01 / 05
+#define ROW_HEADER_H        (22)     // 中文表头；保留原轮播和其余布局
 #define CAROUSEL_H          (290)    // 轮播（比当前卡片高，给上下留呼吸）
 #define ROW_DOTS_H          (5)      // 指示点
 #define DOTS_CUR_W          (26)     // 当前项指示点宽（实心）
@@ -90,14 +91,14 @@
  * CONSTANTS
  */
 /* 轮播内容表。**顺序必须与 app_manager 的 m_menu_entries 一致**（选择索引即此表下标）。
- * 文案全部为 ASCII：固件字体只有 Montserrat 与 UNSCII，无 CJK 字形。 */
+ * 保留原轮播、图标和代码标签；功能文案使用中文子集字体。 */
 static const menu_item_t MENU_ITEMS[APP_MENU_ENTRY_NUM] = {
-    { "IMAGE",     "IMG", "SD PHOTO WALL / UP-DOWN PAGING",        "DIRECT", "MONO SESSION REBUILD",   UI_ICON_IMAGE     },
-    { "PASS",      "PAS", "ARKNIGHTS PASS / COMING SOON",          "UI",     "UI PAGE (PLACEHOLDER)",  UI_ICON_PASS      },
-    { "TEMPLATE",  "TPL", "LIVE PUSH CONTENT / WEATHER, CALENDAR", "DIRECT", "MONO SESSION REBUILD",   UI_ICON_TEMPLATE  },
-    { "CLOCK",     "CLK", "DEVICE TIME / DATE AND WEEKDAY",        "UI",     "UI PAGE (LOW COST)",     UI_ICON_CLOCK     },
-    { "ANIMATION", "ANI", "FRAME ANIMATION / ADJUSTABLE RATE",     "DIRECT", "MONO SESSION REBUILD",   UI_ICON_ANIMATION },
-    { "SETTINGS",  "SET", "DEVICE INFO AND SYSTEM PARAMETERS",     "UI",     "UI PAGE (LOW COST)",     UI_ICON_SETTINGS  },
+    { "图片",   "IMG", "浏览存储中的照片，上下切换图片", "图片浏览", "休眠后保留当前图片", UI_ICON_IMAGE },
+    { "通行证", "PAS", "个人通行证，内容功能待完善",     "个人档案", "查看通行证页面",     UI_ICON_PASS },
+    { "模板",   "TPL", "显示实时推送的天气与日历内容",   "实时内容", "接收手机推送",       UI_ICON_TEMPLATE },
+    { "时钟",   "CLK", "查看设备时间、日期与星期",       "时间显示", "保持设备时间同步",   UI_ICON_CLOCK },
+    { "动图",   "ANI", "播放多帧画面，支持调整速度",     "连续播放", "设置中调整播放参数", UI_ICON_ANIMATION },
+    { "设置",   "SET", "设备信息、连接与系统参数",       "系统管理", "确认键修改当前选项", UI_ICON_SETTINGS },
 };
 
 /*********************************************************************
@@ -208,7 +209,7 @@ static lv_obj_t *menu_make_plate(lv_obj_t *parent, uint8_t idx, int cur)
     }
     /* 卡片名字用 16px 像素字：短码只有 3 个字符（48px 宽）比图标还窄，卡片装得下，
        与上面同字号的编号一起构成"卡片自己的标签"；卡片外的正文仍是 8px */
-    menu_label(grp, &lv_font_unscii_8, fg, it->code);
+    menu_label(grp, &ui_font_14, fg, it->name);
     lv_obj_center(grp);
 
     return plate;
@@ -318,8 +319,13 @@ static void menu_notice_set(const void *data, uint8_t len)
         return;
     }
 
-    n = snprintf(buf, sizeof(buf), "%s - %.*s",
-                 MENU_ITEMS[m_sel].name, (int)len, (const char *)data);
+    if(len >= 7 && memcmp(data, "NO FILM", 7) == 0)
+        n = snprintf(buf, sizeof(buf), "%s / 暂无内容", MENU_ITEMS[m_sel].name);
+    else if(len == 20 && memcmp(data, "ANIM FILE UNREADABLE", 20) == 0)
+        n = snprintf(buf, sizeof(buf), "动图文件无法读取");
+    else
+        n = snprintf(buf, sizeof(buf), "%s - %.*s",
+                     MENU_ITEMS[m_sel].name, (int)len, (const char *)data);
     if(n >= sizeof(buf))
     {
         sys_logw(APP_MENU_TAG, "notice truncated (%u chars)", (unsigned)n);
@@ -368,12 +374,12 @@ static void menu_apply_sel(void)
     }
     if(m_panel_line1 != NULL)
     {
-        lv_label_set_text_fmt(m_panel_line1, "APP %02u   LAYER %s",
+        lv_label_set_text_fmt(m_panel_line1, "%02u  /  %s",
                               (unsigned)(m_sel + 1), it->layer);
     }
     if(m_panel_line2 != NULL)
     {
-        lv_label_set_text_fmt(m_panel_line2, "ENTRY %s", it->entry);
+        lv_label_set_text(m_panel_line2, it->entry);
     }
 
     /* 状态栏顺手刷一次：换选中项本来就要整屏重绘，这次请求不额外付刷新代价。
@@ -400,7 +406,7 @@ static void menu_ui_create(lv_obj_t *root)
     sys_logi(APP_MENU_TAG, "create menu page (%u entries)", (unsigned)APP_MENU_ENTRY_NUM);
 
     /* ============ 外壳：顶部状态栏 + 底部提示行 ============ */
-    app_shell_build(root, "UP/DOWN SELECT   ENTER OPEN   HOLD SLEEP", "MENU", &m_shell);
+    app_shell_build(root, "上下选择  确认进入  长按休眠", "菜单", &m_shell);
 
     /* ============ 正文：夹在状态栏与提示行之间 ============ */
     body = lv_obj_create(root);
@@ -429,7 +435,7 @@ static void menu_ui_create(lv_obj_t *root)
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(header, 8, LV_PART_MAIN);
-    menu_label(header, &lv_font_unscii_8, lv_color_black(), "SELECT APPLICATION");
+    menu_label(header, &ui_font_18, lv_color_black(), "选择应用");
     {
         /* 中间的弹性横线：宽度全交给 flex 分配（显式给宽度会与分配到的空间叠加而溢出） */
         lv_obj_t *sp = menu_rule(header, lv_color_black());
@@ -500,15 +506,15 @@ static void menu_ui_create(lv_obj_t *root)
         lv_obj_set_style_bg_color(tab, lv_color_black(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(tab, LV_OPA_COVER, LV_PART_MAIN);
         {
-            lv_obj_t *t = menu_label(tab, &lv_font_unscii_8, lv_color_white(), "ACTIVE");
+            lv_obj_t *t = menu_label(tab, &ui_font_18, lv_color_white(), "当前");
 
             lv_obj_center(t);
         }
-        m_name_label = menu_label(row, &lv_font_montserrat_24, lv_color_black(), "IMAGE");
+        m_name_label = menu_label(row, &ui_font_24, lv_color_black(), "图片");
     }
 
     /* ---- 一句话说明 ---- */
-    m_desc_label = menu_label(stack, &lv_font_unscii_8, lv_color_black(), "");
+    m_desc_label = menu_label(stack, &ui_font_18, lv_color_black(), "");
     lv_obj_set_size(m_desc_label, CONTENT_W, ROW_DESC_H);
 
     /* ---- 间隙 ---- */
@@ -529,10 +535,10 @@ static void menu_ui_create(lv_obj_t *root)
     lv_obj_set_style_border_color(panel, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_pad_all(panel, 10, LV_PART_MAIN);
 
-    m_panel_line1 = menu_label(panel, &lv_font_unscii_8, lv_color_black(), "");
-    lv_obj_set_pos(m_panel_line1, 0, 4);
-    m_panel_line2 = menu_label(panel, &lv_font_unscii_8, lv_color_black(), "");
-    lv_obj_set_pos(m_panel_line2, 0, 22);
+    m_panel_line1 = menu_label(panel, &ui_font_18, lv_color_black(), "");
+    lv_obj_set_pos(m_panel_line1, 0, 0);
+    m_panel_line2 = menu_label(panel, &ui_font_18, lv_color_black(), "");
+    lv_obj_set_pos(m_panel_line2, 0, 24);
 
     /* ---- 进入失败提示：面板下方的留白处，默认隐藏 ---- */
     m_notice_row = lv_obj_create(stack);
@@ -552,9 +558,9 @@ static void menu_ui_create(lv_obj_t *root)
         lv_obj_set_size(tag, NOTICE_TAG_W, NOTICE_TAG_H);
         lv_obj_set_style_bg_color(tag, lv_color_black(), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(tag, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_center(menu_label(tag, &lv_font_unscii_8, lv_color_white(), "FAILED"));
+        lv_obj_center(menu_label(tag, &ui_font_18, lv_color_white(), "提示"));
 
-        m_notice_label = menu_label(m_notice_row, &lv_font_unscii_8, lv_color_black(), "");
+        m_notice_label = menu_label(m_notice_row, &ui_font_18, lv_color_black(), "");
     }
 
     menu_apply_sel();

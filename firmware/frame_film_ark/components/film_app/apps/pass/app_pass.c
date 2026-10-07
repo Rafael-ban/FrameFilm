@@ -32,6 +32,7 @@
 
 #include "ui_ops.h"
 #include "ui_assets.h"
+#include "ui_fonts.h"
 #include "app_shell.h"
 #include "app_pass.h"
 
@@ -44,12 +45,12 @@
  * 正文是 flex 竖排居中：图标 → 大字 → 细线 → 两行说明。
  * 无交互，故没有行列坐标表；改文案不用动这里。 */
 #define PASS_RULE_W         (240)    // 分隔线宽
-#define PASS_WORD_LS        (8)      // "PASS" 字距（末字也会补一次，故要半格回正）
+#define PASS_WORD_LS        (8)      // 标题字距（末字也会补一次，故要半格回正）
 
-/* 待开发提示。固件字体无 CJK 字形，一律 ASCII。 */
-#define PASS_NOTE_BIG       "UNDER DEVELOPMENT"
-#define PASS_NOTE_SMALL     "PLACEHOLDER / NOT IMPLEMENTED YET"
-#define PASS_FOOT_HINT      "DBL ENTER EXIT   HOLD SLEEP"
+/* 占位页文案。 */
+#define PASS_NOTE_BIG       "功能开发中"
+#define PASS_NOTE_SMALL     "更多内容即将上线"
+#define PASS_FOOT_HINT      "双击确认退出  长按休眠"
 
 /*********************************************************************
  * LOCAL VARIABLES
@@ -101,7 +102,7 @@ static void pass_ui_create(lv_obj_t *root)
     sys_logi(APP_PASS_TAG, "create pass page (placeholder)");
 
     /* 外壳：顶部状态栏 + 底部提示行（与主菜单/时钟同一套版式） */
-    app_shell_build(root, PASS_FOOT_HINT, "PASS", &m_shell);
+    app_shell_build(root, PASS_FOOT_HINT, "通行证", &m_shell);
 
     body = lv_obj_create(root);
     lv_obj_remove_style_all(body);
@@ -123,15 +124,15 @@ static void pass_ui_create(lv_obj_t *root)
     }
 
     /* 大字：与休眠卡的"状态字"同一套语汇（实心大写 + 字距） */
-    o = pass_label(body, &lv_font_montserrat_48, lv_color_black(), "PASS");
+    o = pass_label(body, &ui_font_36, lv_color_black(), "通行证");
     lv_obj_set_style_text_letter_space(o, PASS_WORD_LS, LV_PART_MAIN);
     /* LVGL 给末字也补一次字距，居中会整体偏左半格 —— 平移补回来 */
     lv_obj_set_style_translate_x(o, PASS_WORD_LS / 2, LV_PART_MAIN);
 
     pass_rule(body);
 
-    (void)pass_label(body, &lv_font_unscii_16, lv_color_black(), PASS_NOTE_BIG);
-    (void)pass_label(body, &lv_font_unscii_8, lv_color_black(), PASS_NOTE_SMALL);
+    (void)pass_label(body, &ui_font_18, lv_color_black(), PASS_NOTE_BIG);
+    (void)pass_label(body, &ui_font_14, lv_color_black(), PASS_NOTE_SMALL);
 
     /* 状态栏的电量/WiFi/蓝牙由 app 任务侧采集后回投（页面不读服务层）。
        再挂周期 tick 让它们空闲时也会更新（内容没变不碰控件，不产生额外刷屏）。 */

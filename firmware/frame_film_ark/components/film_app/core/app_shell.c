@@ -40,6 +40,7 @@
 
 #include "ui_core.h"
 #include "app_shell.h"
+#include "ui_fonts.h"
 #include "app_manager.h"
 
 /*********************************************************************
@@ -130,6 +131,15 @@ static lv_obj_t *shell_label(lv_obj_t *parent, lv_color_t color, const char *txt
     lv_obj_set_style_text_font(l, &lv_font_unscii_8, LV_PART_MAIN);
     lv_obj_set_style_text_color(l, color, LV_PART_MAIN);
     lv_label_set_text(l, txt);
+    /* 中文页面使用子集字体；保留原有英文页的小字与几何布局。 */
+    for(const unsigned char *p = (const unsigned char *)txt; *p; p++)
+    {
+        if(*p >= 0x80)
+        {
+            lv_obj_set_style_text_font(l, &ui_font_14, LV_PART_MAIN);
+            break;
+        }
+    }
     return l;
 }
 
@@ -253,16 +263,16 @@ void app_shell_build(lv_obj_t *root, const char *hint, const char *page, app_she
         shell_time_update(out);
     }
     {
-        lv_obj_t *bat = shell_label(status, lv_color_black(), "BAT --%");
+        lv_obj_t *bat = shell_label(status, lv_color_black(), "电量 --%");
         lv_obj_t *bat_pip = shell_pip(status);
         lv_obj_t *wifi_label;
         lv_obj_t *wifi_pip;
         lv_obj_t *bt_label;
         lv_obj_t *bt_pip;
 
-        wifi_label = shell_label(status, lv_color_black(), "WIFI");
+        wifi_label = shell_label(status, lv_color_black(), "无线");
         wifi_pip = shell_pip(status);
-        bt_label = shell_label(status, lv_color_black(), "BT");
+        bt_label = shell_label(status, lv_color_black(), "蓝牙");
         bt_pip = shell_pip(status);
 
         if(out != NULL)
@@ -348,7 +358,7 @@ void app_shell_apply(app_shell_t *s, const app_status_t *st)
 
     if(s->bat_label != NULL)
     {
-        lv_label_set_text_fmt(s->bat_label, "BAT %u%%", (unsigned)st->bat_pct);
+        lv_label_set_text_fmt(s->bat_label, "电量 %u%%", (unsigned)st->bat_pct);
     }
     /* 电量块只有"实心/留空"两态（低电量留空），不参与隐藏逻辑 */
     if(s->bat_pip != NULL)

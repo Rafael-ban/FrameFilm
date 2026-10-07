@@ -28,9 +28,12 @@ add_executable(ark-ui-simulator
     "${ARK_ROOT}/components/film_app/pages/app_settings.c"
     "${ARK_ROOT}/components/film_app/pages/app_sleep.c"
     "${ARK_ROOT}/components/film_app/apps/pass/app_pass.c"
+    "${ARK_ROOT}/components/film_app/apps/clock/app_clock.c"
+    "${ARK_ROOT}/components/film_app/apps/clock/font_clock_hero.c"
     "${ARK_ROOT}/components/film_app/core/app_shell.c"
     "${ARK_ROOT}/components/film_ui/src/ui_assets.c"
     "${ARK_ROOT}/components/film_ui/src/ui_defaults.c"
+    "${ARK_ROOT}/components/film_ui/src/ui_fonts.c"
 )
 target_include_directories(ark-ui-simulator PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/stubs"
@@ -38,6 +41,7 @@ target_include_directories(ark-ui-simulator PRIVATE
     "${ARK_ROOT}/components/film_app/core"
     "${ARK_ROOT}/components/film_app/pages"
     "${ARK_ROOT}/components/film_app/apps/pass"
+    "${ARK_ROOT}/components/film_app/apps/clock"
     "${ARK_ROOT}/components/film_app/apps/image"
     "${ARK_ROOT}/components/film_app/apps/animation"
     "${ARK_ROOT}/components/film_ui/inc"
