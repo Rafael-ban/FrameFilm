@@ -72,14 +72,11 @@ const { mockBluetooth } = require('./ark-browser.test.cjs');
         await page.waitForFunction(() => !document.body.classList.contains('theme-ark'));
         assert.equal(await editor.locator('#codename').inputValue(), '主题检查草稿');
         await page.goto('http://127.0.0.1:8768/ForFilm/?theme=ark', { waitUntil: 'networkidle' });
-        await page.waitForFunction(() => document.body.classList.contains('theme-ark'));
-        await login.waitFor();
-        await page.screenshot({ path: path.join(output, 'login-mobile.png') });
-        await login.getByRole('button', { name: /开始唤醒/ }).click();
-        await login.waitFor({ state: 'hidden' });
+        assert.equal(await page.locator('body').evaluate(el => el.classList.contains('theme-ark')), false);
+        assert.equal(await page.locator('#ark-login').count(), 0);
         assert.equal(await page.evaluate(() => ArkDevice.connected()), false);
-        assert(await page.locator('script[src="js/ark-theme.js?v=prts-2"]').count());
+        assert(await page.locator('script[src="js/ark-theme.js?v=prts-3"]').count());
         assert.deepEqual(errors, []);
-        console.log('PASS: Ark connection, theme toggle, embedded editor, disconnect, mobile layout and offline preview.');
+        console.log('PASS: Ark connection, theme toggle, embedded editor, disconnect, mobile layout and offline gating.');
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
