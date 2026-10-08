@@ -7,10 +7,11 @@
     <link id="style-sheet" rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/keyboard.css">
     <!-- ARK 通行证版皮肤：默认不生效，连上 FRAMEFILMARK 后由 js/ark-theme.js 激活 -->
-    <link id="ark-theme-sheet" rel="stylesheet" href="css/ark-theme.css">
+    <link id="ark-theme-sheet" rel="stylesheet" href="css/ark-theme.css?v=prts-2">
+    <link rel="stylesheet" href="css/ark-login.css?v=prts-2">
     <!-- 动画工坊样式（独立页） -->
     <link rel="stylesheet" href="css/animation.css">
-    <link rel="stylesheet" href="css/ark-controls.css">
+    <link rel="stylesheet" href="css/ark-controls.css?v=prts-2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&family=Baloo+2:wght@400..800&family=Noto+Sans+SC:wght@400..900&display=swap" rel="stylesheet">
@@ -862,14 +863,14 @@
         <!-- ================= Ark 通行证 ================= -->
         <div id="pass-page" class="page">
             <div class="card">
-                <div class="card__title">Ark · 个人通行证</div>
+                <div class="card__title"><span class="ic-wrap"><svg class="ic" viewBox="0 0 24 24"><use href="#i-photo"/></svg></span>个人通行证 · 档案管理</div>
                 <p id="ark-pass-connection" class="field-hint" role="status">离线可编辑、预览和导出；读取或发送前请先连接 Ark。</p>
                 <div class="btn-row">
                     <button type="button" class="secondary-button" id="ark-pass-connect">前往设备连接</button>
                     <button type="button" class="secondary-button" id="ark-pass-open" data-ark-connected disabled>在设备打开通行证</button>
                 </div>
             </div>
-            <iframe id="ark-pass-editor" title="Ark 个人通行证编辑器" src="../ark-pass-editor/index.html?embedded=1" loading="lazy"></iframe>
+            <iframe id="ark-pass-editor" title="Ark 个人通行证编辑器" src="../ark-pass-editor/index.html?embedded=1&amp;v=prts-2" loading="lazy"></iframe>
         </div>
 
         <!-- ================= 设置 ================= -->
@@ -1212,7 +1213,7 @@
 <script src="js/gif-decoder.js"></script>
 <script src="js/animation.js"></script>
 <script src="js/main.js"></script>
-<script src="js/ark-theme.js"></script>
-<script src="js/ark-controls.js"></script>
+<script src="js/ark-theme.js?v=prts-2"></script>
+<script src="js/ark-controls.js?v=prts-2"></script>
 </body>
 </html>

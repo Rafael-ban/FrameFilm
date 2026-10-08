@@ -21,7 +21,7 @@
         // Keep navigation available; cancel remains usable while other actions lock.
         if (busy && !wasBusy) {
             document.querySelectorAll('button,input,select,textarea').forEach(el => {
-                if (el.matches('[data-ark-cancel]')) return;
+                if (el.matches('[data-ark-cancel], [data-ark-local]')) return;
                 locks.set(el, el.disabled);
                 el.disabled = true;
             });

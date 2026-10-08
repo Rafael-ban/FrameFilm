@@ -31,11 +31,22 @@
     const host = window.parent.document.body;
     const style = window.parent.getComputedStyle(host);
     document.body.classList.toggle('theme-ark', host.classList.contains('theme-ark'));
+    document.documentElement.classList.toggle('embedded-ark', host.classList.contains('theme-ark'));
     const tokens = {
       '--ink': '--ink', '--muted': '--ink-soft', '--paper': '--paper',
       '--editor-accent': '--sky', '--editor-radius': '--r',
       '--editor-field-radius': '--r-xs', '--editor-font': '--font-body'
     };
+    if (host.classList.contains('theme-ark')) {
+      Object.assign(tokens, {
+        '--line': '--ark-line', '--ground': '--ark-bg',
+        '--editor-surface': '--ark-bg-2', '--editor-danger': '--ark-red'
+      });
+    } else {
+      for (const token of ['--line', '--ground', '--editor-surface', '--editor-danger']) {
+        document.body.style.removeProperty(token);
+      }
+    }
     for (const [local, parent] of Object.entries(tokens)) {
       document.body.style.setProperty(local, style.getPropertyValue(parent).trim());
     }

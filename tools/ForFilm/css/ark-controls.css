@@ -7,8 +7,6 @@
 #ark-device-name-section .btn-row { flex-wrap: wrap; }
 #ark-device-name-suffix { min-width: 0; max-width: 100%; }
 #ark-operation-status, #ark-pass-connection { overflow-wrap: anywhere; }
-.ark-brand img.mk { width: 32px !important; height: 28px !important; object-fit: contain; }
-.ark-loader__center img.lg { object-fit: contain; }
 button:disabled { cursor: not-allowed; }
 @media (max-width: 899px) {
     .bottom-nav { gap: 2px; }

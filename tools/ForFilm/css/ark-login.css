@@ -1,0 +1,32 @@
+/* The light login scene is intentionally separate from the dark Ark workbench. */
+body.ark-login-open { overflow: hidden; }
+.ark-login { position: fixed; inset: 0; width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; color: #20262a; background: #e9edef; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; overflow: auto; }
+.ark-login::backdrop { background: #e9edef; }
+.ark-login::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 48% 40%, #ffffffed, #f0f2f35c 47%, #bcc7cd44), linear-gradient(115deg, transparent 42%, #fff7 42.1%, transparent 42.3%); }
+.ark-login-plane { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.ark-login-plane::before, .ark-login-plane::after { content: ""; position: absolute; width: 70vw; height: 70vw; border: 1px solid #8b9aa32b; transform: rotate(31deg); }
+.ark-login-plane::before { top: -50vw; left: -12vw; }
+.ark-login-plane::after { right: -47vw; bottom: -30vw; }
+.ark-login-top { position: absolute; top: 32px; left: 4vw; right: 4vw; display: flex; justify-content: space-between; color: #6b7880; font: 10px/1.5 monospace; letter-spacing: .22em; }
+.ark-login .ark-login-skip { position: absolute; right: 4vw; top: 68px; z-index: 2; border: 0; border-bottom: 1px solid #86949b; color: #526068; background: transparent; padding: 8px 0; cursor: pointer; font: 11px/1.5 monospace; }
+.ark-login-main { position: relative; min-height: 70%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 95px 20px 190px; box-sizing: border-box; }
+.ark-login-logo { display: block; width: clamp(98px, 13vw, 160px); height: auto; filter:brightness(0); margin: 0 0 20px; opacity: .88; }
+.ark-login-wordmark { text-align: center; }
+.ark-login .ark-login-wordmark h1 { margin: 0; color: #171c20; font: 800 clamp(48px, 8vw, 88px)/1.08 "Microsoft YaHei", sans-serif; letter-spacing: .12em; padding-left: .12em; transform: scaleX(.95); }
+.ark-login .ark-login-wordmark p { margin: 10px 0 0; font: 600 clamp(19px, 3vw, 30px)/1 monospace; letter-spacing: .38em; padding-left: .38em; color: #252c31; }
+.ark-login-rule { width: 42px; height: 2px; background: #617d8d; margin: 35px 0 22px; }
+.ark-login .ark-login-enter { min-width: 240px; display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 17px 36px; border: 0; background: transparent; color: #29343b; cursor: pointer; }
+.ark-login-enter span { font-size: 23px; letter-spacing: .26em; padding-left: .26em; }
+.ark-login-enter small { font: 10px monospace; letter-spacing: .3em; padding-left: .3em; color: #627783; }
+.ark-login .ark-login-enter:hover { background: #ffffff70; }
+.ark-login button:focus-visible { outline: 2px solid #537d95; outline-offset: 5px; }
+.ark-login #ark-login-description { color: #839098; font-size: 11px; letter-spacing: .1em; margin: 9px 0 0; }
+.ark-login-bottom { position: absolute; bottom: 24px; left: 4vw; right: 4vw; }
+.ark-login-readiness, .ark-login-meta { display: flex; justify-content: space-between; align-items: center; gap: 18px; font: 10px/1.5 monospace; letter-spacing: .09em; color: #60727c; }
+.ark-login-track { height: 2px; background: #bac5cb; margin: 10px 0; }
+.ark-login-track i { display: block; width: 28px; height: 100%; background: #4e7288; }
+.ark-login.is-ready .ark-login-track i { width: 100%; transition: width .25s ease; }
+.ark-login-credit { color: #8a969c; text-align: center; font-size: 9px; margin: 25px 0 0; letter-spacing: .1em; }
+@media (max-width: 600px) { .ark-login-top { top: 22px; font-size: 8px; letter-spacing: .08em; } .ark-login-main { padding-top: 110px; padding-bottom: 180px; min-height: 85%; } .ark-login-logo { width: 110px; } .ark-login-meta { flex-wrap: wrap; font-size: 8px; gap: 5px; } .ark-login-bottom { bottom: 20px; } }
+@media (max-height: 650px) { .ark-login-main { padding-top: 75px; padding-bottom: 140px; } .ark-login-logo { width: 75px; margin-bottom: 12px; } .ark-login .ark-login-wordmark h1 { font-size: 48px; } .ark-login-rule { margin: 18px 0 8px; } .ark-login-bottom { position: relative; bottom: auto; left: auto; right: auto; margin: -105px 4vw 20px; } }
+@media (prefers-reduced-motion: reduce) { .ark-login.is-ready .ark-login-track i { transition: none; } }

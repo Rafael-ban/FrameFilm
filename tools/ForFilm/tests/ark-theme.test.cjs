@@ -7,7 +7,7 @@ const { mockBluetooth } = require('./ark-browser.test.cjs');
 
 (async () => {
     const browser = await chromium.launch({ headless: true, channel: 'msedge' });
-    const output = path.resolve('.output/ark/rhodes-web-theme');
+    const output = path.resolve('.output/ark/prts-web-theme');
     fs.mkdirSync(output, { recursive: true });
     try {
         const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
@@ -19,6 +19,13 @@ const { mockBluetooth } = require('./ark-browser.test.cjs');
         assert.equal(await page.locator('body').evaluate(el => el.classList.contains('theme-ark')), false);
         await page.locator('#scan-button').click();
         await page.waitForFunction(() => ArkDevice.connected() && document.body.classList.contains('theme-ark'));
+        const login = page.getByRole('dialog');
+        await login.waitFor();
+        const enter = login.getByRole('button', { name: /开始唤醒/ });
+        await page.waitForFunction(() => document.querySelector('#ark-login img')?.complete);
+        await page.screenshot({ path: path.join(output, 'login-desktop.png') });
+        await enter.click();
+        await login.waitFor({ state: 'hidden' });
         assert.equal(await page.locator('[id^="ark-ef-"]').count(), 0);
         assert.equal(await page.locator('.ark-rec, .ark-giant').count(), 0);
         await page.screenshot({ path: path.join(output, 'connected-desktop.png'), fullPage: true });
@@ -29,8 +36,20 @@ const { mockBluetooth } = require('./ark-browser.test.cjs');
         await page.waitForFunction(() => getComputedStyle(document.querySelector('#ark-pass-editor')).opacity === '1');
         const accent = await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--sky').trim());
         assert.equal(await editor.locator('body').evaluate(el => getComputedStyle(el).getPropertyValue('--editor-accent').trim()), accent);
+        const cardStyle = await page.locator('#pass-page > .card').evaluate(el => {
+            const s = getComputedStyle(el);
+            return { background: s.backgroundColor, color: s.color, radius: s.borderRadius };
+        });
+        assert.deepEqual(await editor.locator('.editor').evaluate(el => {
+            const s = getComputedStyle(el);
+            return { background: s.backgroundColor, color: s.color, radius: s.borderRadius };
+        }), cardStyle);
         await page.screenshot({ path: path.join(output, 'pass-desktop.png'), fullPage: true });
         await page.locator('[data-page="config-page"]').click();
+        await page.getByRole('button', { name: '重看启动界面' }).click();
+        await login.waitFor();
+        await page.keyboard.press('Escape');
+        await login.waitFor({ state: 'hidden' });
         await page.locator('label.switch:has(#ark-theme-switch)').click();
         assert.equal(await page.locator('#ark-theme-switch').isChecked(), false);
         await page.waitForFunction(() => !document.body.classList.contains('theme-ark'));
@@ -40,6 +59,7 @@ const { mockBluetooth } = require('./ark-browser.test.cjs');
         await page.locator('label.switch:has(#ark-theme-switch)').click();
         assert(await page.locator('#ark-theme-switch').isChecked());
         await page.waitForFunction(() => document.body.classList.contains('theme-ark'));
+        assert.equal(await login.isVisible(), false, 'Theme toggle must not repeat the introduction');
         await page.screenshot({ path: path.join(output, 'settings-desktop.png'), fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 });
         await page.locator('[data-page="pass-page"]').click();
@@ -53,7 +73,12 @@ const { mockBluetooth } = require('./ark-browser.test.cjs');
         assert.equal(await editor.locator('#codename').inputValue(), '主题检查草稿');
         await page.goto('http://127.0.0.1:8768/ForFilm/?theme=ark', { waitUntil: 'networkidle' });
         await page.waitForFunction(() => document.body.classList.contains('theme-ark'));
+        await login.waitFor();
+        await page.screenshot({ path: path.join(output, 'login-mobile.png') });
+        await login.getByRole('button', { name: /开始唤醒/ }).click();
+        await login.waitFor({ state: 'hidden' });
         assert.equal(await page.evaluate(() => ArkDevice.connected()), false);
+        assert(await page.locator('script[src="js/ark-theme.js?v=prts-2"]').count());
         assert.deepEqual(errors, []);
         console.log('PASS: Ark connection, theme toggle, embedded editor, disconnect, mobile layout and offline preview.');
     } finally { await browser.close(); }
