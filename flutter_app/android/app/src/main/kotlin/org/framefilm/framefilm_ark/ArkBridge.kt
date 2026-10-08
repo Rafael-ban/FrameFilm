@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.util.concurrent.Executors
 import org.framefilm.ark.FilmConverter
+import org.framefilm.ark.FirmwareDownloader
 import org.framefilm.ark.ArkFirmware
 import org.framefilm.ark.TransferSnapshot
 import android.bluetooth.BluetoothDevice
@@ -42,6 +43,11 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private var firmwareFile: File? = null
     private var importedFirmware: ArkFirmware? = null
     private var firmwareName: String? = null
+    private class Download(val downloader: FirmwareDownloader, val result: MethodChannel.Result) {
+        @Volatile var file: File? = null
+    }
+    private var download: Download? = null
+    private var firmwareDownload: Map<String, Any> = downloadState("idle", 0, 0, "", false)
     private var pickingFirmware = false
     private var importing = false
     private var importResult: MethodChannel.Result? = null
@@ -114,6 +120,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         "connected" to connected, "message" to message, "devices" to devices,
         "name" to name, "battery" to battery, "width" to width, "height" to height,
         "importing" to importing,
+        "firmwareDownload" to firmwareDownload,
         "hasFirmwareState" to true,
         "importedFirmware" to importedFirmware?.let { mapOf("name" to firmwareName,
             "size" to it.size, "version" to it.version, "project" to it.project,
@@ -144,6 +151,11 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 return
             }
             when (call.method) {
+                "downloadFirmware" -> downloadFirmware(call, result)
+                "cancelFirmwareDownload" -> {
+                    cancelFirmwareDownload()
+                    result.success(snapshot())
+                }
                 "pickFilm" -> pickFilm(result)
                 "pickFirmware", "importFirmware" -> pickFilm(result, firmware = true)
                 "clearFirmware" -> {
@@ -389,6 +401,106 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         firmwareName = null
     }
 
+    private fun downloadState(phase: String, received: Long, total: Long, detail: String,
+                              canCancel: Boolean): Map<String, Any> = mapOf(
+        "phase" to phase, "received" to received, "total" to total,
+        "message" to detail, "canCancel" to canCancel)
+
+    private fun replaceFirmware(file: File, image: ArkFirmware, displayName: String) {
+        val previous = firmwareFile
+        firmwareFile = file
+        importedFirmware = image
+        firmwareName = displayName
+        if (previous != file) previous?.delete()
+    }
+
+    private fun cancelFirmwareDownload() {
+        val job = download ?: return
+        download = null
+        job.downloader.cancel()
+        job.file?.delete()
+        importing = false
+        firmwareDownload = downloadState("cancelled",
+            firmwareDownload["received"] as Long, firmwareDownload["total"] as Long, "固件下载已取消", false)
+        emit()
+        job.result.success(snapshot())
+    }
+
+    private fun downloadFirmware(call: MethodCall, result: MethodChannel.Result) {
+        checkReplace()
+        val url = requireNotNull(call.argument<String>("url")) { "缺少固件下载地址" }
+        val displayName = call.argument<String>("name")
+        require(displayName == "frame_film_ark.bin") { "请选择原始 frame_film_ark.bin 资产" }
+        val target = java.net.URI(url)
+        require(target.scheme == "https" && target.host.equals("github.com", true) &&
+            target.rawPath?.startsWith("/Rafael-ban/FrameFilm/releases/download/") == true &&
+            target.rawPath?.endsWith("/frame_film_ark.bin") == true) { "固件必须来自 Rafael-ban/FrameFilm Release" }
+        val size = requireNotNull(call.argument<Number>("size")) { "缺少固件大小" }.toLong()
+        require(size in 1..FirmwareDownloader.MAX_SIZE) { "固件大小必须在 1 B 至 4 MiB 之间" }
+        val sha256 = call.argument<String>("sha256")
+        require(sha256 == null || sha256.matches(Regex("[a-fA-F0-9]{64}"))) { "固件 SHA256 格式无效" }
+        val job = Download(FirmwareDownloader(), result)
+        download = job
+        importing = true
+        firmwareDownload = downloadState("downloading", 0, size, "正在从 GitHub 下载固件", true)
+        emit()
+        worker.execute {
+            var temporary: File? = null
+            try {
+                job.downloader.checkCancelled()
+                val file = File.createTempFile("import-", ".bin", cache)
+                temporary = file
+                job.file = file
+                var lastProgress = 0L
+                job.downloader.download(url, file, size, sha256) { received ->
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (received == size || now - lastProgress >= 150) {
+                        lastProgress = now
+                        main.post {
+                            if (!closed && download === job) {
+                                firmwareDownload = downloadState("downloading", received, size, "正在从 GitHub 下载固件", true)
+                                emit()
+                            }
+                        }
+                    }
+                }
+                main.post {
+                    if (!closed && download === job) {
+                        firmwareDownload = downloadState("validating", size, size, "正在校验 Ark 固件", true)
+                        emit()
+                    }
+                }
+                val image = ArkFirmware.inspect(file)
+                job.downloader.checkCancelled()
+                main.post {
+                    if (closed || download !== job) file.delete()
+                    else {
+                        replaceFirmware(file, image, "frame_film_ark.bin")
+                        download = null
+                        importing = false
+                        firmwareDownload = downloadState("done", size, size, "固件下载并校验完成", false)
+                        transfer = TransferSnapshot("idle", "固件已导入：${image.version}", cleanupCompleted = true,
+                            kind = "firmware", targetVersion = image.version, targetBuild = image.elfSha256)
+                        emit()
+                        result.success(snapshot())
+                    }
+                }
+            } catch (error: Exception) {
+                temporary?.delete()
+                main.post {
+                    if (!closed && download === job) {
+                        download = null
+                        importing = false
+                        firmwareDownload = downloadState("error", firmwareDownload["received"] as Long,
+                            size, error.message ?: "固件下载失败", false)
+                        emit()
+                        result.success(snapshot())
+                    }
+                }
+            }
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun pickFilm(result: MethodChannel.Result, firmware: Boolean = false) {
         checkReplace()
@@ -453,10 +565,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                     if (closed) file.delete()
                     else {
                         if (firmware) {
-                            deleteFirmware()
-                            firmwareFile = file
-                            importedFirmware = image
-                            firmwareName = sendName
+                            replaceFirmware(file, checkNotNull(image), sendName)
                         } else {
                             deleteCurrent()
                             currentFile = file
@@ -490,6 +599,12 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     fun close() {
         if (closed) return
         closed = true
+        download?.let {
+            it.downloader.cancel()
+            it.file?.delete()
+            it.result.error("closed", "会话已关闭", null)
+        }
+        download = null
         clearRead("closed", "蓝牙会话已关闭")
         permissionResult?.error("closed", "蓝牙会话已关闭", null)
         permissionResult = null

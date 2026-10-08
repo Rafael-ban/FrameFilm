@@ -112,6 +112,27 @@ class FilmTransfer {
   double? get progress => total > 0 ? (received / total).clamp(0.0, 1.0) : null;
 }
 
+class FirmwareDownload {
+  const FirmwareDownload({
+    this.phase = 'idle',
+    this.received = 0,
+    this.total = 0,
+    this.message = '',
+    this.canCancel = false,
+  });
+  factory FirmwareDownload.fromMap(Map d) => FirmwareDownload(
+    phase: d['phase'] as String? ?? 'idle',
+    received: (d['received'] as num?)?.toInt() ?? 0,
+    total: (d['total'] as num?)?.toInt() ?? 0,
+    message: d['message'] as String? ?? '',
+    canCancel: d['canCancel'] == true,
+  );
+  final String phase, message;
+  final int received, total;
+  final bool canCancel;
+  double? get progress => total > 0 ? (received / total).clamp(0.0, 1.0) : null;
+}
+
 class DeviceSnapshot {
   const DeviceSnapshot({
     this.connected = false,
@@ -125,6 +146,8 @@ class DeviceSnapshot {
     this.importedFirmware,
     this.importing = false,
     this.transfer = const FilmTransfer(),
+    this.firmwareDownload = const FirmwareDownload(),
+    this.hasDownloadState = false,
     this.hasFilmState = false,
     this.hasFirmwareState = false,
     this.hasImportingState = false,
@@ -156,6 +179,10 @@ class DeviceSnapshot {
       transfer: data['transfer'] is Map
           ? FilmTransfer.fromMap(data['transfer'] as Map)
           : const FilmTransfer(),
+      firmwareDownload: data['firmwareDownload'] is Map
+          ? FirmwareDownload.fromMap(data['firmwareDownload'] as Map)
+          : const FirmwareDownload(),
+      hasDownloadState: data.containsKey('firmwareDownload'),
       hasFilmState: data.containsKey('importedFile'),
       hasFirmwareState: data.containsKey('importedFirmware'),
       hasImportingState: data.containsKey('importing'),
@@ -174,12 +201,17 @@ class DeviceSnapshot {
   final ImportedFirmware? importedFirmware;
   final bool importing;
   final FilmTransfer transfer;
+  final FirmwareDownload firmwareDownload;
+  final bool hasDownloadState;
   final bool hasFilmState;
   final bool hasFirmwareState;
   final bool hasImportingState;
   final bool hasTransferState;
 
   DeviceSnapshot retainingTransfer(DeviceSnapshot previous) => DeviceSnapshot(
+    firmwareDownload: hasDownloadState || firmwareDownload.phase != 'idle'
+        ? firmwareDownload
+        : previous.firmwareDownload,
     connected: connected,
     message: message,
     devices: devices,
@@ -252,7 +284,8 @@ class DeviceController extends ChangeNotifier {
   StreamSubscription<DeviceSnapshot>? _subscription;
 
   Future<void> command(String method, [Map<String, Object?>? arguments]) async {
-    final cancelling = method == 'cancelTransfer';
+    final cancellingDownload = method == 'cancelFirmwareDownload';
+    final cancelling = method == 'cancelTransfer' || cancellingDownload;
     if (!gateway.supported || (busy && !cancelling)) return;
     if ((snapshot.transfer.active || snapshot.transfer.canConfirm) &&
         const {
@@ -263,6 +296,7 @@ class DeviceController extends ChangeNotifier {
           'scan',
           'startTransfer',
           'pickFirmware',
+          'downloadFirmware',
           'clearFirmware',
           'startFirmwareTransfer',
         }.contains(method)) {
@@ -275,6 +309,7 @@ class DeviceController extends ChangeNotifier {
           'startTransfer',
           'retryTransfer',
           'pickFirmware',
+          'downloadFirmware',
           'clearFirmware',
           'startFirmwareTransfer',
         }.contains(method)) {
@@ -295,6 +330,7 @@ class DeviceController extends ChangeNotifier {
           'clearFilm',
           'startTransfer',
           'pickFirmware',
+          'downloadFirmware',
           'clearFirmware',
           'startFirmwareTransfer',
         }.contains(method)) {
@@ -313,7 +349,10 @@ class DeviceController extends ChangeNotifier {
         (!snapshot.transfer.canConfirm || snapshot.transfer.active)) {
       return;
     }
-    if (cancelling && !snapshot.transfer.canCancel) return;
+    if (cancellingDownload && !snapshot.firmwareDownload.canCancel) return;
+    if (cancelling && !cancellingDownload && !snapshot.transfer.canCancel) {
+      return;
+    }
     if (!cancelling) busy = true;
     errorMessage = null;
     notifyListeners();

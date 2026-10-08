@@ -7,11 +7,17 @@ on:
     branches: [main]
     paths: ['flutter_app/**', 'android/app/src/main/java/**', 'firmware/frame_film_ark/**', '.github/workflows/ark-builds.yml']
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish the built Ark OTA image to GitHub Releases (main only)'
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 concurrency:
   group: ark-builds-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 jobs:
   android:
     name: Flutter Android debug APK
@@ -114,3 +120,42 @@ jobs:
           path: |
             firmware/frame_film_ark/ci-logs/
             firmware/frame_film_ark/build/log/
+
+  release:
+    name: Publish Ark OTA firmware
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main'
+    needs: firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download this run's firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: ark-esp32s3-firmware
+          path: release-input
+      - name: Publish application image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$(find release-input -type f -name frame_film_ark.bin -print -quit)"
+          test -n "$image"
+          tag="ark-build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          digest="$(sha256sum "$image" | cut -d ' ' -f 1)"
+          cat > release-notes.md <<EOF
+          Ark OTA application image for ESP32-S3 / frame_film_ark.
+
+          Source commit: ${GITHUB_SHA}
+          File SHA256: ${digest}
+
+          Import frame_film_ark.bin in the Ark app. This is not a merged serial-flash image.
+          The displayed firmware version is not an update identifier; the app verifies the actual ELF build fingerprint after reboot.
+          Build completion is not a device acceptance test.
+          EOF
+          gh release create "$tag" "$image" --repo "$GH_REPO" \
+            --target "$GITHUB_SHA" --title "Ark build ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
+            --notes-file release-notes.md --latest=false

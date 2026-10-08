@@ -17,6 +17,8 @@ class PreviewDeviceGateway implements DeviceGateway {
   ImportedFilm? _film;
   ImportedFirmware? _firmware;
   FilmTransfer _transfer = const FilmTransfer();
+  FirmwareDownload _download = const FirmwareDownload();
+  bool _downloadFailed = false;
   PreviewScenario scenario = PreviewScenario.normal;
   static const warning = '模拟设备 / 演示数据，不会连接或修改真实设备';
   static const _build = 'demo-build-20261008';
@@ -43,6 +45,9 @@ class PreviewDeviceGateway implements DeviceGateway {
         importedFile: _film,
         importedFirmware: _firmware,
         transfer: _transfer,
+        firmwareDownload: _download,
+        hasDownloadState: true,
+        importing: _download.canCancel,
         hasFilmState: true,
         hasFirmwareState: true,
         hasTransferState: true,
@@ -60,6 +65,8 @@ class PreviewDeviceGateway implements DeviceGateway {
     _film = null;
     _firmware = null;
     _transfer = const FilmTransfer();
+    _download = const FirmwareDownload();
+    _downloadFailed = false;
     _emit();
   }
 
@@ -67,6 +74,14 @@ class PreviewDeviceGateway implements DeviceGateway {
   Future<void> invoke(String method, [Map<String, Object?>? arguments]) async {
     if (_disposed) return;
     switch (method) {
+      case 'downloadFirmware':
+        _startDownload();
+      case 'cancelFirmwareDownload':
+        _timer?.cancel();
+        _download = const FirmwareDownload(
+          phase: 'cancelled',
+          message: '模拟下载已取消，原已导入固件保留，可重新下载',
+        );
       case 'scan':
         _scanned = true;
       case 'connect':
@@ -132,6 +147,56 @@ class PreviewDeviceGateway implements DeviceGateway {
         throw UnsupportedError('演示模式未实现：$method');
     }
     _emit();
+  }
+
+  void _startDownload() {
+    _timer?.cancel();
+    var step = 0;
+    void advance() {
+      step++;
+      if (step == 2 &&
+          scenario == PreviewScenario.transferFailure &&
+          !_downloadFailed) {
+        _downloadFailed = true;
+        _timer?.cancel();
+        _download = const FirmwareDownload(
+          phase: 'error',
+          message: '模拟下载失败，原固件保留；重新下载可恢复',
+        );
+      } else if (step >= 5) {
+        _timer?.cancel();
+        _firmware = const ImportedFirmware(
+          name: 'frame_film_ark.bin / DEMO',
+          size: 1048576,
+          version: '3.2.5 / DEMO',
+          project: 'frame_film_ark',
+          elfSha256: _build,
+          fileSha256: 'demo-file-fingerprint',
+        );
+        _transfer = const FilmTransfer(
+          kind: 'firmware',
+          message: '演示固件已导入，未执行升级',
+        );
+        _download = const FirmwareDownload(
+          phase: 'done',
+          received: 1048576,
+          total: 1048576,
+          message: '模拟下载与校验完成，仅导入演示固件',
+        );
+      } else {
+        _download = FirmwareDownload(
+          phase: step == 4 ? 'validating' : 'downloading',
+          received: 1048576 * step ~/ 4,
+          total: 1048576,
+          canCancel: true,
+          message: step == 4 ? '模拟校验镜像…' : '模拟下载中…',
+        );
+      }
+      _emit();
+    }
+
+    advance();
+    _timer = Timer.periodic(stepDuration, (_) => advance());
   }
 
   void _start(bool firmware) {

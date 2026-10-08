@@ -59,3 +59,13 @@
 - 4项新测试、受影响文件analyze和Web构建通过。Navigator内演示栏修复后仅复测下拉交互，Edge浏览器确认film取消重试完成及窄屏场景选择。
 - 本机服务：http://127.0.0.1:8770/?preview=1，输出仍在 D:/dev-tool/FrameFilm-build/flutter/web。
 - 下一小步：GitHub Release原始应用固件获取与下载，复用现有校验/OTA；现阶段未发布远端或更改手机。
+
+### 阶段 C2：GitHub 在线固件
+
+- 设置页已接入固定公开仓库 Releases 查询（最近20个、正式发布、精确 frame_film_ark.bin），按发布时间选择候选。版本字符串不参与更新判断。
+- Android支持下载字节进度、取消、重试下载及校验成功后导入；4MiB/长度/可选GitHub资产SHA检查后，复用ArkFirmware.inspect验证目标与镜像。失败或取消保留原文件；下载不自动启动OTA。
+- 独立firmwareDownload快照与取消入口，避免与设备WiFi OTA的transfer状态混淆。Web支持真实查询，模拟入口可演示下载，不访问真实设备。
+- CI新增默认关闭的main手动publish_release选项，发布仅该次构建的原始app.bin，tag使用运行号/尝试号。仅改本地配置，未执行发布或远端CI。
+- 验证：Flutter定向7项测试/analyze、Android下载helper host probe、APK与Web构建通过；发布job YAML和bash语法通过。Edge浏览器真实API HTTP200空列表，模拟下载取消后重新下载完成，状态仍为导入待升级。
+- 本轮APK为 D:/dev-tool/FrameFilm-build/flutter/app/outputs/flutter-apk/app-debug.apk（97,311,403字节），没有安装手机。原固件和设备数据未更改。
+- 待实测：正式Release附件下载/网络重定向、Android取消/生命周期及下载后实机OTA。当前公开Releases为空，无线上新固件可验收；保持不推送、不发布。

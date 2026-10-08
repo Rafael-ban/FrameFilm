@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'device_gateway.dart';
 import 'preview_device_gateway.dart';
+import 'github_release_service.dart';
 
 enum FilmTheme { automatic, forFilm, arknights }
 
@@ -18,6 +19,33 @@ class FrameFilmApp extends StatefulWidget {
 
 class _FrameFilmAppState extends State<FrameFilmApp> {
   late DeviceController device;
+  final releases = GitHubReleaseService();
+  GitHubFirmwareRelease? onlineFirmware;
+  bool checkingReleases = false;
+  String? releaseMessage;
+  Future<void> checkReleases() async {
+    setState(() {
+      checkingReleases = true;
+      releaseMessage = null;
+      onlineFirmware = null;
+    });
+    try {
+      final release = await releases.latest();
+      if (mounted) {
+        setState(() {
+          onlineFirmware = release;
+          releaseMessage = release == null
+              ? '暂无包含 frame_film_ark.bin 的正式发布。'
+              : null;
+        });
+      }
+    } catch (error) {
+      if (mounted) setState(() => releaseMessage = '发布查询失败：$error');
+    } finally {
+      if (mounted) setState(() => checkingReleases = false);
+    }
+  }
+
   FilmTheme selectedTheme = FilmTheme.automatic;
   int page = 0;
   bool loading = false;
@@ -65,6 +93,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
 
   @override
   void dispose() {
+    releases.dispose();
     loadingTimer?.cancel();
     device.removeListener(onDeviceChanged);
     device.dispose();
@@ -734,6 +763,65 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('固件升级', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              OutlinedButton(
+                key: const Key('check-github'),
+                onPressed: checkingReleases ? null : checkReleases,
+                child: Text(checkingReleases ? '正在查询…' : '检查 GitHub 发布'),
+              ),
+              if (device.gateway is PreviewDeviceGateway)
+                OutlinedButton(
+                  key: const Key('demo-online-firmware'),
+                  onPressed: () => setState(() {
+                    onlineFirmware = GitHubFirmwareRelease.demo;
+                    releaseMessage = null;
+                  }),
+                  child: const Text('演示在线固件'),
+                ),
+            ],
+          ),
+          if (releaseMessage != null) Text(releaseMessage!),
+          if (onlineFirmware case final release?) ...[
+            Text('${release.name} · ${release.tag}'),
+            Text('发布于 ${release.publishedAt.toLocal()} · ${release.size} 字节'),
+            Text(
+              release.sha256 == null
+                  ? '发布未提供有效 SHA-256；下载后检查镜像自身完整性。'
+                  : '下载后核对 GitHub 资产 SHA-256 与镜像完整性。',
+            ),
+            const Text('发布版本仅供展示；升级以 ELF 构建指纹判定。下载完成只导入，仍需点击“检查并升级”。'),
+            OutlinedButton(
+              key: const Key('download-firmware'),
+              onPressed: editable
+                  ? () => device.command(
+                      'downloadFirmware',
+                      release.downloadArguments,
+                    )
+                  : null,
+              child: const Text('下载并校验'),
+            ),
+            if (!supported) const Text('当前浏览器仅支持查询发布；下载并校验需要 Android 客户端。'),
+          ],
+          if (snapshot.firmwareDownload.phase != 'idle') ...[
+            Text(snapshot.firmwareDownload.message),
+            Text(
+              '${snapshot.firmwareDownload.received} / ${snapshot.firmwareDownload.total} 字节',
+            ),
+            if (snapshot.firmwareDownload.canCancel) ...[
+              LinearProgressIndicator(
+                value: snapshot.firmwareDownload.progress,
+              ),
+              OutlinedButton(
+                key: const Key('cancel-firmware-download'),
+                onPressed: () => device.command('cancelFirmwareDownload'),
+                child: const Text('取消下载'),
+              ),
+            ],
+          ],
           const SizedBox(height: 12),
           Text(
             supported
