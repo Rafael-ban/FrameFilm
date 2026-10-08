@@ -34,4 +34,3 @@
 首次远端运行：[Ark builds #37736539292](https://github.com/Rafael-ban/FrameFilm/actions/runs/37736539292)，源码提交 `f9614d3`。已验证 Flutter APK 编译、运行资源检查、APK 上传，以及 ESP-IDF 5.5.2 Ark 固件编译、大小报告、合并镜像与产物上传；两份构建日志也已上传。编译成功和 APK 资源检查通过不代表设备最终文件提交、相机、屏幕刷新或 OTA 已经实测。
 
 参考：[Flutter action](https://github.com/subosito/flutter-action)、[Gradle Java compatibility](https://docs.gradle.org/current/userguide/compatibility.html)、[Espressif 官方 CI 容器](https://github.com/espressif/esp-idf-ci-action)、[IDF 5.5.2 merge-bin 实现](https://github.com/espressif/esp-idf/blob/v5.5.2/tools/idf_py_actions/serial_ext.py)。
-
