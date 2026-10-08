@@ -1,0 +1,21 @@
+name: framefilm_ark
+description: FrameFilm Ark 原生客户端，Flutter 双主题与 Android 通信桥接。
+publish_to: none
+version: 0.3.0+3
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/rhodes_logo.png

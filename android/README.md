@@ -4,7 +4,9 @@
 
 当前开发优先级（2026-10-08）：网页主题统一与状态收敛后，开始研究 **Flutter 原生界面重构**。现有 Android Views 工程保留为通信实现基线；下述 M1/M2 是已有工程的验证记录，不是 Flutter 的完成记录。取消与重试的实机验收仍为待完成，不因切换框架而视为通过。
 
-## Flutter 重构方案（研究完成，尚未创建工程）
+## Flutter 重构方案（第一阶段已建立）
+
+新工程位于 [`flutter_app`](../flutter_app/README.md)，已有六页原生框架、双主题、通行证内存预览与 Android BLE 桥接。Dart 静态检查、3 项 widget 测试和 Web 预览构建通过；Android APK 首次构建被 C 盘空间不足阻塞，尚未完成 Android 编译或实机连接验收。旧工程继续作为通信内核来源和既有验证记录。
 
 - 视觉：提供 **明日方舟 / PRTS** 与 **原 ForFilm** 两套完整主题，共享功能、页面状态与草稿；Arknights 采用当前网页已确认的炭灰、黑白、冷蓝体系，不复用旧 Android 黑白黄外观。连接 Ark 成功后进入主题加载界面，同一会话内切页不重复播放。
 - 页面：连接、Frame、Film、动画、通行证、设置。全部使用 Flutter widgets，不使用 WebView；手机使用适合触控的导航布局，保留网页功能分组和操作语义。
@@ -20,7 +22,7 @@
 3. 接入通行证编辑和 SD 读写、图片转换、设备设置；个人资料沿用网页与固件的格式，读取失败不覆盖草稿，部分文件发送成功明确提示。
 4. 再补齐高级图像算法、动画编辑和批量队列；OTA 单独处理已有擦除/超时问题后再验收。
 
-开发环境检查：Android SDK 目录与 platform-tools 已存在；本轮终端 PATH 未找到 `flutter` / `dart`，尚未执行 Flutter 构建。现有 Android 项目为 compile/target SDK 35、min SDK 29、JVM 17，Flutter 宿主配置应由正式模板生成后整合现有内核。
+开发环境：Flutter stable 3.47.6 / Dart 3.13.5 已安装到仓库忽略目录 `.output/toolchains/flutter`，新宿主由官方模板生成。Android SDK 目录与 platform-tools 已存在；APK 构建前须解决 C 盘空间，并将大型构建依赖安排到空间充足的磁盘。现有 Android 项目和新宿主均使用 compile/target SDK 35、min SDK 29、JVM 17。
 
 技术依据：[Flutter platform channels](https://docs.flutter.dev/platform-integration/platform-channels)、[Android WiFi Direct](https://developer.android.com/develop/connectivity/wifi/wifip2p)。Android 13+ 的附近 WiFi 权限、旧系统的定位要求及 BLE 权限仍由平台层按系统版本处理。
 
