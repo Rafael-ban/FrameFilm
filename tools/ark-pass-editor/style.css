@@ -44,6 +44,9 @@ body.embedded.theme-ark input::placeholder,body.embedded.theme-ark textarea::pla
 body.embedded.theme-ark .primary{background:var(--ink);border-color:var(--ink);color:var(--ark-bg)}
 body.embedded.theme-ark :is(.secondary,.file-button){background:transparent;border-color:var(--line);color:var(--ink)}
 body.embedded.theme-ark :is(button,.file-button):hover:not(:disabled){background:#2c3135;color:var(--ink);border-color:var(--ink);outline:none}
+body.embedded.theme-ark :is(button,.file-button){transition:background .15s,color .15s,border-color .15s}
+body.embedded.theme-ark :is(button,.file-button):active:not(:disabled){background:#2c3135;color:var(--ink);border-color:var(--ark-accent)}
+body.embedded.theme-ark :is(button,.file-button):focus-visible,body.embedded.theme-ark .file-button:focus-within{outline:2px solid var(--ark-accent);outline-offset:3px}
 body.embedded.theme-ark .text-button{background:none;color:var(--muted);border:0;padding-left:0}
 body.embedded.theme-ark .preview-frame{background:var(--ark-bg);border:1px solid var(--line);padding:16px}
 body.embedded.theme-ark .preview-frame canvas{background:#fff;box-shadow:none}
@@ -53,3 +56,5 @@ body.embedded.theme-ark label{font-weight:600;letter-spacing:.03em}
 body.embedded.theme-ark .status{padding-top:12px;border-top:1px solid var(--line);line-height:1.6}
 @media(max-width:1000px){body.embedded .workspace{grid-template-columns:1fr}}
 @media(max-width:560px){body.embedded .editor,body.embedded .preview-panel{padding:20px 16px}}
+@media(max-width:899px){body.embedded.theme-ark :is(input[type=text],textarea){font-size:16px}}
+@media(prefers-reduced-motion:reduce){body.embedded.theme-ark :is(button,.file-button){transition:none}}

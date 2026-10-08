@@ -274,28 +274,25 @@ function showMessage(message, type = 'info') {
     messageDiv.style.left = '50%';
     messageDiv.style.transform = 'translateX(-50%)';
     messageDiv.style.padding = '12px 24px';
-    messageDiv.style.borderRadius = '8px';
+    messageDiv.style.borderRadius = 'var(--notice-radius, 8px)';
     messageDiv.style.zIndex = '10000';
     messageDiv.style.fontWeight = '600';
-    messageDiv.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+    messageDiv.style.boxShadow = 'var(--notice-shadow, 0 4px 12px rgba(0, 0, 0, 0.15))';
+    messageDiv.style.color = 'var(--notice-color, white)';
 
     // 设置不同类型的颜色
     switch (type) {
         case 'success':
-            messageDiv.style.backgroundColor = '#4CAF50';
-            messageDiv.style.color = 'white';
+            messageDiv.style.backgroundColor = 'var(--notice-success, #4CAF50)';
             break;
         case 'error':
-            messageDiv.style.backgroundColor = '#f44336';
-            messageDiv.style.color = 'white';
+            messageDiv.style.backgroundColor = 'var(--notice-error, #f44336)';
             break;
         case 'warning':
-            messageDiv.style.backgroundColor = '#ff9800';
-            messageDiv.style.color = 'white';
+            messageDiv.style.backgroundColor = 'var(--notice-warning, #ff9800)';
             break;
         default:
-            messageDiv.style.backgroundColor = '#2196F3';
-            messageDiv.style.color = 'white';
+            messageDiv.style.backgroundColor = 'var(--notice-info, #2196F3)';
     }
 
     document.body.appendChild(messageDiv);
