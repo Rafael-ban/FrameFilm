@@ -49,6 +49,26 @@ try {
     Set-Content -LiteralPath $properties -Value $lines -Encoding utf8
     & "$flutter\bin\flutter.bat" @FlutterArguments
     $result = $LASTEXITCODE
+    if ($result -eq 0 -and $FlutterArguments.Count -ge 2 -and
+        $FlutterArguments[0] -eq 'build' -and $FlutterArguments[1] -eq 'apk' -and
+        $FlutterArguments -contains '--debug' -and
+        $FlutterArguments -notcontains '--split-per-abi' -and
+        $FlutterArguments -notcontains '--flavor') {
+        # A migrated incremental cache can leave a successfully packaged APK without
+        # Dart code. Check the actual archive before reporting this debug build usable.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $apk = [IO.Compression.ZipFile]::OpenRead((Join-Path $output 'app\outputs\flutter-apk\app-debug.apk'))
+        try {
+            foreach ($name in @('kernel_blob.bin', 'vm_snapshot_data', 'isolate_snapshot_data')) {
+                $entry = $apk.GetEntry("assets/flutter_assets/$name")
+                # This SDK permits an empty VM snapshot placeholder.
+                if ($null -eq $entry -or ($name -ne 'vm_snapshot_data' -and $entry.Length -eq 0)) {
+                    throw "APK missing $name. Remove this project's .dart_tool/flutter_build cache, run pub get and rebuild."
+                }
+            }
+            Write-Output 'Verified debug APK: Dart kernel and runtime snapshots are present.'
+        } finally { $apk.Dispose() }
+    }
 } finally {
     Pop-Location
     foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process') }
