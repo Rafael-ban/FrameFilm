@@ -40,6 +40,7 @@
 
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
+#include "esp_memory_utils.h"
 #include "esp_log.h"
 #include "cJSON.h"
 
@@ -372,6 +373,7 @@ static uint8_t wifi_direct_download(const char *url, uint32_t *received_out, uin
     uint32_t received = 0, total = 0;
     uint8_t header[32];
     size_t header_len = 0;
+    unsigned chunk_index = 0;
     do {
         if(esp_http_client_open(client, 0) != ESP_OK) break;
         int64_t length = esp_http_client_fetch_headers(client);
@@ -406,10 +408,20 @@ static uint8_t wifi_direct_download(const char *url, uint32_t *received_out, uin
             if((int32_t)(xTaskGetTickCount() - deadline) >= 0) break;
             size_t want = total - received;
             if(want > 4096) want = 4096;
-            uint8_t *chunk = pvPortMalloc(want);
+            /* FatFS can pass full sectors directly to SDMMC. Use PSRAM so
+             * ESP32-S3 SDMMC uses its sector-sized DMA bounce buffer. This
+             * avoids RTC FAST DMA corruption without reserving 4 KiB of DRAM. */
+            uint8_t *chunk = heap_caps_malloc(want, MALLOC_CAP_SPIRAM);
             if(!chunk) { error = WIFI_DIRECT_ERR_RESOURCE; break; }
             int got = esp_http_client_read(client, (char *)chunk, (int)want);
             if(got <= 0) { vPortFree(chunk); break; }
+            if(chunk_index < 3)
+            {
+                sys_logi(WIFI_SERVICE_TAG, "HTTP chunk trace: index=%u want=%u got=%d buffer=%p dma=%d aligned4=%d",
+                         chunk_index, (unsigned)want, got, (void *)chunk,
+                         esp_ptr_dma_capable(chunk), ((uintptr_t)chunk & 3u) == 0);
+            }
+            ++chunk_index;
             if(header_len < sizeof(header))
             {
                 size_t take = sizeof(header) - header_len;

@@ -86,6 +86,8 @@ $env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电
 
 ## 保存故障定位补充（2026-10-08）
 
+当前结论：WiFi 保存错误已在下述 PSRAM 修复版实机复测通过。以下先保留定位过程的历史记录，最终结果见本节末尾。
+
 - 本轮接入过 Android 9 `TYH201H` 和 `25042PN24C` 两台手机，测试结果分开记录。Android 9 扫描无结果的原因尚未确定，不能判定为权限或机型不兼容。
 - `25042PN24C` 已覆盖安装当前本地 APK，手机安装包与本地 SHA-256 均为 `174326575dbc265ebe73bbadc9ecd8db0f0fc336aad5e06424134fbd95c570d6`；扫描、连接成功。
 - 当前 APK 导入缓存与仓库测试 film SHA-256 相同，发送名为 `ark_flutter_test.film`。WiFi 实测 UART 仍返回 `state=5 bytes=43232/43232 error=3`，不是仅凭手机 100% 进度判断。
@@ -96,6 +98,15 @@ $env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电
 - 后续三阶段诊断记录 `http`（接收缓冲）、`prewrite`（文件任务写前）、`readback`（关闭后重新打开读回）的前 32 字节；镜像 SHA-256 `e0e6ae8b8126325dac5676faaccc0fe4aa2f45501525e119814599c9666a1d6b`，大小 1,852,944 字节，已 OTA 部署，启动 ELF 摘要前缀 `3b055b23f`，通行证档案保持一致。
 
 - 对照实测后，源码进一步限定只记录 film 的写前头部，避免记录非 film 显式路径文件；增量编译通过，此日志范围收窄未再次部署，film 路径与已测诊断版一致。
+
+### 最终修复：WiFi 接收缓冲避开 RTC FAST
+
+- 加细诊断发现首个 4096 字节缓冲位于 `0x600fe1e0`（RTC FAST heap），`dma=0`。源缓冲在 `fwrite` 后仍正确，但 `fflush/fsync` 成功后、关闭写句柄之前，另一句柄读回已全零；关闭后 POSIX 512 字节读取也全零，排除仅由 `fclose` 或小块读缓冲造成。
+- ESP-IDF 5.5.2 当前 SDMMC 路径对齐检查没有排除 RTC FAST。Ark 启用了 RTC FAST heap，普通 `pvPortMalloc` 因而可能给出 CPU 可读写、SDMMC DMA 不可访问的缓冲。此前成功的 WiFi 测试未记录缓冲地址与实际分块，不能断言当时的具体触发差异。
+- 直接申请 4096 字节内部 DMA 内存实测资源不足（`state=5/error=6`）；最终改为 `heap_caps_malloc(want, MALLOC_CAP_SPIRAM)`，由 S3 SDMMC 既有的单 sector DMA 缓冲中转。保留 4096 网络分块上限、文件校验、取消及提交语义；额外同步和重复读取探针未纳入最终修复。
+- 最终固件 3.2.5 已 OTA 启动：1,853,200 字节，SHA-256 `c3d4ddda362449dccc7a70fc0c031339abf4b7e1aa47e0b2ab0cf6ea17edb102`，ELF 前缀 `59982a465`。首次电脑重连核验时手机已占用 BLE，后续单独只读核验确认版本及通行证档案保持一致。
+- 同一台手机、现有 APK 与 `ark_flutter_test.film` 实测：缓冲位于 PSRAM `0x3c1f04f4`；HTTP、写前、落盘读回的 32 字节完全一致；日志确认正式提交文件及 `state=4 bytes=43232/43232 error=0`。App 显示传输完成、原 WiFi 配置未变、临时服务与连接清理确认。此项为保存链路验收，不代表整文件回读 hash 或实体屏幕显示验收；本轮未扩大为全量回归。
+- 结构化证据见 [DMA 缓冲修复对照](../docs/development/ark-dma-buffer-fix-20261008.json)。此前取消、清理测试仍以先前记录为准，本轮修复后的验证集中于失败的保存路径。
 
 ## 下一步
 

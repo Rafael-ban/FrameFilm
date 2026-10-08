@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-08",
+  "firmware_version": "3.2.5",
+  "sample": "android/app/src/main/assets/ark_direct_test.film",
+  "sample_sha256": "71236bcb91a33df761b5c4a27d2d42c638493709cab62fad378b1eb989545766",
+  "transfer_filename": "ark_flutter_test.film",
+  "total_bytes": 43232,
+  "before": {
+    "firmware_sha256": "d2318b0789669ca735c7ce2f837a2fa9c7d0e6c20424effcd1c73814481d839c",
+    "buffer": "0x600fe1e0",
+    "dma_capable": false,
+    "aligned4": true,
+    "first_chunk_bytes": 4096,
+    "source_header": "C0A80000D002E001000101000000000000000000000000000000000000000000",
+    "post_fwrite_source_header": "C0A80000D002E001000101000000000000000000000000000000000000000000",
+    "fwrite_bytes": 4096,
+    "fflush_result": 0,
+    "fsync_result": 0,
+    "before_fclose_readback_header": "0000000000000000000000000000000000000000000000000000000000000000",
+    "after_fclose_posix_read_bytes": 512,
+    "after_fclose_posix_header": "0000000000000000000000000000000000000000000000000000000000000000",
+    "device_state": 5,
+    "device_error": 3,
+    "received_bytes": 43232
+  },
+  "source_findings": {
+    "idf": "5.5.2",
+    "rtc_heap_config": "CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP=y",
+    "rtc_fast_range": "0x600fe000-0x600fffff",
+    "host_alignment_check": "Checks address and size alignment, not DMA capability",
+    "sdmmc_direct_write": "Aligned, non-external RAM reaches direct DMA on ESP32-S3",
+    "history_limit": "Prior successful WiFi test did not capture buffer address or actual HTTP chunk sizes"
+  },
+  "fix": {
+    "file": "firmware/frame_film_ark/components/film_service/src/service_wifi.c",
+    "allocation": "heap_caps_malloc(want, MALLOC_CAP_SPIRAM)",
+    "chunk_limit": 4096,
+    "extra_sync_and_read_probes_removed": true,
+    "firmware_bytes": 1853200,
+    "firmware_sha256": "c3d4ddda362449dccc7a70fc0c031339abf4b7e1aa47e0b2ab0cf6ea17edb102"
+  },
+  "after": {
+    "deployed_elf_prefix": "59982a465",
+    "buffer": "0x3c1f04f4",
+    "memory": "PSRAM",
+    "dma_capable": false,
+    "transfer_via": "ESP32-S3 SDMMC internal sector DMA bounce buffer",
+    "first_chunk_bytes": 4096,
+    "http_header": "C0A80000D002E001000101000000000000000000000000000000000000000000",
+    "prewrite_header": "C0A80000D002E001000101000000000000000000000000000000000000000000",
+    "readback_header": "C0A80000D002E001000101000000000000000000000000000000000000000000",
+    "committed_file": "/sdcard/film/ark_flutter_test.film",
+    "received_bytes": 43232,
+    "device_state": 4,
+    "device_error": 0,
+    "app_result": "Transfer complete; saved 43232 bytes; prior WiFi configuration unchanged; temporary service and connection cleanup confirmed",
+    "profile_preserved": true,
+    "profile_sha256": "89f7edbefe24bfb6bddcb49693d8afc7fb4c8f872391d7c3d9b6f967bb0a3cd0",
+    "ota_followup": "Initial PC reconnect timed out while phone held BLE; separate read-only version/profile check passed",
+    "full_file_readback_hash_verified": false,
+    "physical_display_verified": false
+  },
+  "dma_allocation_trial": {
+    "allocation": "heap_caps_malloc(want, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)",
+    "firmware_sha256": "f05b823895ee50b604e64eba16c1a4e76208e49bb4a6ff4c072164ce3e474623",
+    "device_state": 5,
+    "device_error": 6,
+    "received_bytes": 0,
+    "total_bytes": 43232,
+    "conclusion": "4096-byte internal DMA allocation unavailable while WiFi and BLE are active; replaced by PSRAM with SDMMC sector-sized bounce buffer"
+  }
+}
