@@ -23,28 +23,43 @@
 
 ## 工具链与命令
 
-本轮使用 Flutter stable 3.47.6 / Dart 3.13.5。SDK 安装于仓库忽略目录 `.output/toolchains/flutter`，未修改系统 PATH。Android compile/target SDK 35、minSDK 29、JVM 17；调试包名 `org.framefilm.ark.flutter.dev`，与现有客户端共存。当前签名仅用于开发。
+本轮使用 Flutter stable 3.47.6 / Dart 3.13.5。Android compile/target SDK 35、minSDK 29、JVM 17；调试包名 `org.framefilm.ark.flutter.dev`，与现有客户端共存。当前签名仅用于开发。
 
-从 `flutter_app` 执行（或将 Flutter 加入 PATH 后使用普通命令）：
+本机大型依赖与构建目录已经迁到 D 盘，原 C 盘入口保留 Windows 目录联接（junction）。没有更改系统 PATH，也没有迁移整个 `.codex/worktrees`：其他工作树仍有正在运行的程序和未提交内容。
+
+| 内容 | 本机实际位置 |
+|---|---|
+| Flutter SDK | `D:\dev-tool\FrameFilm-toolchains\flutter` |
+| Android SDK / NDK | `D:\dev-tool\Android\Sdk` |
+| Gradle 缓存与分发包 | `D:\dev-tool\gradle-home` |
+| Dart Pub 缓存 | `D:\dev-tool\pub-cache` |
+| 当前 Flutter 构建输出 | `D:\dev-tool\FrameFilm-build\flutter` |
+| 本构建入口的临时文件 | `D:\dev-tool\FrameFilm-build\temp` |
+| 当前 Ark 固件 build | `D:\dev-tool\FrameFilm-build\firmware-ark` |
+
+从仓库根目录使用入口脚本。它为本次命令设置 SDK、缓存与 TEMP/TMP，命令结束后恢复进程环境；自动维护忽略的 `local.properties`。执行 `clean` 删除 build 联接后，下次使用入口会重建联接，防止输出重新落到 C 盘。
 
 ```powershell
-& ../.output/toolchains/flutter/bin/flutter.bat pub get
-& ../.output/toolchains/flutter/bin/flutter.bat analyze --no-pub
-& ../.output/toolchains/flutter/bin/flutter.bat test --no-pub test/widget_test.dart
-& ../.output/toolchains/flutter/bin/flutter.bat build web --no-pub
-& ../.output/toolchains/flutter/bin/flutter.bat build apk --debug --target-platform android-arm64 --no-pub
+$env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电脑使用自己的兼容 JDK
+./flutter_app/tool/flutter.ps1 pub get
+./flutter_app/tool/flutter.ps1 analyze --no-pub
+./flutter_app/tool/flutter.ps1 test --no-pub test/widget_test.dart
+./flutter_app/tool/flutter.ps1 build web --no-pub
+./flutter_app/tool/flutter.ps1 build apk --debug --target-platform android-arm64 --no-pub
 ```
+
+这组 D 盘路径是当前电脑的开发配置，不是项目运行依赖。其他电脑可以按标准 Flutter 命令构建；也可以用 `FRAMEFILM_DEV_ROOT` 指定同结构存储目录。不同 checkout 应使用独立存储根目录，避免共享构建输出。已有非联接的 build 目录需要先迁移，脚本不会自动删除。Ark 的 build 联接如被 `fullclean` 删除，也需要重新创建或用 `idf.py -B <D盘目录>` 指定输出位置。
 
 浏览器预览从 `build/web` 启动静态服务，本轮地址 `http://127.0.0.1:8770/`。它用于查看同一份 Flutter 界面，无 BLE 能力；手机端桥接仍需 Android 构建及实机验证。预览不是把网页嵌进 App。
 
-## 本轮验证与阻塞（2026-10-08）
+## 验证记录（2026-10-08）
 
 - Flutter analyze：通过，无问题。
 - 3 项 widget 测试：通过。覆盖六页导航、离线边界、主题选择、表单切页保留、先连接后补名称、过场结束/断连取消及明确 ForFilm 偏好。测试使用 FakeGateway，不是真蓝牙验收。
 - Web 构建通过，电脑实际打开并检查两套主题。
-- Android APK 构建失败：C 盘空间不足，失败点为资源编译和原生库合并，未产出 APK，不能声称 Android 编译或 BLE 实机通过。
-- 已清理本次失败的 `build/app` 中间产物，并撤回本次新装的 NDK 28.2.13676358，恢复约 2.3 GiB 空间。D 盘检查时约 88 GiB 空闲；下轮先把大型 Android/Gradle 构建目录安排到 D 盘，再恢复 APK 构建。
-- 没有安装手机、配对设备或向 Ark 写入数据。
+- 首次 Android 构建因 C 盘空间不足失败。迁移依赖、构建输出和临时目录后重试成功，NDK 28.2.13676358 安装于 D 盘。
+- Android arm64 debug APK 已生成：`build/app/outputs/flutter-apk/app-debug.apk`。此结果确认 Kotlin 桥接和原生依赖编译通过；不能替代蓝牙实机验收。
+- 迁移后首次 ADB 检查没有发现手机，安装与只读连接测试待设备接入；没有向 Ark 写入数据。
 
 ## 下一步
 
