@@ -1,0 +1,117 @@
+name: Ark builds
+on:
+  push:
+    branches: [main, codex/ark-flutter]
+    paths: ['flutter_app/**', 'android/app/src/main/java/**', 'firmware/frame_film_ark/**', '.github/workflows/ark-builds.yml']
+  pull_request:
+    branches: [main]
+    paths: ['flutter_app/**', 'android/app/src/main/java/**', 'firmware/frame_film_ark/**', '.github/workflows/ark-builds.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ark-builds-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android:
+    name: Flutter Android debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Restore ignored Gradle wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter create --platforms=android --project-name=ci_wrapper "$RUNNER_TEMP/ci_wrapper"
+          cp "$RUNNER_TEMP/ci_wrapper/android/gradlew" flutter_app/android/gradlew
+          cp "$RUNNER_TEMP/ci_wrapper/android/gradlew.bat" flutter_app/android/gradlew.bat
+          cp "$RUNNER_TEMP/ci_wrapper/android/gradle/wrapper/gradle-wrapper.jar" flutter_app/android/gradle/wrapper/gradle-wrapper.jar
+          chmod +x flutter_app/android/gradlew
+      - name: Build APK
+        working-directory: flutter_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../ci-logs
+          flutter --version 2>&1 | tee ../ci-logs/flutter-version.log
+          flutter pub get 2>&1 | tee ../ci-logs/flutter-pub.log
+          flutter build apk --debug 2>&1 | tee ../ci-logs/flutter-build.log
+      - name: Check Flutter debug runtime assets
+        shell: python
+        run: |
+          import zipfile
+          with zipfile.ZipFile('flutter_app/build/app/outputs/flutter-apk/app-debug.apk') as archive:
+              for name in ('kernel_blob.bin', 'isolate_snapshot_data', 'vm_snapshot_data'):
+                  info = archive.getinfo('assets/flutter_assets/' + name)
+                  if name != 'vm_snapshot_data' and info.file_size == 0:
+                      raise RuntimeError(f'Empty Flutter runtime asset: {name}')
+                  print(f'{name}: {info.file_size} bytes')
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ark-flutter-debug-apk
+          path: flutter_app/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+      - name: Upload Android build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ark-flutter-build-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+  firmware:
+    name: Ark ESP32-S3 firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container: espressif/idf:v5.5.2
+    defaults:
+      run:
+        shell: bash
+        working-directory: firmware/frame_film_ark
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Ark and size report
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh"
+          mkdir -p ci-logs
+          idf.py --version 2>&1 | tee ci-logs/idf-version.log
+          idf.py build 2>&1 | tee ci-logs/build.log
+          idf.py size 2>&1 | tee ci-logs/size.log
+          idf.py merge-bin -o frame_film_ark-flash.bin 2>&1 | tee ci-logs/merge.log
+      - name: Upload Ark firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: ark-esp32s3-firmware
+          if-no-files-found: error
+          path: |
+            firmware/frame_film_ark/build/frame_film_ark.bin
+            firmware/frame_film_ark/build/frame_film_ark-flash.bin
+            firmware/frame_film_ark/build/bootloader/bootloader.bin
+            firmware/frame_film_ark/build/partition_table/partition-table.bin
+            firmware/frame_film_ark/build/ota_data_initial.bin
+            firmware/frame_film_ark/build/flasher_args.json
+            firmware/frame_film_ark/build/flash_args
+            firmware/frame_film_ark/build/frame_film_ark.elf
+            firmware/frame_film_ark/build/frame_film_ark.map
+            firmware/frame_film_ark/sdkconfig
+      - name: Upload Ark build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ark-firmware-build-logs
+          if-no-files-found: ignore
+          path: |
+            firmware/frame_film_ark/ci-logs/
+            firmware/frame_film_ark/build/log/
+
