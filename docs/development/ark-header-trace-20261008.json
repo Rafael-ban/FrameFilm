@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-08",
+  "firmware_version": "3.2.5",
+  "deployed_firmware_sha256": "e0e6ae8b8126325dac5676faaccc0fe4aa2f45501525e119814599c9666a1d6b",
+  "deployed_elf_prefix": "3b055b23f",
+  "sample": "android/app/src/main/assets/ark_direct_test.film",
+  "sample_sha256": "71236bcb91a33df761b5c4a27d2d42c638493709cab62fad378b1eb989545766",
+  "transfer_filename": "ark_flutter_test.film",
+  "total_bytes": 43232,
+  "received_bytes": 43232,
+  "headers": {
+    "source": "C0A80000D002E001000101000000000000000000000000000000000000000000",
+    "http": "C0A80000D002E001000101000000000000000000000000000000000000000000",
+    "prewrite": "C0A80000D002E001000101000000000000000000000000000000000000000000",
+    "readback": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "first_difference": {
+    "offset": 0,
+    "prewrite": "C0",
+    "readback": "00"
+  },
+  "device_result": {
+    "state": 5,
+    "error": 3
+  },
+  "conclusion": "First observed divergence is between the file task pre-fwrite buffer and the 32-byte readback after fclose/reopen. Filesystem, driver and media root cause is not yet isolated."
+}

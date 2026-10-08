@@ -94,6 +94,8 @@ typedef struct {
     char save_dir[64];       // 保存时的工作目录快照（避免保存途中切目录导致路径错乱）
     char save_path[512];     // 保存时的完整路径（显式路径模式下由相对路径拼接而来）
     char save_part_path[544];
+    uint8_t save_header[FILM_HEADER_SIZE]; // First bytes observed before fwrite.
+    size_t save_header_len;
     uint8_t save_owner;
     uint8_t save_failed;
     uint8_t save_skip_relocate; // 1：显式路径保存，完成后跳过 relocate/列表刷新/事件上浮
@@ -124,6 +126,20 @@ static volatile uint8_t m_list_ready = 0;           // 当前目录列表是否�
 /*********************************************************************
  * LOCAL FUNCTIONS
  */
+static void file_log_header(const char *stage, const uint8_t *hdr, size_t len)
+{
+    char hex[FILM_HEADER_SIZE * 2 + 1];
+    static const char digits[] = "0123456789ABCDEF";
+    for(size_t i = 0; i < len; ++i)
+    {
+        hex[i * 2] = digits[hdr[i] >> 4];
+        hex[i * 2 + 1] = digits[hdr[i] & 15];
+    }
+    hex[len * 2] = '\0';
+    sys_logi(FILE_TAG, "Film header trace stage=%s owner=%u bytes=%u hex=%s",
+             stage, (unsigned)m_file_state.save_owner, (unsigned)len, hex);
+}
+
 static void file_task_handle(void *pvParameters);
 static void file_msg_send(void *p_msg, bool in_isr);
 static void file_timer_callback(TimerHandle_t xTimer);
@@ -367,6 +383,7 @@ static void file_task_handle(void *pvParameters)
                 {
                     m_file_state.save_file_size = msg.file_size;
                     m_file_state.save_written = 0;
+                    m_file_state.save_header_len = 0;
                     m_file_state.save_failed = 0;
                     m_file_state.save_owner = msg.owner;
                     m_save_result = 0;
@@ -384,6 +401,15 @@ save_start_done:
                    !m_file_state.save_failed && msg.pdata &&
                    msg.data_len <= m_file_state.save_file_size - m_file_state.save_written)
                 {
+                    if(m_file_state.save_header_len < FILM_HEADER_SIZE &&
+                       (!m_file_state.save_skip_relocate || file_has_suffix(m_file_state.save_path, ".film")))
+                    {
+                        size_t take = FILM_HEADER_SIZE - m_file_state.save_header_len;
+                        if(take > msg.data_len) take = msg.data_len;
+                        memcpy(m_file_state.save_header + m_file_state.save_header_len, msg.pdata, take);
+                        m_file_state.save_header_len += take;
+                        file_log_header("prewrite", m_file_state.save_header, m_file_state.save_header_len);
+                    }
                     size_t written = fwrite(msg.pdata, 1, msg.data_len, m_file_state.save_file_handle);
                     m_file_state.save_written += written;
                     if(written == msg.data_len) m_save_result = 0;
@@ -809,6 +835,18 @@ static int file_validate_film(uint16_t *frame_count_out)
     size_t rd = fread(hdr, 1, sizeof(hdr), fp);
     int read_error = ferror(fp);
     int read_errno = errno;
+    file_log_header("readback", hdr, rd);
+    size_t compared = rd < m_file_state.save_header_len ? rd : m_file_state.save_header_len;
+    for(size_t i = 0; i < compared; ++i)
+    {
+        if(hdr[i] != m_file_state.save_header[i])
+        {
+            sys_loge(FILE_TAG, "Film header first difference owner=%u offset=%u prewrite=%02X readback=%02X",
+                     (unsigned)m_file_state.save_owner, (unsigned)i,
+                     m_file_state.save_header[i], hdr[i]);
+            break;
+        }
+    }
     fclose(fp);
 
     if(rd != FILM_HEADER_SIZE || m_file_state.save_written < FILM_HEADER_SIZE)

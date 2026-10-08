@@ -1,7 +1,7 @@
 name: Ark builds
 on:
   push:
-    branches: [main, codex/ark-flutter]
+    branches: [main]
     paths: ['flutter_app/**', 'android/app/src/main/java/**', 'firmware/frame_film_ark/**', '.github/workflows/ark-builds.yml']
   pull_request:
     branches: [main]

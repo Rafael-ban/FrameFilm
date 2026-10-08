@@ -4,7 +4,7 @@
 
 ## 触发与下载
 
-- 推送到 `main` 或 `codex/ark-flutter`、向 `main` 提交 PR 时，限定 Flutter、复用的 Android Kotlin 源码、Ark 固件及工作流自身路径。
+- 推送到 `main`、向 `main` 提交 PR 时，限定 Flutter、复用的 Android Kotlin 源码、Ark 固件及工作流自身路径。
 - 当前开发分支推送即可自动运行；工作流进入默认分支后，可从 GitHub → Actions → Ark builds → Run workflow 手动运行。
 - 两个 job 独立运行，完成后从该次运行的 Artifacts 下载。构建失败时保留已生成的日志；SDK 安装或 checkout 阶段失败请查看 Actions 步骤日志。
 

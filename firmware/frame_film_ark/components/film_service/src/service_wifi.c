@@ -370,6 +370,8 @@ static uint8_t wifi_direct_download(const char *url, uint32_t *received_out, uin
     uint8_t error = WIFI_DIRECT_ERR_HTTP;
     bool saving = false;
     uint32_t received = 0, total = 0;
+    uint8_t header[32];
+    size_t header_len = 0;
     do {
         if(esp_http_client_open(client, 0) != ESP_OK) break;
         int64_t length = esp_http_client_fetch_headers(client);
@@ -408,6 +410,26 @@ static uint8_t wifi_direct_download(const char *url, uint32_t *received_out, uin
             if(!chunk) { error = WIFI_DIRECT_ERR_RESOURCE; break; }
             int got = esp_http_client_read(client, (char *)chunk, (int)want);
             if(got <= 0) { vPortFree(chunk); break; }
+            if(header_len < sizeof(header))
+            {
+                size_t take = sizeof(header) - header_len;
+                if(take > (size_t)got) take = (size_t)got;
+                memcpy(header + header_len, chunk, take);
+                header_len += take;
+                if(header_len == sizeof(header))
+                {
+                    char hex[sizeof(header) * 2 + 1];
+                    static const char digits[] = "0123456789ABCDEF";
+                    for(size_t i = 0; i < header_len; ++i)
+                    {
+                        hex[i * 2] = digits[header[i] >> 4];
+                        hex[i * 2 + 1] = digits[header[i] & 15];
+                    }
+                    hex[header_len * 2] = '\0';
+                    sys_logi(WIFI_SERVICE_TAG, "Film header trace stage=http owner=%u bytes=%u hex=%s",
+                             (unsigned)FILE_SAVE_WIFI, (unsigned)header_len, hex);
+                }
+            }
             if(service_file_save_data(FILE_SAVE_WIFI, chunk, (uint32_t)got) != 0)
             {
                 error = WIFI_DIRECT_ERR_SAVE;
