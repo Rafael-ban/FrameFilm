@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-08",
+  "firmware_version": "3.2.5",
+  "firmware_commit": "0df633f",
+  "firmware_sha256": "c3d4ddda362449dccc7a70fc0c031339abf4b7e1aa47e0b2ab0cf6ea17edb102",
+  "client": "Existing Flutter Android APK on 25042PN24C",
+  "scope": "WiFi transfer, storage reload and physical display acceptance",
+  "full_file_readback_sha256_verified": false,
+  "full_file_readback_limitation": "Existing firmware has no generic film content or hash query; 0x53 reads profile JSON only",
+  "initial_fixture": {
+    "path": "android/app/src/main/assets/ark_direct_test.film",
+    "device_name": "ark_flutter_test.film",
+    "source_sha256": "71236bcb91a33df761b5c4a27d2d42c638493709cab62fad378b1eb989545766",
+    "loaded_bytes": 43232,
+    "file_id": 4,
+    "user_photo": "User supplied Image_674248828481753.jpg; not copied into repository",
+    "observation": "Complete image, but 90 degrees counterclockwise relative to supplied reference with panel cable down",
+    "orientation_passed": false
+  },
+  "portrait_fixture": {
+    "path": "docs/development/fixtures/ark_portrait_test.film",
+    "source_sha256": "771bb24c2d6c69ef65b31eac2ba596aae0b2c648b684c863c09b06bf497a8b2f",
+    "format": "MonoFast 1bpp, MSB first, 1 black",
+    "logical_size": [
+      480,
+      720
+    ],
+    "physical_header_size": [
+      720,
+      480
+    ],
+    "generation": "Center original icon without scaling on 480x720 logical canvas; apply UI mapping dx=719-y, dy=x",
+    "bytes": 43232,
+    "transport": "Flutter App WiFi Direct",
+    "state": 4,
+    "error": 0,
+    "received_bytes": 43232,
+    "committed_path": "/sdcard/film/ark_portrait_test.film",
+    "file_id": 5,
+    "loaded_bytes": 43232,
+    "current_file_query": 5,
+    "image_play_mode": 0,
+    "playback_settings_changed": false,
+    "physical_display_verified": true,
+    "confirmation": "方向和图案都正确，圆点在左上角",
+    "reference_orientation": "Panel portrait, flex cable down, dot in upper-left of icon",
+    "prior_wifi_configuration_unchanged": true,
+    "temporary_service_cleanup_confirmed": true
+  },
+  "remaining_issue": {
+    "status": "Observed, not fixed in this verification-only change",
+    "description": "Image app queues previous file on list-ready, then the new file on file-saved",
+    "old_file_id": 3,
+    "new_file_id": 5,
+    "log_old_display_start_ms": 1356957,
+    "log_old_display_complete_ms": 1386187,
+    "approximate_extra_seconds": 29,
+    "effect": "One old full-color refresh before new mono image; eventual target display is correct"
+  },
+  "conclusion": "Portrait fixture passed real App WiFi save, complete file reload, and user-confirmed physical orientation/display. No full-file device hash claim."
+}
