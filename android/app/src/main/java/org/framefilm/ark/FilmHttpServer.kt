@@ -9,18 +9,26 @@ import java.net.Socket
 import java.net.SocketException
 import java.util.concurrent.Executors
 
+/** The firmware appends ".ffupload.part" while saving, within its 64-character FAT limit. */
+internal object FilmTransferName {
+    private val validName = Regex("[A-Za-z0-9_.-]{1,45}\\.film")
+
+    fun forFile(displayName: String, file: File): String {
+        if (validName.matches(displayName)) return displayName
+        // This import's temporary ID stays fixed across retries.
+        val id = file.name.removePrefix("import-").removeSuffix(".film")
+            .filter { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' }
+            .takeLast(40)
+        return "ark_${id.ifEmpty { "film" }}.film"
+    }
+}
 /** Serves one local film through the phone's Wi-Fi Direct GO address. */
 class FilmHttpServer(file: File, fileName: String, address: Inet4Address) : Closeable {
     private val source = file.also {
         require(it.isFile && it.length() in 1..0xffffffffL) { "film 文件不存在或大小无效" }
     }
     private val length = source.length()
-    private val filename: String = run {
-        val stem = fileName.removeSuffix(".film").map { ch ->
-            if ((ch.isLetterOrDigit() && ch.code < 128) || ch == '_' || ch == '-') ch else '_'
-        }.joinToString("").trim('_').take(30).ifEmpty { "film" }
-        "ark_direct_${System.currentTimeMillis()}_${stem}.film"
-    }
+    private val filename: String = FilmTransferName.forFile(fileName, source)
     private val server = ServerSocket().apply {
         reuseAddress = true
         bind(InetSocketAddress(address, 0))

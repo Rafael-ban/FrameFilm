@@ -28,7 +28,12 @@ Future<void> openPage(WidgetTester tester, String title) async {
   if (bottom.evaluate().isNotEmpty) {
     await tester.tap(bottom);
   } else {
-    await tester.tap(find.descendant(of: find.byType(NavigationRail), matching: find.text(title)));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationRail),
+        matching: find.text(title),
+      ),
+    );
   }
   await tester.pumpAndSettle();
 }
@@ -123,4 +128,167 @@ void main() {
     expect(find.text('FrameFilm'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets('film import, native progress, cancellation and retry', (
+    tester,
+  ) async {
+    final gateway = FakeGateway();
+    addTearDown(gateway.events.close);
+    await tester.pumpWidget(FrameFilmApp(gateway: gateway));
+    gateway.events.add(const DeviceSnapshot(connected: true));
+    await tester.pump(const Duration(seconds: 2));
+    await openPage(tester, 'Film');
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('start-transfer')))
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.byKey(const Key('pick-film')));
+    await tester.pump();
+    expect(gateway.calls, contains('pickFilm'));
+    gateway.events.add(
+      DeviceSnapshot.fromMap({
+        'connected': true,
+        'importedFile': {
+          'name': 'test.film',
+          'size': 172832,
+          'width': 720,
+          'height': 480,
+        },
+        'importing': false,
+      }),
+    );
+    await tester.pump();
+    expect(find.text('test.film'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('start-transfer')));
+    await tester.pump();
+    expect(gateway.calls, contains('startTransfer'));
+    gateway.events.add(
+      DeviceSnapshot.fromMap({
+        'connected': true,
+        'transfer': {
+          'phase': 'downloading',
+          'message': '设备正在接收',
+          'received': 25,
+          'total': 100,
+          'canCancel': true,
+        },
+      }),
+    );
+    await tester.pump();
+    expect(find.text('test.film'), findsOneWidget);
+    expect(
+      tester
+          .widget<LinearProgressIndicator>(
+            find.byKey(const Key('transfer-progress')),
+          )
+          .value,
+      .25,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(find.byKey(const Key('pick-film')))
+          .onPressed,
+      isNull,
+    );
+    await tester.ensureVisible(find.byKey(const Key('cancel-transfer')));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      find.byKey(const Key('cancel-transfer')).hitTestable(),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('cancel-transfer')));
+    await tester.pump();
+    expect(gateway.calls, contains('cancelTransfer'));
+    gateway.events.add(
+      DeviceSnapshot.fromMap({
+        'connected': true,
+        'transfer': {
+          'phase': 'cancelled',
+          'message': '取消完成',
+          'canRetry': true,
+          'cleanupCompleted': true,
+        },
+      }),
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('retry-transfer')));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      find.byKey(const Key('retry-transfer')).hitTestable(),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('retry-transfer')));
+    await tester.pump();
+    expect(gateway.calls, contains('retryTransfer'));
+    gateway.events.add(
+      DeviceSnapshot.fromMap({
+        'connected': true,
+        'transfer': {
+          'phase': 'restoring',
+          'message': '保存与恢复中',
+          'received': 100,
+          'total': 100,
+          'canCancel': true,
+        },
+      }),
+    );
+    await tester.pump();
+    expect(find.text('传输完成'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('film preview has no native actions', (tester) async {
+    final gateway = FakeGateway(supported: false);
+    addTearDown(gateway.events.close);
+    await tester.pumpWidget(FrameFilmApp(gateway: gateway));
+    await openPage(tester, 'Film');
+    expect(find.textContaining('需要 Android 原生客户端'), findsOneWidget);
+    expect(
+      tester
+          .widget<OutlinedButton>(find.byKey(const Key('pick-film')))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('start-transfer')))
+          .onPressed,
+      isNull,
+    );
+    expect(gateway.calls, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  test(
+    'cancel bypasses a pending command and partial snapshots retain film',
+    () async {
+      final gateway = BlockingGateway();
+      final controller = DeviceController(gateway);
+      gateway.events.add(
+        DeviceSnapshot.fromMap({
+          'connected': true,
+          'importedFile': {'name': 'keep.film', 'size': 100},
+          'transfer': {'phase': 'downloading', 'canCancel': true},
+        }),
+      );
+      gateway.events.add(const DeviceSnapshot(connected: true));
+      expect(controller.snapshot.importedFile?.name, 'keep.film');
+      await controller.command('cancelTransfer');
+      expect(gateway.calls, contains('cancelTransfer'));
+      gateway.pending.complete();
+      await Future<void>.delayed(Duration.zero);
+      controller.dispose();
+      await gateway.events.close();
+    },
+  );
+}
+
+class BlockingGateway extends FakeGateway {
+  final pending = Completer<void>();
+  @override
+  Future<void> invoke(String method, [Map<String, Object?>? arguments]) async {
+    calls.add(method);
+    if (method == 'snapshot') await pending.future;
+  }
 }

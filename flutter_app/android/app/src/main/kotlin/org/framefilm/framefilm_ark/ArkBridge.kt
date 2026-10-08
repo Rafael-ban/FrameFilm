@@ -2,6 +2,12 @@ package org.framefilm.framefilm_ark
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.provider.OpenableColumns
+import java.io.File
+import java.util.concurrent.Executors
+import org.framefilm.ark.FilmConverter
+import org.framefilm.ark.TransferSnapshot
 import android.bluetooth.BluetoothDevice
 import android.content.pm.PackageManager
 import android.os.Build
@@ -21,6 +27,21 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private val events = EventChannel(messenger, "org.framefilm.ark/events")
     private var sink: EventChannel.EventSink? = null
     private var closed = false
+    private val worker = Executors.newSingleThreadExecutor()
+    private val cache = File(activity.cacheDir, "flutter-film").apply {
+        mkdirs()
+        // Once per process: a previous process cannot still serve these cached files.
+        if (!cacheInitialized) {
+            listFiles()?.filter { it.isFile && it.name.startsWith("import-") }?.forEach { it.delete() }
+            cacheInitialized = true
+        }
+    }
+    private var currentFile: File? = null
+    private var importedName: String? = null
+    private var importing = false
+    private var importResult: MethodChannel.Result? = null
+    private var transferPermission = false
+    private var transfer = TransferSnapshot("idle", "请导入 film 文件", cleanupCompleted = true)
     private var connected = false
     private var message = "请扫描并连接 Ark"
     private var devices: List<Map<String, String>> = emptyList()
@@ -41,6 +62,14 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
     private var pending: Read? = null
     private val session: ArkSession = ArkSession(activity, object : ArkSession.Listener {
+        override fun onTransfer(snapshot: TransferSnapshot) {
+            transfer = snapshot
+            if (closed) {
+                if (snapshot.phase in setOf("done", "cancelled", "error")) deleteCurrent()
+                return
+            }
+            emit()
+        }
         override fun onDevices(found: List<BluetoothDevice>) {
             if (closed) return
             devices = found.map { device ->
@@ -59,7 +88,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 clearDetails()
             }
             emit()
-            if (becameReady) beginRefresh(null)
+            if (becameReady && !session.transferActive) beginRefresh(null)
         }
         override fun onPacket(packet: ByteArray) {
             val read = pending ?: return
@@ -78,7 +107,14 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
 
     private fun snapshot(): Map<String, Any?> = mapOf(
         "connected" to connected, "message" to message, "devices" to devices,
-        "name" to name, "battery" to battery, "width" to width, "height" to height)
+        "name" to name, "battery" to battery, "width" to width, "height" to height,
+        "importing" to importing,
+        "importedFile" to currentFile?.let { mapOf("name" to importedName,
+            "size" to it.length(), "width" to FilmConverter.WIDTH, "height" to FilmConverter.HEIGHT) },
+        "transfer" to mapOf("phase" to transfer.phase, "message" to transfer.message,
+            "received" to transfer.received, "total" to transfer.total,
+            "canCancel" to transfer.canCancel, "canRetry" to transfer.canRetry,
+            "success" to transfer.success, "cleanupCompleted" to transfer.cleanupCompleted))
 
     private fun emit() { if (!closed) sink?.success(snapshot()) }
 
@@ -92,7 +128,32 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         if (closed) { result.error("closed", "蓝牙会话已关闭", null); return }
         try {
+            if (call.method in setOf("scan", "connect", "refresh") && session.transferActive) {
+                result.error("busy", "直传期间请等待传输结束", null)
+                return
+            }
             when (call.method) {
+                "pickFilm" -> pickFilm(result)
+                "clearFilm" -> {
+                    checkReplace()
+                    deleteCurrent()
+                    transfer = TransferSnapshot("idle", "已清除 film 文件", cleanupCompleted = true)
+                    emit()
+                    result.success(snapshot())
+                }
+                "startTransfer", "retryTransfer" -> {
+                    check(!importing && !refreshing && !session.transferActive) { "请等待当前操作完成" }
+                    val file = checkNotNull(currentFile) { "请先导入 film 文件" }
+                    withPermissions(result, direct = true) {
+                        transferPermission = false
+                        session.startTransfer(file, checkNotNull(importedName))
+                        result.success(snapshot())
+                    }
+                }
+                "cancelTransfer" -> {
+                    session.cancelTransfer()
+                    result.success(snapshot())
+                }
                 "snapshot" -> { emit(); result.success(snapshot()) }
                 "scan" -> withPermissions(result) {
                     session.scan()
@@ -127,18 +188,23 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         }
     }
 
-    private fun withPermissions(result: MethodChannel.Result, action: () -> Unit) {
+    private fun withPermissions(result: MethodChannel.Result, direct: Boolean = false, action: () -> Unit) {
         val required = when {
             Build.VERSION.SDK_INT >= 31 -> arrayOf(Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT)
             else -> arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-        val missing = required.filter { activity.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        val requested = if (!direct) required else required + when {
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES)
+            else -> arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val missing = requested.filter { activity.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) { action(); return }
         if (permissionResult != null) {
             result.error("busy", "请先完成蓝牙权限授权", null)
             return
         }
+        transferPermission = direct
         permissionResult = result
         permissionAction = action
         try { activity.requestPermissions(missing.toTypedArray(), PERMISSION_REQUEST) }
@@ -158,7 +224,11 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         permissionAction = null
         if (closed || result == null) return true
         if (grantResults.isEmpty() || grantResults.any { it != PackageManager.PERMISSION_GRANTED }) {
-            message = "需要附近设备权限才能扫描和连接 Ark，请在系统设置中允许"
+            message = "需要附近设备 / Wi-Fi 或定位权限，请允许后重试"
+            if (transferPermission) transfer = TransferSnapshot("error", message,
+                total = currentFile?.length() ?: 0, canRetry = currentFile != null,
+                cleanupCompleted = transfer.cleanupCompleted)
+            transferPermission = false
             emit()
             result.error("permission_denied", message, null)
         } else {
@@ -169,6 +239,10 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
 
     private fun beginRefresh(result: MethodChannel.Result?) {
+        if (session.transferActive) {
+            result?.error("busy", "直传期间不能读取设备信息", null)
+            return
+        }
         if (!connected || !session.isReady) {
             result?.error("not_connected", "请先连接 Ark", null)
             return
@@ -257,6 +331,103 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private fun u16(data: ByteArray, offset: Int) =
         ((data[offset].toInt() and 255) shl 8) or (data[offset + 1].toInt() and 255)
 
+    private fun checkReplace() {
+        check(!importing && !session.transferActive && !transferPermission &&
+            transfer.cleanupCompleted) { "请等待导入或直传清理结束" }
+    }
+
+    private fun deleteCurrent() {
+        currentFile?.delete()
+        currentFile = null
+        importedName = null
+    }
+
+    @Suppress("DEPRECATION")
+    private fun pickFilm(result: MethodChannel.Result) {
+        checkReplace()
+        importing = true
+        importResult = result
+        emit()
+        try {
+            activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }, PICK_FILM)
+        } catch (error: Exception) {
+            importing = false
+            importResult = null
+            emit()
+            throw error
+        }
+    }
+
+    fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != PICK_FILM) return false
+        if (closed) return true
+        val result = importResult
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            importing = false
+            importResult = null
+            emit()
+            result?.success(snapshot())
+            return true
+        }
+        worker.execute {
+            var temporary: File? = null
+            try {
+                val displayName = activity.contentResolver.query(uri,
+                    arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                    if (it.moveToFirst()) it.getString(0) else null
+                } ?: "import.film"
+                val file = File.createTempFile("import-", ".film", cache)
+                temporary = file
+                checkNotNull(activity.contentResolver.openInputStream(uri)).use { input ->
+                    file.outputStream().use { output ->
+                        val buffer = ByteArray(8192)
+                        var total = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            if (Thread.currentThread().isInterrupted) error("导入已取消")
+                            total += count
+                            require(total <= 32L * 1024 * 1024) { "film 超过 32 MiB" }
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
+                FilmConverter.validate(file)
+                val sendName = org.framefilm.ark.FilmTransferName.forFile(displayName, file)
+                main.post {
+                    if (closed) file.delete()
+                    else {
+                        deleteCurrent()
+                        currentFile = file
+                        importedName = sendName
+                        importing = false
+                        importResult = null
+                        transfer = TransferSnapshot("idle", "film 文件已导入，发送名 " + sendName,
+                            cleanupCompleted = true)
+                        emit()
+                        result?.success(snapshot())
+                    }
+                }
+            } catch (error: Exception) {
+                temporary?.delete()
+                main.post {
+                    if (!closed) {
+                        importing = false
+                        importResult = null
+                        message = error.message ?: "film 导入失败"
+                        emit()
+                        result?.error("import_failed", message, null)
+                    }
+                }
+            }
+        }
+        return true
+    }
+
     fun close() {
         if (closed) return
         closed = true
@@ -267,8 +438,13 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         methods.setMethodCallHandler(null)
         events.setStreamHandler(null)
         sink = null
+        importResult?.error("closed", "会话已关闭", null)
+        importResult = null
+        worker.shutdownNow()
+        val active = session.transferActive
         session.close()
+        if (!active) deleteCurrent()
     }
 
-    private companion object { const val PERMISSION_REQUEST = 4207 }
+    private companion object { const val PERMISSION_REQUEST = 4207; const val PICK_FILM = 4208; var cacheInitialized = false }
 }

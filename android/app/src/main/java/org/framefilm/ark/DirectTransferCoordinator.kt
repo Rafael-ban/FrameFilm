@@ -22,7 +22,7 @@ class DirectTransferCoordinator(
     private val after = mutableListOf<ByteArray>()
     private val p2p: ArkP2pController = ArkP2pController(context, object : ArkP2pController.Listener {
         override fun onGroupReady(frequencyMhz: Int) {
-            if (active && !stopping) emit("connecting", "2.4GHz GO 已就绪（${frequencyMhz}MHz）")
+            if (active && !stopping) emit("connecting", if (frequencyMhz > 0) "2.4GHz GO 已就绪（${frequencyMhz}MHz）" else "直连组已就绪，Android 9 由系统选择频段")
         }
         override fun onSessionReady(session: ArkP2pController.Session) {
             if (!active || stopping) return
@@ -34,20 +34,18 @@ class DirectTransferCoordinator(
                     write(server!!.url.toByteArray(Charsets.US_ASCII)); write(0)
                 }.toByteArray()
                 if (payload.size > 192) { stop("直传参数超过 BLE 单包上限"); return }
-                ble.sendNoReply(0x4B, byteArrayOf(0)) { result ->
-                    if (!active || stopping) return@sendNoReply
-                    result.getOrElse { stop(it.message ?: "无法切换图片 app"); return@sendNoReply }
-                    startSubmitted = true
-                    ble.command(0x50, payload, 8_000) { reply ->
-                        if (!active || stopping) return@command
-                        val code = reply.getOrElse { stop(it.message ?: "直传启动失败"); return@command }
-                        if (code.size != 1 || code[0].toInt() != 0) {
-                            startSubmitted = false
-                            stop("Ark 拒绝直传（代码 ${code.firstOrNull()?.toInt()?.and(0xff) ?: -1}）")
-                        } else {
-                            emit("connecting", "Ark 已接受直传；文件 ${server!!.size} 字节")
-                            poll()
-                        }
+                // Saving already routes film files by frame count. Do not enter the image
+                // app here: entering it would replay the previous image before upload.
+                startSubmitted = true
+                ble.command(0x50, payload, 8_000) { reply ->
+                    if (!active || stopping) return@command
+                    val code = reply.getOrElse { stop(it.message ?: "直传启动失败"); return@command }
+                    if (code.size != 1 || code[0].toInt() != 0) {
+                        startSubmitted = false
+                        stop("Ark 拒绝直传（代码 ${code.firstOrNull()?.toInt()?.and(0xff) ?: -1}）")
+                    } else {
+                        emit("connecting", "Ark 已接受直传；文件 ${server!!.size} 字节")
+                        poll()
                     }
                 }
             } catch (error: Exception) { stop("手机 HTTP 服务启动失败：${error.message}") }
@@ -143,7 +141,19 @@ class DirectTransferCoordinator(
             emit(phase, "Ark 状态 $state，${bytes[1].toInt() and 0xff}%，$received/$total 字节")
             if (state in 4..6) {
                 terminal = true
-                if (state != 4) { stop("Ark 直传失败：状态 $state，错误 $error"); return@command }
+                if (state != 4) {
+                    val reason = when (error) {
+                        1 -> "设备连接直连网络失败；Android 9 请先断开手机的 5GHz Wi-Fi 后重试"
+                        2 -> "设备下载文件失败"
+                        3 -> "设备无法保存文件，请检查 SD 卡剩余空间和写入状态"
+                        4 -> "设备已取消传输"
+                        5 -> "设备恢复原有 Wi-Fi 连接失败"
+                        6 -> "设备可用资源不足"
+                        else -> "设备未完成传输"
+                    }
+                    stop("$reason（状态 $state，错误 $error）")
+                    return@command
+                }
                 val expected = server?.size ?: -1L
                 if (received != expected || reportedTotal != expected) {
                     stop("传输字节数不符：$received/$reportedTotal，预期 $expected")

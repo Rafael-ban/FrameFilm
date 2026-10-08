@@ -1,6 +1,6 @@
 # FrameFilm Ark · Flutter
 
-第一阶段原生界面与 Android BLE 桥接。使用 Flutter widgets，不使用 WebView。
+Flutter 原生界面、Android BLE 桥接与 film 文件 Wi-Fi Direct 传输。使用 Flutter widgets，不使用 WebView；先完成功能，最终手机 UI 再与网页统一。
 
 ## 当前范围
 
@@ -10,20 +10,31 @@
 - 设置可离线预览明日方舟；主题偏好目前只在当前应用会话内保留。
 - Android bridge 接入扫描、权限、连接、断开、0x42 屏参、0x23 电量与 0x54 名字读取。命令同时等待写入完成和同通道回包；超时断开以丢弃旧连接的迟到回包。
 - 通行证提供代号、编号、职能的内存表单预览；不是最终设备档案布局，也不写 SD，退出应用后不保留。
-- Frame、Film、动画目前展示阶段范围，尚未接入图片转换、传输或编辑操作。
+- Film 页支持系统文件选择器导入已有 `.film`、格式与 720×480 尺寸校验、Wi-Fi Direct 直传、设备实际字节进度、取消、清理状态与重试。单文件上限 32 MiB；非法文件或取消选择保留上次导入。合法 ASCII 文件名最长 50 字符（包含 `.film`），其他名称映射为本次导入的稳定短名，以预留固件保存后缀。
+- 传输通过 BLE 协商手机创建的临时 2.4GHz 直连组，不需要路由器或用户手动开热点。重试从头传输，不是断点续传；只有设备确认保存且连接清理完成才显示成功。
+- 导入副本保存在应用缓存；替换、清除与会话结束时释放，进程启动清理上次遗留副本。活动传输和未完成的清理期间不允许替换文件。
+- Frame 与动画仍未接入图片转换或编辑操作。
 
 ## 结构与复用
 
 - `lib/app.dart`：原生页面、主题与连接过场。
 - `lib/device_gateway.dart`：平台通道、设备快照与页面控制器。
-- `android/app/src/main/kotlin/org/framefilm/framefilm_ark/ArkBridge.kt`：唯一 ArkSession、权限与通知读取。
+- `android/app/src/main/kotlin/org/framefilm/framefilm_ark/ArkBridge.kt`：唯一 ArkSession、权限、通知读取与系统文件导入。
 - Android Gradle 从仓库现有 `../android/app/src/main/java` 引入通信源码，排除旧 Activity/UI/相机 Provider；没有复制第二套 BLE/P2P 状态机。
-- 桥接在 Flutter 宿主生命周期内持有会话，页面切换不关闭连接；关闭 engine 时释放。首阶段不承诺后台常驻或进程终止后恢复。
+- 桥接在 Flutter 宿主生命周期内持有会话，页面切换不关闭连接；关闭 engine 时释放。暂不承诺后台常驻或进程终止后自动恢复；进程结束后需重新导入文件。
 - `assets/rhodes_logo.png` 来自仓库 `tools/ui-assets/boot_logo_mono.png`，源图说明见 `tools/ui-assets/boot-logo.md`。
+
+## Android 9 兼容性
+
+最低 Android 9（API 28）。Android 9 使用公开旧版 `createGroup(channel, listener)`，读取系统生成的名称和密码；系统不提供强制指定或查询组频段的公开 API，若当前 5GHz Wi-Fi 使 Ark 无法连接，请先断开该 Wi-Fi 后重试。Android 10 及以上使用可明确指定 2.4GHz 的接口。蓝牙扫描和旧版直连需要定位授权，部分系统还需要开启定位服务。
+
+直传准备阶段不再发送切换图片 app 的命令，避免先重放旧图。固件保存时按帧数归入图片/动画目录；已处在相应内容页时由固件已有保存事件刷新，其他页面保持原画面。Android 9 尚需对应系统的实机验证，当前连接手机报告 Android 17。
+
+参考：[Android Wi-Fi Direct API](https://developer.android.com/reference/android/net/wifi/p2p/WifiP2pManager)、[API 29 起支持指定频段](https://developer.android.com/reference/android/net/wifi/p2p/WifiP2pConfig.Builder)。
 
 ## 工具链与命令
 
-本轮使用 Flutter stable 3.47.6 / Dart 3.13.5。Android compile/target SDK 35、minSDK 29、JVM 17；调试包名 `org.framefilm.ark.flutter.dev`，与现有客户端共存。当前签名仅用于开发。
+本轮使用 Flutter stable 3.47.6 / Dart 3.13.5。Android compile/target SDK 35、minSDK 28（Android 9）、JVM 17；调试包名 `org.framefilm.ark.flutter.dev`，与现有客户端共存。当前签名仅用于开发。
 
 本机大型依赖与构建目录已经迁到 D 盘，原 C 盘入口保留 Windows 目录联接（junction）。没有更改系统 PATH，也没有迁移整个 `.codex/worktrees`：其他工作树仍有正在运行的程序和未提交内容。
 
@@ -50,23 +61,31 @@ $env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电
 
 这组 D 盘路径是当前电脑的开发配置，不是项目运行依赖。其他电脑可以按标准 Flutter 命令构建；也可以用 `FRAMEFILM_DEV_ROOT` 指定同结构存储目录。不同 checkout 应使用独立存储根目录，避免共享构建输出。已有非联接的 build 目录需要先迁移，脚本不会自动删除。Ark 的 build 联接如被 `fullclean` 删除，也需要重新创建或用 `idf.py -B <D盘目录>` 指定输出位置。
 
-浏览器预览从 `build/web` 启动静态服务，本轮地址 `http://127.0.0.1:8770/`。它用于查看同一份 Flutter 界面，无 BLE 能力；手机端桥接仍需 Android 构建及实机验证。预览不是把网页嵌进 App。
+浏览器预览从 `build/web` 启动静态服务，本轮地址 `http://127.0.0.1:8770/`。它用于查看同一份 Flutter 界面，无 Android BLE、文件导入或 Wi-Fi Direct 能力；手机端桥接仍需 Android 构建及实机验证。预览不是把网页嵌进 App。
 
 ## 验证记录（2026-10-08）
 
 - Flutter analyze：通过，无问题。
-- 3 项 widget 测试：通过。覆盖六页导航、离线边界、主题选择、表单切页保留、先连接后补名称、过场结束/断连取消及明确 ForFilm 偏好。测试使用 FakeGateway，不是真蓝牙验收。
+- 第一阶段 3 项 widget 测试：通过。覆盖六页导航、离线边界、主题选择、表单切页保留、先连接后补名称、过场结束/断连取消及明确 ForFilm 偏好。测试使用 FakeGateway，不是真蓝牙验收。
 - Web 构建通过，电脑实际打开并检查两套主题。
 - 首次 Android 构建因 C 盘空间不足失败。迁移依赖、构建输出和临时目录后重试成功，NDK 28.2.13676358 安装于 D 盘。
 - Android arm64 debug APK 已生成：`build/app/outputs/flutter-apk/app-debug.apk`。此结果确认 Kotlin 桥接和原生依赖编译通过；不能替代蓝牙实机验收。
 - 首次实机出现白屏：旧 APK 缺少 `kernel_blob.bin`，Dart VM 没有应用 isolate。清除迁移残留的 `.dart_tool/flutter_build` 并执行 `pub get` 后重新打包，手机已正常显示页面。C/D 盘别名混用的旧输出记录与 Flutter 增量清理机制是本次构建缺文件的相关证据，不是页面或蓝牙逻辑故障。
 - 构建入口新增标准 debug APK 检查：kernel、isolate snapshot 必须非空，VM snapshot 必须存在（本 SDK 的 VM 占位文件为 0 字节，允许为空）。本次修复 APK 为 81,936,838 字节。
 - 实机 `25042PN24C`（系统报告 Android 17）已更新安装并完成启动、扫描、连接、首次读取和手动刷新验证：设备名 `FRAMEFILMARK-伊卡洛斯sama`，电量 100%，屏幕 720×480。连接后界面切为 PRTS 主题。
-- 本轮仅查询屏参、电量与设备名，没有修改 Ark 参数或文件。图片传输、取消重试、后台保持与长时间稳定性不在本轮验收范围内。
+- 第一阶段只读测试仅查询屏参、电量与设备名；第二阶段传输测试记录见下。
+
+## 第二阶段：film 直传与 CI
+
+- `flutter analyze --no-pub`：通过。6 项 widget 测试已通过（其中一项滚动定位失败修正后，仅复测该项）。新增覆盖导入、实际进度、取消、清理与重试状态；FakeGateway 不替代真实设备。
+- Android arm64 debug APK 编译、运行资源检查与覆盖安装通过；最终包 81,982,381 字节。`aapt dump badging` 确认 `sdkVersion: 28`，支持安装到 Android 9。
+- 实机已成功导入 43,232 字节、720×480 的测试 film；初次直传到达设备保存阶段后返回错误 3。定位到旧 HTTP 服务附加时间戳后，加上固件 `.ffupload.part` 后缀超过 FATFS 64 字符限制；已将实际发送名限制为 50 字符以内并取消每次重试的时间戳前缀，UI 与设备保存名一致。
+- 修复后真机：导入通过；取消显示“已取消”，临时服务与连接清理确认；取消后重试可启动并接收完整 43,232 字节，仍在设备提交阶段返回状态 5 / 错误 3。100% 没有误报成功，失败后清理确认。所选 `ark_flutter_test.film` 与仓库样例 SHA-256 完全相同，用户确认 SD 卡可打开已有图片。设备最终保存、显示尚未验收通过，需要后续读取固件提交日志定位；未格式化 SD、未修改设备固件。
+- Android 9 分支本轮完成源码与 APK 编译检查，尚无 Android 9 真机结果；不能用 Android 17 手机代替该项验收。
+- 自动构建配置及产物说明见 [Ark 自动构建](../docs/development/ci-builds.md)。分别构建 Android debug APK 和 ESP-IDF 5.5.2 Ark 固件，保留构建日志；远端首次运行状态另行记录。
 
 ## 下一步
 
-1. 已完成 Android APK 构建与扫描/连接/只读信息实机验证；后续先补功能，最终手机 UI 以现有网页视觉与交互为准。
-2. 接入现成 film 导入、WiFi 直传、进度、取消、清理和重试；现有内核取消重试的历史实机缺口仍未关闭。
-3. 完成通行证头像、代号、编号、所属、签名与 SD 读写，增加草稿持久化。
-4. 迁移图片转换与高级动画功能；OTA 的固件擦除超时独立处理。
+1. 继续完成功能后，再按现有网页统一手机 UI。
+2. 完成通行证头像、代号、编号、所属、签名与 SD 读写，增加草稿持久化。
+3. 迁移图片转换与高级动画功能；后台保持、进程恢复与长时间稳定性另行验证。

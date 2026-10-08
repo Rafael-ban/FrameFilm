@@ -257,13 +257,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
       'Frame 是设备与画面的工作区。',
       ['读取设备名称、电量和屏幕参数已接入', '画面排版与设备端设置将在后续阶段接入'],
     ),
-    2 => stagePage(
-      context,
-      Icons.photo_library_outlined,
-      '让照片留在电子纸上',
-      '照片转换与 film 文件传输尚未接入。',
-      ['后续接入图片选择与裁剪', '后续接入颜色转换、预览与上传'],
-    ),
+    2 => filmPage(context),
     3 => stagePage(
       context,
       Icons.movie_filter_outlined,
@@ -318,7 +312,10 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                 children: [
                   if (!snapshot.connected)
                     FilledButton.icon(
-                      onPressed: device.busy
+                      onPressed:
+                          device.busy ||
+                              device.snapshot.transfer.active ||
+                              device.snapshot.importing
                           ? null
                           : () => device.command('scan'),
                       icon: const Icon(Icons.search),
@@ -326,14 +323,20 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                     ),
                   if (snapshot.connected) ...[
                     FilledButton.icon(
-                      onPressed: device.busy
+                      onPressed:
+                          device.busy ||
+                              device.snapshot.transfer.active ||
+                              device.snapshot.importing
                           ? null
                           : () => device.command('refresh'),
                       icon: const Icon(Icons.refresh),
                       label: const Text('刷新信息'),
                     ),
                     OutlinedButton(
-                      onPressed: device.busy
+                      onPressed:
+                          device.busy ||
+                              device.snapshot.transfer.active ||
+                              device.snapshot.importing
                           ? null
                           : () => device.command('disconnect'),
                       child: const Text('断开连接'),
@@ -378,7 +381,10 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                 title: Text(item.name),
                 subtitle: Text(item.address),
                 trailing: FilledButton.tonal(
-                  onPressed: device.busy
+                  onPressed:
+                      device.busy ||
+                          device.snapshot.transfer.active ||
+                          device.snapshot.importing
                       ? null
                       : () => device.command('connect', {
                           'address': item.address,
@@ -390,7 +396,178 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
       ],
       const SizedBox(height: 20),
-      const Text('第一阶段 · 原生连接与界面\n扫描、连接和读取由 Android 蓝牙服务提供。画面编辑与上传尚未接入。'),
+      const Text(
+        '原生连接与文件传输\n扫描、连接和读取由 Android 蓝牙服务提供。film 文件直传请进入 Film 页。',
+      ),
+    ];
+  }
+
+  List<Widget> filmPage(BuildContext context) {
+    final snapshot = device.snapshot;
+    final file = snapshot.importedFile;
+    final transfer = snapshot.transfer;
+    final supported = device.gateway.supported;
+    final available =
+        supported && !device.busy && !snapshot.importing && !transfer.active;
+    final editable =
+        available && !(transfer.canRetry && !transfer.cleanupCompleted);
+    final phase = switch (transfer.phase) {
+      'idle' => '等待文件',
+      'preparing' => '准备直传',
+      'connecting' => '建立 Wi-Fi 连接',
+      'downloading' => '设备接收中',
+      'restoring' => '设备保存 / 恢复 Wi-Fi',
+      'cancelling' => '正在取消',
+      'cleanup' => '清理临时连接',
+      'done' =>
+        transfer.success && transfer.cleanupCompleted ? '传输完成' : '等待完成确认',
+      'cancelled' => '已取消',
+      'error' => '传输未完成',
+      _ => transfer.phase,
+    };
+    return [
+      panel(
+        context,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'film 文件 · Wi-Fi 直传',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              supported
+                  ? '导入已有 .film 文件，通过已连接的 Ark 建立 Wi-Fi Direct 传输。'
+                  : '当前平台仅供界面预览。文件导入与 Wi-Fi Direct 直传需要 Android 原生客户端。',
+            ),
+            const SizedBox(height: 20),
+            Text(
+              file?.name ?? '尚未选择 film 文件',
+              key: const Key('film-file-name'),
+            ),
+            if (file != null) ...[
+              const SizedBox(height: 8),
+              Text('${file.size} 字节'),
+              Text(
+                file.width != null && file.height != null
+                    ? '${file.width} × ${file.height}'
+                    : '尺寸信息不可用',
+              ),
+            ],
+            if (snapshot.importing)
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text('正在导入并校验文件…'),
+              ),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                OutlinedButton.icon(
+                  key: const Key('pick-film'),
+                  onPressed: editable ? () => device.command('pickFilm') : null,
+                  icon: const Icon(Icons.file_open_outlined),
+                  label: const Text('选择 film 文件'),
+                ),
+                FilledButton.icon(
+                  key: const Key('start-transfer'),
+                  onPressed:
+                      editable &&
+                          file != null &&
+                          snapshot.connected &&
+                          !transfer.canRetry
+                      ? () => device.command('startTransfer')
+                      : null,
+                  icon: const Icon(Icons.wifi),
+                  label: const Text('Wi-Fi 直传'),
+                ),
+                OutlinedButton(
+                  key: const Key('clear-film'),
+                  onPressed: editable && file != null
+                      ? () => device.command('clearFilm')
+                      : null,
+                  child: const Text('清除文件'),
+                ),
+              ],
+            ),
+            if (supported && !snapshot.connected)
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text('请先在连接页连接 Ark 设备。'),
+              ),
+            if (device.errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  device.errorMessage!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 20),
+      panel(
+        context,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              phase,
+              key: const Key('transfer-phase'),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 12),
+            Text(transfer.message),
+            if (transfer.active || transfer.total > 0) ...[
+              const SizedBox(height: 16),
+              LinearProgressIndicator(
+                key: const Key('transfer-progress'),
+                value: transfer.progress,
+              ),
+              const SizedBox(height: 8),
+              Text('${transfer.received} / ${transfer.total} 字节'),
+            ],
+            if (transfer.phase == 'done' ||
+                transfer.phase == 'cancelled' ||
+                transfer.phase == 'error') ...[
+              const SizedBox(height: 12),
+              Text(
+                transfer.cleanupCompleted
+                    ? '临时服务与连接清理已确认'
+                    : '清理尚未确认，请查看上方原因；可重试以重新处理连接。',
+              ),
+            ],
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                OutlinedButton(
+                  key: const Key('cancel-transfer'),
+                  onPressed: supported && transfer.canCancel
+                      ? () => device.command('cancelTransfer')
+                      : null,
+                  child: const Text('取消传输'),
+                ),
+                FilledButton.tonal(
+                  key: const Key('retry-transfer'),
+                  onPressed:
+                      available &&
+                          file != null &&
+                          snapshot.connected &&
+                          transfer.canRetry
+                      ? () => device.command('retryTransfer')
+                      : null,
+                  child: const Text('重试传输'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     ];
   }
 
@@ -584,7 +761,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
           const Divider(height: 32),
           const Text(
-            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息读取、通行证内存表单预览。\n\n后续阶段\n图片与动画编辑、film 转换与上传、设备参数及通行证同步。',
+            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息读取、film 导入与 Wi-Fi 直传（进度、取消、重试）、通行证内存表单预览。\n\n后续阶段\n图片与动画编辑、film 转换、设备参数及通行证同步。',
           ),
         ],
       ),

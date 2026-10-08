@@ -9,6 +9,67 @@ class DeviceInfo {
   final String name;
 }
 
+class ImportedFilm {
+  const ImportedFilm({
+    required this.name,
+    required this.size,
+    this.width,
+    this.height,
+  });
+  factory ImportedFilm.fromMap(Map data) => ImportedFilm(
+    name: data['name'] as String? ?? 'film',
+    size: (data['size'] as num?)?.toInt() ?? 0,
+    width: (data['width'] as num?)?.toInt(),
+    height: (data['height'] as num?)?.toInt(),
+  );
+  final String name;
+  final int size;
+  final int? width;
+  final int? height;
+}
+
+class FilmTransfer {
+  const FilmTransfer({
+    this.phase = 'idle',
+    this.message = '选择 film 文件后开始直传',
+    this.received = 0,
+    this.total = 0,
+    this.canCancel = false,
+    this.canRetry = false,
+    this.cleanupCompleted = false,
+    this.success = false,
+  });
+  factory FilmTransfer.fromMap(Map data) => FilmTransfer(
+    phase: data['phase'] as String? ?? 'idle',
+    message: data['message'] as String? ?? '',
+    received: (data['received'] as num?)?.toInt() ?? 0,
+    total: (data['total'] as num?)?.toInt() ?? 0,
+    canCancel: data['canCancel'] == true,
+    canRetry: data['canRetry'] == true,
+    cleanupCompleted: data['cleanupCompleted'] == true,
+    success: data['success'] == true,
+  );
+  final String phase;
+  final String message;
+  final int received;
+  final int total;
+  final bool canCancel;
+  final bool canRetry;
+  final bool cleanupCompleted;
+  final bool success;
+  bool get active =>
+      canCancel ||
+      const {
+        'preparing',
+        'connecting',
+        'downloading',
+        'restoring',
+        'cancelling',
+        'cleanup',
+      }.contains(phase);
+  double? get progress => total > 0 ? (received / total).clamp(0.0, 1.0) : null;
+}
+
 class DeviceSnapshot {
   const DeviceSnapshot({
     this.connected = false,
@@ -18,6 +79,12 @@ class DeviceSnapshot {
     this.battery,
     this.width,
     this.height,
+    this.importedFile,
+    this.importing = false,
+    this.transfer = const FilmTransfer(),
+    this.hasFilmState = false,
+    this.hasImportingState = false,
+    this.hasTransferState = false,
   });
 
   factory DeviceSnapshot.fromMap(Map<Object?, Object?> data) {
@@ -35,6 +102,16 @@ class DeviceSnapshot {
       battery: (data['battery'] as num?)?.toInt(),
       width: (data['width'] as num?)?.toInt(),
       height: (data['height'] as num?)?.toInt(),
+      importedFile: data['importedFile'] is Map
+          ? ImportedFilm.fromMap(data['importedFile'] as Map)
+          : null,
+      importing: data['importing'] == true,
+      transfer: data['transfer'] is Map
+          ? FilmTransfer.fromMap(data['transfer'] as Map)
+          : const FilmTransfer(),
+      hasFilmState: data.containsKey('importedFile'),
+      hasImportingState: data.containsKey('importing'),
+      hasTransferState: data.containsKey('transfer'),
     );
   }
 
@@ -45,6 +122,29 @@ class DeviceSnapshot {
   final int? battery;
   final int? width;
   final int? height;
+  final ImportedFilm? importedFile;
+  final bool importing;
+  final FilmTransfer transfer;
+  final bool hasFilmState;
+  final bool hasImportingState;
+  final bool hasTransferState;
+
+  DeviceSnapshot retainingTransfer(DeviceSnapshot previous) => DeviceSnapshot(
+    connected: connected,
+    message: message,
+    devices: devices,
+    name: name,
+    battery: battery,
+    width: width,
+    height: height,
+    importedFile: hasFilmState || importedFile != null
+        ? importedFile
+        : previous.importedFile,
+    importing: hasImportingState || importing ? importing : previous.importing,
+    transfer: hasTransferState || transfer.phase != 'idle'
+        ? transfer
+        : previous.transfer,
+  );
 }
 
 abstract class DeviceGateway {
@@ -79,7 +179,7 @@ class DeviceController extends ChangeNotifier {
     if (gateway.supported) {
       _subscription = gateway.snapshots.listen(
         (value) {
-          snapshot = value;
+          snapshot = value.retainingTransfer(snapshot);
           notifyListeners();
         },
         onError: (Object error) {
@@ -99,8 +199,46 @@ class DeviceController extends ChangeNotifier {
   StreamSubscription<DeviceSnapshot>? _subscription;
 
   Future<void> command(String method, [Map<String, Object?>? arguments]) async {
-    if (busy || !gateway.supported) return;
-    busy = true;
+    final cancelling = method == 'cancelTransfer';
+    if (!gateway.supported || (busy && !cancelling)) return;
+    if (snapshot.transfer.active &&
+        const {
+          'pickFilm',
+          'clearFilm',
+          'connect',
+          'disconnect',
+          'scan',
+          'startTransfer',
+        }.contains(method)) {
+      return;
+    }
+    if (snapshot.importing &&
+        const {
+          'pickFilm',
+          'clearFilm',
+          'startTransfer',
+          'retryTransfer',
+        }.contains(method)) {
+      return;
+    }
+    if (method == 'startTransfer' &&
+        (snapshot.importedFile == null || !snapshot.connected)) {
+      return;
+    }
+    if (snapshot.transfer.canRetry &&
+        !snapshot.transfer.cleanupCompleted &&
+        const {'pickFilm', 'clearFilm', 'startTransfer'}.contains(method)) {
+      return;
+    }
+    if (method == 'retryTransfer' &&
+        (!snapshot.transfer.canRetry ||
+            snapshot.transfer.active ||
+            snapshot.importedFile == null ||
+            !snapshot.connected)) {
+      return;
+    }
+    if (cancelling && !snapshot.transfer.canCancel) return;
+    if (!cancelling) busy = true;
     errorMessage = null;
     notifyListeners();
     try {
@@ -108,7 +246,7 @@ class DeviceController extends ChangeNotifier {
     } catch (error) {
       errorMessage = '操作未完成：$error';
     } finally {
-      busy = false;
+      if (!cancelling) busy = false;
       if (!_disposed) notifyListeners();
     }
   }
