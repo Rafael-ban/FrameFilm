@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import 'device_gateway.dart';
+import 'preview_device_gateway.dart';
 
 enum FilmTheme { automatic, forFilm, arknights }
 
@@ -15,7 +17,7 @@ class FrameFilmApp extends StatefulWidget {
 }
 
 class _FrameFilmAppState extends State<FrameFilmApp> {
-  late final DeviceController device;
+  late DeviceController device;
   FilmTheme selectedTheme = FilmTheme.automatic;
   int page = 0;
   bool loading = false;
@@ -66,6 +68,9 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     loadingTimer?.cancel();
     device.removeListener(onDeviceChanged);
     device.dispose();
+    if (device.gateway case final PreviewDeviceGateway preview) {
+      preview.dispose();
+    }
     operatorName.dispose();
     operatorId.dispose();
     operatorRole.dispose();
@@ -172,53 +177,73 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                 ),
               ],
             ),
-            body: Stack(
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  children: [
-                    if (wide)
-                      NavigationRail(
-                        selectedIndex: page,
-                        onDestinationSelected: (value) =>
-                            setState(() => page = value),
-                        labelType: NavigationRailLabelType.all,
-                        destinations: destinations
-                            .map(
-                              (item) => NavigationRailDestination(
-                                icon: Icon(item.$2),
-                                label: Text(item.$1),
+                if (device.gateway case final PreviewDeviceGateway preview)
+                  previewControls(context, preview),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      Row(
+                        children: [
+                          if (wide)
+                            NavigationRail(
+                              selectedIndex: page,
+                              onDestinationSelected: (value) =>
+                                  setState(() => page = value),
+                              labelType: NavigationRailLabelType.all,
+                              destinations: destinations
+                                  .map(
+                                    (item) => NavigationRailDestination(
+                                      icon: Icon(item.$2),
+                                      label: Text(item.$1),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 980,
+                                ),
+                                child: ListView(
+                                  padding: EdgeInsets.all(wide ? 32 : 20),
+                                  children: [
+                                    Text(
+                                      ark
+                                          ? 'TERMINAL / 0${page + 1}'
+                                          : '你的电子纸工作台',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelMedium,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      destinations[page].$1,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineLarge
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 24),
+                                    ...pageContent(context),
+                                  ],
+                                ),
                               ),
-                            )
-                            .toList(),
-                      ),
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.topCenter,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 980),
-                          child: ListView(
-                            padding: EdgeInsets.all(wide ? 32 : 20),
-                            children: [
-                              Text(
-                                ark ? 'TERMINAL / 0${page + 1}' : '你的电子纸工作台',
-                                style: Theme.of(context).textTheme.labelMedium,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                destinations[page].$1,
-                                style: Theme.of(context).textTheme.headlineLarge
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 24),
-                              ...pageContent(context),
-                            ],
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                    ),
-                  ],
+                      if (loading)
+                        Positioned.fill(child: connectionTransition()),
+                    ],
+                  ),
                 ),
-                if (loading) Positioned.fill(child: connectionTransition()),
               ],
             ),
             bottomNavigationBar: wide
@@ -243,6 +268,73 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
       ),
     );
   }
+
+  void enterPreview() {
+    device.removeListener(onDeviceChanged);
+    device.dispose();
+    device = DeviceController(PreviewDeviceGateway());
+    device.addListener(onDeviceChanged);
+    setState(() {});
+  }
+
+  Widget previewControls(BuildContext context, PreviewDeviceGateway preview) =>
+      Material(
+        color: Theme.of(context).colorScheme.secondaryContainer,
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  PreviewDeviceGateway.warning,
+                  key: Key('preview-warning'),
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Wrap(
+                  spacing: 16,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    DropdownButton<PreviewScenario>(
+                      key: const Key('preview-scenario'),
+                      value: preview.scenario,
+                      items: const [
+                        DropdownMenuItem(
+                          value: PreviewScenario.normal,
+                          child: Text('正常流程'),
+                        ),
+                        DropdownMenuItem(
+                          value: PreviewScenario.transferFailure,
+                          child: Text('传输失败（重试恢复）'),
+                        ),
+                        DropdownMenuItem(
+                          value: PreviewScenario.unconfirmed,
+                          child: Text('升级结果待确认'),
+                        ),
+                        DropdownMenuItem(
+                          value: PreviewScenario.sameBuild,
+                          child: Text('相同构建（跳过升级）'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) preview.reset(value);
+                      },
+                    ),
+                    TextButton.icon(
+                      key: const Key('reset-preview'),
+                      onPressed: () => preview.reset(),
+                      icon: const Icon(Icons.restart_alt),
+                      label: const Text('重置演示'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 
   Widget panel(BuildContext context, {required Widget child}) => Card(
     child: Padding(padding: const EdgeInsets.all(24), child: child),
@@ -305,6 +397,15 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                 ),
               ),
             const SizedBox(height: 20),
+            if (kIsWeb && !supported)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: FilledButton(
+                  key: const Key('enter-preview'),
+                  onPressed: enterPreview,
+                  child: const Text('进入模拟设备演示'),
+                ),
+              ),
             if (supported)
               Wrap(
                 spacing: 12,
@@ -396,7 +497,11 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
       ],
       const SizedBox(height: 20),
-      const Text('原生连接与文件传输\n扫描、连接和读取由 Android 蓝牙服务提供。film 文件直传请进入 Film 页。'),
+      Text(
+        device.gateway is PreviewDeviceGateway
+            ? '演示中的扫描、文件选择、传输及升级均为模拟。Film 页体验直传，设置页体验 OTA。'
+            : '原生连接与文件传输\n扫描、连接和读取由 Android 蓝牙服务提供。film 文件直传请进入 Film 页。',
+      ),
     ];
   }
 

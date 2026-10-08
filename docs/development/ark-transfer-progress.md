@@ -51,3 +51,11 @@
 - 下一阶段先统一 Flutter 功能：补明确标注演示数据的 Web 设备模式，电脑预览同份 UI 与状态流程，再编译 Android 实测 BLE/WiFi/OTA。当前 Web 的 PlatformDeviceGateway 不支持设备操作，不能把静态预览视为完整功能验证。
 - GitHub 在线获取列入下一阶段：当前 CI 只上传 Actions artifact，尚无 Release 发布。计划 Release 提供原始 Ark app.bin 及构建摘要，下载后复用现有解析、完整性校验和 OTA；不以 3.2.5 或版本大小作为更新依据。
 - 功能缺项顺序：设备参数/时间/遥控、通行证实际读写、图片转换、动画编辑，最后统一两套主题细节。维持 Android 9 下限、构建在 D 盘、暂不推送。
+
+### 阶段 C1：Flutter 电脑交互预览
+
+- 已接入仅内存的 PreviewDeviceGateway，Web query `preview=1` 或显式按钮进入；Android默认保持平台桥接。所有页面持续显示模拟标识，不访问真实设备或文件。
+- 同份页面支持模拟连接、film/固件元信息、传输进度、取消/重试、OTA重启确认，以及失败恢复、待确认、相同构建跳过场景；切换场景/重置/退出清理计时器。
+- 4项新测试、受影响文件analyze和Web构建通过。Navigator内演示栏修复后仅复测下拉交互，Edge浏览器确认film取消重试完成及窄屏场景选择。
+- 本机服务：http://127.0.0.1:8770/?preview=1，输出仍在 D:/dev-tool/FrameFilm-build/flutter/web。
+- 下一小步：GitHub Release原始应用固件获取与下载，复用现有校验/OTA；现阶段未发布远端或更改手机。

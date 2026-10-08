@@ -1,6 +1,6 @@
 # FrameFilm Ark · Flutter
 
-Flutter 原生界面、Android BLE 桥接与 film 文件 Wi-Fi Direct 传输。使用 Flutter widgets，不使用 WebView；先完成功能，最终手机 UI 再与网页统一。
+Flutter 共用界面、Android BLE 桥接与 film / 固件 Wi-Fi Direct 传输。使用 Flutter widgets，不使用 WebView；先在电脑 Web 检查功能和交互，再用 Android 实机验收无线链路，最后统一手机与网页的主题细节。
 
 ## 当前范围
 
@@ -61,7 +61,22 @@ $env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电
 
 这组 D 盘路径是当前电脑的开发配置，不是项目运行依赖。其他电脑可以按标准 Flutter 命令构建；也可以用 `FRAMEFILM_DEV_ROOT` 指定同结构存储目录。不同 checkout 应使用独立存储根目录，避免共享构建输出。已有非联接的 build 目录需要先迁移，脚本不会自动删除。Ark 的 build 联接如被 `fullclean` 删除，也需要重新创建或用 `idf.py -B <D盘目录>` 指定输出位置。
 
-浏览器预览从 `build/web` 启动静态服务，本轮地址 `http://127.0.0.1:8770/`。它用于查看同一份 Flutter 界面，无 Android BLE、文件导入或 Wi-Fi Direct 能力；手机端桥接仍需 Android 构建及实机验证。预览不是把网页嵌进 App。
+浏览器预览从 `build/web` 启动静态服务，本机地址 `http://127.0.0.1:8770/`。默认仅查看界面；点击“进入模拟设备演示”，或直接打开 `http://127.0.0.1:8770/?preview=1`，可使用同一份页面操作内存模拟设备。Android 默认不会进入模拟模式。
+
+```powershell
+./flutter_app/tool/flutter.ps1 build web --no-pub
+python -m http.server 8770 --bind 127.0.0.1 --directory D:/dev-tool/FrameFilm-build/flutter/web
+```
+
+模拟模式顶部始终显示“模拟设备 / 演示数据，不会连接或修改真实设备”。连接页扫描并连接模拟 Ark 后，在 Film 页选择演示文件并直传，或到设置页选择演示固件并检查升级；无需连接手机或 Ark。
+
+- 正常流程：演示进度、提交及 OTA 重启后确认；传输期间可取消并从头重试。
+- 传输失败（重试恢复）：首次传输中断，清理后重试成功。
+- 升级结果待确认：传输结束仍保留“待确认”，点击确认后演示重连与构建匹配。
+- 相同构建（跳过升级）：演示无需升级的结果，不启动传输。
+- 切换场景或点击“重置演示”会取消演示计时器，并清空模拟连接、文件及传输状态。页面关闭释放模拟器。
+
+演示文件仅为内存元信息，不读取本地文件，不发送真实 BLE/WiFi/OTA 命令。模拟验证用于页面与状态交互，不代表硬件功能通过；真实文件解析、权限、蓝牙、Wi-Fi Direct 和 Flash 升级仍需 Android 构建及实机验收。Frame 图片转换、动画编辑、通行证设备读写与 GitHub 在线固件仍是后续功能。
 
 ## 验证记录（2026-10-08）
 
@@ -131,3 +146,11 @@ $env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电
 1. 继续完成功能后，再按现有网页统一手机 UI。
 2. 完成通行证头像、代号、编号、所属、签名与 SD 读写，增加草稿持久化。
 3. 迁移图片转换与高级动画功能；后台保持、进程恢复与长时间稳定性另行验证。
+
+## 可交互 Web 演示验证（2026-10-08）
+
+- 新增 PreviewDeviceGateway 定向测试4项通过；受影响文件 analyze 无问题，Web 构建通过。
+- 浏览器检查发现 MaterialApp.builder 外置演示栏不在 Navigator 内，已移到 Scaffold.body 顶部；实际点击场景下拉的 widget 测试复测通过。
+- Edge 浏览器已验证模拟扫描/连接、Ark主题切换、film选择、取消后重试并完成；390×844窄屏场景选择与布局已检查。页面无浏览器脚本异常。
+- 浏览器探针最初使用文本/分组查找完成区域导致等待超时；实际区域为 progressbar，可访问性状态明确记录完成及完整字节数。修正探针后确认，同样修正了弹出菜单的 menuitem 定位。此问题属于测试定位，不是传输失败。
+- 本轮未重装 APK、未连接实体 Ark；OTA异常分支覆盖来自模拟器定向测试，不替代手机OTA验收。GitHub在线下载尚未实现。
