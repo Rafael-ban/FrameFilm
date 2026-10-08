@@ -23,12 +23,12 @@ internal object FilmTransferName {
     }
 }
 /** Serves one local film through the phone's Wi-Fi Direct GO address. */
-class FilmHttpServer(file: File, fileName: String, address: Inet4Address) : Closeable {
+class FilmHttpServer(file: File, fileName: String, address: Inet4Address, firmware: Boolean = false) : Closeable {
     private val source = file.also {
         require(it.isFile && it.length() in 1..0xffffffffL) { "film 文件不存在或大小无效" }
     }
     private val length = source.length()
-    private val filename: String = FilmTransferName.forFile(fileName, source)
+    private val filename: String = if (firmware) "firmware.bin" else FilmTransferName.forFile(fileName, source)
     private val server = ServerSocket().apply {
         reuseAddress = true
         bind(InetSocketAddress(address, 0))

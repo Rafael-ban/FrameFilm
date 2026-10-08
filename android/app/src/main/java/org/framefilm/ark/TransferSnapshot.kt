@@ -9,4 +9,8 @@ data class TransferSnapshot(
     val canRetry: Boolean = false,
     val cleanupCompleted: Boolean = false,
     val success: Boolean = false,
+    val kind: String = "film",
+    val targetVersion: String? = null,
+    val targetBuild: String? = null,
+    val canConfirm: Boolean = false,
 )

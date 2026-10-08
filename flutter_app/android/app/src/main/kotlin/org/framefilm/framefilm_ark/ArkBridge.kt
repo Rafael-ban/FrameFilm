@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.util.concurrent.Executors
 import org.framefilm.ark.FilmConverter
+import org.framefilm.ark.ArkFirmware
 import org.framefilm.ark.TransferSnapshot
 import android.bluetooth.BluetoothDevice
 import android.content.pm.PackageManager
@@ -38,6 +39,10 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
     private var currentFile: File? = null
     private var importedName: String? = null
+    private var firmwareFile: File? = null
+    private var importedFirmware: ArkFirmware? = null
+    private var firmwareName: String? = null
+    private var pickingFirmware = false
     private var importing = false
     private var importResult: MethodChannel.Result? = null
     private var transferPermission = false
@@ -65,7 +70,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         override fun onTransfer(snapshot: TransferSnapshot) {
             transfer = snapshot
             if (closed) {
-                if (snapshot.phase in setOf("done", "cancelled", "error")) deleteCurrent()
+                if (snapshot.phase in setOf("done", "cancelled", "error", "unconfirmed")) { deleteCurrent(); deleteFirmware() }
                 return
             }
             emit()
@@ -109,11 +114,17 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         "connected" to connected, "message" to message, "devices" to devices,
         "name" to name, "battery" to battery, "width" to width, "height" to height,
         "importing" to importing,
+        "hasFirmwareState" to true,
+        "importedFirmware" to importedFirmware?.let { mapOf("name" to firmwareName,
+            "size" to it.size, "version" to it.version, "project" to it.project,
+            "elfSha256" to it.elfSha256, "fileSha256" to it.fileSha256) },
         "importedFile" to currentFile?.let { mapOf("name" to importedName,
             "size" to it.length(), "width" to FilmConverter.WIDTH, "height" to FilmConverter.HEIGHT) },
         "transfer" to mapOf("phase" to transfer.phase, "message" to transfer.message,
             "received" to transfer.received, "total" to transfer.total,
             "canCancel" to transfer.canCancel, "canRetry" to transfer.canRetry,
+            "kind" to transfer.kind, "targetVersion" to transfer.targetVersion,
+            "targetBuild" to transfer.targetBuild, "canConfirm" to transfer.canConfirm,
             "success" to transfer.success, "cleanupCompleted" to transfer.cleanupCompleted))
 
     private fun emit() { if (!closed) sink?.success(snapshot()) }
@@ -134,6 +145,27 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
             }
             when (call.method) {
                 "pickFilm" -> pickFilm(result)
+                "pickFirmware", "importFirmware" -> pickFilm(result, firmware = true)
+                "clearFirmware" -> {
+                    checkReplace()
+                    deleteFirmware()
+                    transfer = TransferSnapshot("idle", "已清除固件", cleanupCompleted = true, kind = "firmware")
+                    emit(); result.success(snapshot())
+                }
+                "startFirmwareTransfer" -> {
+                    check(!importing && !refreshing && !session.transferActive) { "请等待当前操作完成" }
+                    val file = checkNotNull(firmwareFile) { "请先导入 app.bin 固件" }
+                    val image = checkNotNull(importedFirmware)
+                    withPermissions(result, direct = true) {
+                        transferPermission = false
+                        session.startFirmwareTransfer(file, image)
+                        result.success(snapshot())
+                    }
+                }
+                "confirmFirmwareTransfer" -> withPermissions(result) {
+                    session.confirmFirmwareTransfer()
+                    result.success(snapshot())
+                }
                 "clearFilm" -> {
                     checkReplace()
                     deleteCurrent()
@@ -141,7 +173,15 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                     emit()
                     result.success(snapshot())
                 }
-                "startTransfer", "retryTransfer" -> {
+                "retryTransfer" -> {
+                    check(!importing && !refreshing && !session.transferActive) { "请等待当前操作完成" }
+                    withPermissions(result, direct = true) {
+                        transferPermission = false
+                        session.retryTransfer()
+                        result.success(snapshot())
+                    }
+                }
+                "startTransfer" -> {
                     check(!importing && !refreshing && !session.transferActive) { "请等待当前操作完成" }
                     val file = checkNotNull(currentFile) { "请先导入 film 文件" }
                     withPermissions(result, direct = true) {
@@ -333,7 +373,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
 
     private fun checkReplace() {
         check(!importing && !session.transferActive && !transferPermission &&
-            transfer.cleanupCompleted) { "请等待导入或直传清理结束" }
+            transfer.cleanupCompleted && !transfer.canConfirm) { "请等待导入或直传清理结束" }
     }
 
     private fun deleteCurrent() {
@@ -342,9 +382,17 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         importedName = null
     }
 
+    private fun deleteFirmware() {
+        firmwareFile?.delete()
+        firmwareFile = null
+        importedFirmware = null
+        firmwareName = null
+    }
+
     @Suppress("DEPRECATION")
-    private fun pickFilm(result: MethodChannel.Result) {
+    private fun pickFilm(result: MethodChannel.Result, firmware: Boolean = false) {
         checkReplace()
+        pickingFirmware = firmware
         importing = true
         importResult = result
         emit()
@@ -373,14 +421,15 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
             result?.success(snapshot())
             return true
         }
+        val firmware = pickingFirmware
         worker.execute {
             var temporary: File? = null
             try {
                 val displayName = activity.contentResolver.query(uri,
                     arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                     if (it.moveToFirst()) it.getString(0) else null
-                } ?: "import.film"
-                val file = File.createTempFile("import-", ".film", cache)
+                } ?: if (firmware) "app.bin" else "import.film"
+                val file = File.createTempFile("import-", if (firmware) ".bin" else ".film", cache)
                 temporary = file
                 checkNotNull(activity.contentResolver.openInputStream(uri)).use { input ->
                     file.outputStream().use { output ->
@@ -391,23 +440,33 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                             if (count < 0) break
                             if (Thread.currentThread().isInterrupted) error("导入已取消")
                             total += count
-                            require(total <= 32L * 1024 * 1024) { "film 超过 32 MiB" }
+                            val limit = if (firmware) 4L * 1024 * 1024 else 32L * 1024 * 1024
+                            require(total <= limit) { if (firmware) "固件超过 Ark 4 MiB Flash 容量" else "film 超过 32 MiB" }
                             output.write(buffer, 0, count)
                         }
                     }
                 }
-                FilmConverter.validate(file)
-                val sendName = org.framefilm.ark.FilmTransferName.forFile(displayName, file)
+                val image = if (firmware) ArkFirmware.inspect(file) else null
+                if (!firmware) FilmConverter.validate(file)
+                val sendName = if (firmware) displayName else org.framefilm.ark.FilmTransferName.forFile(displayName, file)
                 main.post {
                     if (closed) file.delete()
                     else {
-                        deleteCurrent()
-                        currentFile = file
-                        importedName = sendName
+                        if (firmware) {
+                            deleteFirmware()
+                            firmwareFile = file
+                            importedFirmware = image
+                            firmwareName = sendName
+                        } else {
+                            deleteCurrent()
+                            currentFile = file
+                            importedName = sendName
+                        }
                         importing = false
                         importResult = null
-                        transfer = TransferSnapshot("idle", "film 文件已导入，发送名 " + sendName,
-                            cleanupCompleted = true)
+                        transfer = TransferSnapshot("idle", if (firmware) "固件已导入：${image?.version}" else "film 文件已导入，发送名 $sendName",
+                            cleanupCompleted = true, kind = if (firmware) "firmware" else "film",
+                            targetVersion = image?.version, targetBuild = image?.elfSha256)
                         emit()
                         result?.success(snapshot())
                     }
@@ -418,7 +477,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                     if (!closed) {
                         importing = false
                         importResult = null
-                        message = error.message ?: "film 导入失败"
+                        message = error.message ?: if (firmware) "固件导入失败" else "film 导入失败"
                         emit()
                         result?.error("import_failed", message, null)
                     }
@@ -443,7 +502,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         worker.shutdownNow()
         val active = session.transferActive
         session.close()
-        if (!active) deleteCurrent()
+        if (!active) { deleteCurrent(); deleteFirmware() }
     }
 
     private companion object { const val PERMISSION_REQUEST = 4207; const val PICK_FILM = 4208; var cacheInitialized = false }

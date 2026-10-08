@@ -6,6 +6,8 @@
  * INCLUDES
  */
 #include <stdint.h>
+#include <stddef.h>
+#include "esp_err.h"
 #include "esp_partition.h"
 
 /*********************************************************************
@@ -54,6 +56,13 @@ typedef enum {
 /*********************************************************************
  * GLOBAL FUNCTIONS
  */
+uint32_t service_ota_direct_max(void);
+esp_err_t service_ota_direct_begin(uint32_t size, const uint8_t sha[32]);
+esp_err_t service_ota_direct_write(const uint8_t *data, size_t len);
+esp_err_t service_ota_direct_finish(void);
+esp_err_t service_ota_direct_activate(void);
+void service_ota_direct_abort(void);
+
 extern void service_ota_start(void);
 extern void service_set_length(uint32_t len);
 extern void service_ota_write(uint8_t *data, uint16_t len);

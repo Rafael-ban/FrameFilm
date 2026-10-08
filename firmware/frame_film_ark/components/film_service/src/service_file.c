@@ -136,7 +136,7 @@ static void file_log_header(const char *stage, const uint8_t *hdr, size_t len)
         hex[i * 2 + 1] = digits[hdr[i] & 15];
     }
     hex[len * 2] = '\0';
-    sys_logi(FILE_TAG, "Film header trace stage=%s owner=%u bytes=%u hex=%s",
+    sys_logd(FILE_TAG, "Film header trace stage=%s owner=%u bytes=%u hex=%s",
              stage, (unsigned)m_file_state.save_owner, (unsigned)len, hex);
 }
 

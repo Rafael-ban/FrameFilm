@@ -396,9 +396,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
       ],
       const SizedBox(height: 20),
-      const Text(
-        '原生连接与文件传输\n扫描、连接和读取由 Android 蓝牙服务提供。film 文件直传请进入 Film 页。',
-      ),
+      const Text('原生连接与文件传输\n扫描、连接和读取由 Android 蓝牙服务提供。film 文件直传请进入 Film 页。'),
     ];
   }
 
@@ -408,23 +406,13 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     final transfer = snapshot.transfer;
     final supported = device.gateway.supported;
     final available =
-        supported && !device.busy && !snapshot.importing && !transfer.active;
+        supported &&
+        !device.busy &&
+        !snapshot.importing &&
+        !transfer.active &&
+        !transfer.canConfirm;
     final editable =
         available && !(transfer.canRetry && !transfer.cleanupCompleted);
-    final phase = switch (transfer.phase) {
-      'idle' => '等待文件',
-      'preparing' => '准备直传',
-      'connecting' => '建立 Wi-Fi 连接',
-      'downloading' => '设备接收中',
-      'restoring' => '设备保存 / 恢复 Wi-Fi',
-      'cancelling' => '正在取消',
-      'cleanup' => '清理临时连接',
-      'done' =>
-        transfer.success && transfer.cleanupCompleted ? '传输完成' : '等待完成确认',
-      'cancelled' => '已取消',
-      'error' => '传输未完成',
-      _ => transfer.phase,
-    };
     return [
       panel(
         context,
@@ -509,66 +497,207 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
         ),
       ),
       const SizedBox(height: 20),
-      panel(
-        context,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              phase,
-              key: const Key('transfer-phase'),
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 12),
-            Text(transfer.message),
-            if (transfer.active || transfer.total > 0) ...[
-              const SizedBox(height: 16),
-              LinearProgressIndicator(
-                key: const Key('transfer-progress'),
-                value: transfer.progress,
-              ),
-              const SizedBox(height: 8),
-              Text('${transfer.received} / ${transfer.total} 字节'),
-            ],
-            if (transfer.phase == 'done' ||
-                transfer.phase == 'cancelled' ||
-                transfer.phase == 'error') ...[
-              const SizedBox(height: 12),
-              Text(
-                transfer.cleanupCompleted
-                    ? '临时服务与连接清理已确认'
-                    : '清理尚未确认，请查看上方原因；可重试以重新处理连接。',
-              ),
-            ],
+      transferStatus(context),
+    ];
+  }
+
+  String shortBuild(String value) =>
+      value.length > 16 ? value.substring(0, 16) : value;
+
+  Widget transferStatus(BuildContext context) {
+    final snapshot = device.snapshot;
+    final transfer = snapshot.transfer;
+    final firmware = transfer.kind == 'firmware';
+    final hasFile = firmware
+        ? snapshot.importedFirmware != null
+        : snapshot.importedFile != null;
+    final supported = device.gateway.supported;
+    final available =
+        supported &&
+        !device.busy &&
+        !snapshot.importing &&
+        !transfer.active &&
+        !transfer.canConfirm;
+    final phase = switch (transfer.phase) {
+      'idle' => '等待文件',
+      'preparing' => '准备直传',
+      'connecting' => '建立 Wi-Fi 连接',
+      'downloading' => '设备接收中',
+      'restoring' => firmware ? '校验固件 / 恢复 Wi-Fi' : '设备保存 / 恢复 Wi-Fi',
+      'validating' => '检查目标固件',
+      'ready' => '固件已校验',
+      'applying' => '提交升级',
+      'rebooting' => '等待设备重启',
+      'confirming' => '核对运行构建',
+      'unconfirmed' => '升级结果待确认',
+      'cancelling' => '正在取消',
+      'cleanup' => '清理临时连接',
+      'done' =>
+        transfer.success && transfer.cleanupCompleted
+            ? (firmware ? '固件构建已确认' : '传输完成')
+            : '等待完成确认',
+      'cancelled' => '已取消',
+      'error' => '传输未完成',
+      _ => transfer.phase,
+    };
+    return panel(
+      context,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            phase,
+            key: const Key('transfer-phase'),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 12),
+          Text(transfer.message),
+          if (firmware && transfer.targetBuild != null)
+            Text('目标构建：${shortBuild(transfer.targetBuild!)}'),
+          if (transfer.active || transfer.total > 0) ...[
             const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                OutlinedButton(
-                  key: const Key('cancel-transfer'),
-                  onPressed: supported && transfer.canCancel
-                      ? () => device.command('cancelTransfer')
-                      : null,
-                  child: const Text('取消传输'),
-                ),
-                FilledButton.tonal(
-                  key: const Key('retry-transfer'),
-                  onPressed:
-                      available &&
-                          file != null &&
-                          snapshot.connected &&
-                          transfer.canRetry
-                      ? () => device.command('retryTransfer')
-                      : null,
-                  child: const Text('重试传输'),
-                ),
-              ],
+            LinearProgressIndicator(
+              key: const Key('transfer-progress'),
+              value: transfer.progress,
+            ),
+            const SizedBox(height: 8),
+            Text('${transfer.received} / ${transfer.total} 字节'),
+          ],
+          if (transfer.phase == 'done' ||
+              transfer.phase == 'cancelled' ||
+              transfer.phase == 'error') ...[
+            const SizedBox(height: 12),
+            Text(
+              transfer.cleanupCompleted
+                  ? '临时服务与连接清理已确认'
+                  : '清理尚未确认，请查看上方原因；可重试以重新处理连接。',
             ),
           ],
-        ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              OutlinedButton(
+                key: const Key('cancel-transfer'),
+                onPressed: supported && transfer.canCancel
+                    ? () => device.command('cancelTransfer')
+                    : null,
+                child: Text(firmware ? '取消升级' : '取消传输'),
+              ),
+              if (transfer.canConfirm)
+                FilledButton(
+                  key: const Key('confirm-firmware'),
+                  onPressed: supported && !device.busy && !transfer.active
+                      ? () => device.command('confirmFirmwareTransfer')
+                      : null,
+                  child: const Text('重连并确认升级'),
+                ),
+              FilledButton.tonal(
+                key: const Key('retry-transfer'),
+                onPressed:
+                    available &&
+                        hasFile &&
+                        snapshot.connected &&
+                        transfer.canRetry
+                    ? () => device.command('retryTransfer')
+                    : null,
+                child: Text(firmware ? '重试升级' : '重试传输'),
+              ),
+            ],
+          ),
+        ],
       ),
-    ];
+    );
+  }
+
+  Widget firmwarePanel(BuildContext context) {
+    final snapshot = device.snapshot;
+    final file = snapshot.importedFirmware;
+    final transfer = snapshot.transfer;
+    final supported = device.gateway.supported;
+    final editable =
+        supported &&
+        !device.busy &&
+        !snapshot.importing &&
+        !transfer.active &&
+        !transfer.canConfirm &&
+        !(transfer.canRetry && !transfer.cleanupCompleted);
+    return panel(
+      context,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('固件升级', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          Text(
+            supported
+                ? '导入 Ark 应用固件 .bin，通过 Wi-Fi 直传升级。设备重启并核对构建指纹后，才会确认完成。'
+                : '固件导入与升级需要 Android 客户端。',
+          ),
+          const SizedBox(height: 16),
+          Text(file?.name ?? '尚未选择固件', key: const Key('firmware-file-name')),
+          if (file != null) ...[
+            const SizedBox(height: 8),
+            Text('${file.size} 字节 · ${file.project}'),
+            Text('构建指纹：${shortBuild(file.elfSha256)}'),
+            Text('固件版本：${file.version}'),
+          ],
+          if (snapshot.importing)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text('正在导入并校验文件…'),
+            ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              OutlinedButton.icon(
+                key: const Key('pick-firmware'),
+                onPressed: editable
+                    ? () => device.command('pickFirmware')
+                    : null,
+                icon: const Icon(Icons.file_open_outlined),
+                label: const Text('选择固件'),
+              ),
+              FilledButton.icon(
+                key: const Key('start-firmware'),
+                onPressed:
+                    editable &&
+                        file != null &&
+                        snapshot.connected &&
+                        !transfer.canRetry
+                    ? () => device.command('startFirmwareTransfer')
+                    : null,
+                icon: const Icon(Icons.system_update_alt),
+                label: const Text('检查并升级'),
+              ),
+              OutlinedButton(
+                key: const Key('clear-firmware'),
+                onPressed: editable && file != null
+                    ? () => device.command('clearFirmware')
+                    : null,
+                child: const Text('清除固件'),
+              ),
+            ],
+          ),
+          if (supported && !snapshot.connected && !transfer.canConfirm)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text('请先连接 Ark 设备。'),
+            ),
+          if (device.errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                device.errorMessage!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget information(String label, String value) => Column(
@@ -741,6 +870,12 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
       ),
     ),
     const SizedBox(height: 20),
+    firmwarePanel(context),
+    const SizedBox(height: 20),
+    if (device.snapshot.transfer.kind == 'firmware') ...[
+      transferStatus(context),
+      const SizedBox(height: 20),
+    ],
     panel(
       context,
       child: Column(
@@ -761,7 +896,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
           const Divider(height: 32),
           const Text(
-            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息读取、film 导入与 Wi-Fi 直传（进度、取消、重试）、通行证内存表单预览。\n\n后续阶段\n图片与动画编辑、film 转换、设备参数及通行证同步。',
+            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息读取、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、通行证内存表单预览。\n\n后续阶段\n图片与动画编辑、film 转换、设备参数及通行证同步。',
           ),
         ],
       ),

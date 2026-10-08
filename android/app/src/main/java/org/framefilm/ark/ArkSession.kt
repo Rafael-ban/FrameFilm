@@ -18,7 +18,7 @@ class ArkSession(context: Context, private val listener: Listener) {
 
     private data class QueuedWrite(val channel: Int, val payload: ByteArray,
                                    val callback: (Result<Unit>) -> Unit)
-    private data class TransferInput(val file: File, val fileName: String)
+    private data class TransferInput(val file: File, val fileName: String, val firmware: ArkFirmware? = null)
 
     private val main = Handler(Looper.getMainLooper())
     private val appContext = context.applicationContext
@@ -32,6 +32,7 @@ class ArkSession(context: Context, private val listener: Listener) {
     private var disconnectAfterTransfer = false
     private var closing = false
     private var closed = false
+    private var connectedDevice: BluetoothDevice? = null
     private var coordinator: DirectTransferCoordinator? = null
     private val ble: ArkBleController = ArkBleController(context, object : ArkBleController.Listener {
         override fun onDevices(found: List<BluetoothDevice>) {
@@ -41,6 +42,7 @@ class ArkSession(context: Context, private val listener: Listener) {
         }
         override fun onReady() {
             if (!closed) listener.onConnection(true, "Ark GATT 已就绪，MTU ${ble.negotiatedMtu}")
+            coordinator?.onBleReady()
             pump()
         }
         override fun onPanel(panelId: Int, width: Int, height: Int) { }
@@ -64,6 +66,12 @@ class ArkSession(context: Context, private val listener: Listener) {
     fun scannedName(address: String): String? = ble.scannedName(address)
     val transferActive: Boolean get() = pendingStart != null || settling || coordinator?.isActive == true
 
+    private fun publishTransfer(snapshot: TransferSnapshot) {
+        val image = lastInput?.firmware
+        listener.onTransfer(if (image == null) snapshot else snapshot.copy(kind = "firmware",
+            targetVersion = image.version, targetBuild = image.elfSha256))
+    }
+
     private fun onMain(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
     }
@@ -75,13 +83,13 @@ class ArkSession(context: Context, private val listener: Listener) {
     }
 
     fun connect(address: String) = onMain {
-        if (closed || closing || transferActive) {
-            listener.onConnection(isReady, "直传或关闭期间不能切换设备")
+        if (closed || closing || transferActive || coordinator?.needsConfirmation == true) {
+            listener.onConnection(isReady, "直传、关闭或升级结果待确认期间不能切换设备")
             return@onMain
         }
         val device = devices[address]
         if (device == null) listener.onConnection(false, "请先扫描并选择 Ark")
-        else ble.connect(device)
+        else { connectedDevice = device; ble.connect(device) }
     }
 
     fun disconnect() = onMain {
@@ -97,7 +105,7 @@ class ArkSession(context: Context, private val listener: Listener) {
                     settling = false
                     cancelAfterSettle = false
                     disconnectAfterTransfer = false
-                    if (!complete) listener.onTransfer(TransferSnapshot("error", message,
+                    if (!complete) publishTransfer(TransferSnapshot("error", message,
                         canRetry = lastInput?.file?.isFile == true, cleanupCompleted = false))
                     if (closing) finishClose() else ble.close()
                 }
@@ -142,21 +150,21 @@ class ArkSession(context: Context, private val listener: Listener) {
             settling = false
             if (cancelAfterSettle) {
                 cancelAfterSettle = false
-                listener.onTransfer(TransferSnapshot(if (ready) "cancelled" else "error",
+                publishTransfer(TransferSnapshot(if (ready) "cancelled" else "error",
                     if (ready) "重试前已取消" else message, total = input.file.length(),
                     canRetry = input.file.isFile, cleanupCompleted = previous?.cleanupConfirmed ?: true))
                 if (closing) finishClose()
                 else if (disconnectAfterTransfer) { disconnectAfterTransfer = false; ble.close() }
             } else if (!ready || !ble.isReady || closing) {
-                listener.onTransfer(TransferSnapshot("error", message,
+                publishTransfer(TransferSnapshot("error", message,
                     canRetry = input.file.isFile, cleanupCompleted = previous?.cleanupConfirmed ?: true))
                 if (closing) finishClose()
             } else {
                 val next = DirectTransferCoordinator(appContext, ble, input.file, input.fileName,
                     object : DirectTransferCoordinator.Listener {
                         override fun onSnapshot(snapshot: TransferSnapshot) {
-                            if (!closed) listener.onTransfer(snapshot)
-                            if (snapshot.phase in setOf("done", "cancelled", "error") &&
+                            if (!closed) publishTransfer(snapshot)
+                            if (snapshot.phase in setOf("done", "cancelled", "error", "unconfirmed") &&
                                 coordinator?.isActive == false) {
                                 if (closing) finishClose()
                                 else if (disconnectAfterTransfer) {
@@ -165,6 +173,9 @@ class ArkSession(context: Context, private val listener: Listener) {
                                 }
                             }
                         }
+                    }, input.firmware, reconnect = {
+                        val device = connectedDevice
+                        if (!closed && !closing && device != null) ble.connect(device)
                     })
                 coordinator = next
                 next.start()
@@ -173,30 +184,36 @@ class ArkSession(context: Context, private val listener: Listener) {
         if (previous == null) begin(true, "") else previous.ensureSettled(begin)
     }
 
-    fun startTransfer(file: File, fileName: String) = onMain {
+    fun startTransfer(file: File, fileName: String) = startInput(file, fileName, null)
+
+    fun startFirmwareTransfer(file: File, firmware: ArkFirmware) = startInput(file, "firmware.bin", firmware)
+
+    fun confirmFirmwareTransfer() = onMain { coordinator?.confirmFirmware() }
+
+    private fun startInput(file: File, fileName: String, firmware: ArkFirmware?) = onMain {
         if (closed || closing) {
-            listener.onTransfer(TransferSnapshot("error", "会话已关闭",
+            publishTransfer(TransferSnapshot("error", "会话已关闭",
                 cleanupCompleted = coordinator?.cleanupConfirmed ?: true))
             return@onMain
         }
-        if (transferActive) {
-            listener.onConnection(ble.isReady, "已有直传正在进行")
+        if (transferActive || coordinator?.needsConfirmation == true) {
+            listener.onConnection(ble.isReady, "已有直传正在进行或升级结果待确认")
             return@onMain
         }
         if (!file.isFile || file.length() !in 1..0xffffffffL) {
-            listener.onTransfer(TransferSnapshot("error", "film 文件不存在或大小无效",
+            publishTransfer(TransferSnapshot("error", if (firmware == null) "film 文件不存在或大小无效" else "固件文件不存在或大小无效",
                 cleanupCompleted = coordinator?.cleanupConfirmed ?: true))
             return@onMain
         }
-        val input = TransferInput(file, fileName)
+        val input = TransferInput(file, fileName, firmware)
         lastInput = input
         if (!ble.isReady) {
-            listener.onTransfer(TransferSnapshot("error", "请先连接 Ark", total = file.length(),
+            publishTransfer(TransferSnapshot("error", "请先连接 Ark", total = file.length(),
                 canRetry = true, cleanupCompleted = coordinator?.cleanupConfirmed ?: true))
             return@onMain
         }
         pendingStart = input
-        listener.onTransfer(TransferSnapshot("preparing", "等待普通 BLE 写入完成", total = file.length(), canCancel = true))
+        publishTransfer(TransferSnapshot("preparing", "等待普通 BLE 写入完成", total = file.length(), canCancel = true))
         pump()
     }
 
@@ -204,7 +221,7 @@ class ArkSession(context: Context, private val listener: Listener) {
         val pending = pendingStart
         if (pending != null) {
             pendingStart = null
-            listener.onTransfer(TransferSnapshot("cancelled", "发送直传命令前已取消", total = pending.file.length(),
+            publishTransfer(TransferSnapshot("cancelled", "发送直传命令前已取消", total = pending.file.length(),
                 canRetry = pending.file.isFile, cleanupCompleted = coordinator?.cleanupConfirmed ?: true))
             if (closing) finishClose()
             else if (disconnectAfterTransfer) { disconnectAfterTransfer = false; ble.close() }
@@ -215,9 +232,9 @@ class ArkSession(context: Context, private val listener: Listener) {
     fun retryTransfer() = onMain {
         val input = lastInput
         if (input == null || !input.file.isFile) {
-            listener.onTransfer(TransferSnapshot("error", "没有可重试的本地 film 文件",
+            publishTransfer(TransferSnapshot("error", "没有可重试的本地 film 文件",
                 cleanupCompleted = coordinator?.cleanupConfirmed ?: true))
-        } else startTransfer(input.file, input.fileName)
+        } else startInput(input.file, input.fileName, input.firmware)
     }
 
     private fun failQueuedWrites(message: String) {
@@ -231,7 +248,8 @@ class ArkSession(context: Context, private val listener: Listener) {
         if (settling) { cancelAfterSettle = true; return@onMain }
         if (pendingStart != null) pendingStart = null
         val attempt = coordinator
-        if (attempt?.isActive == true) attempt.cancel()
+        if (attempt?.needsConfirmation == true) finishClose()
+        else if (attempt?.isActive == true) attempt.cancel()
         else if (attempt != null && !attempt.cleanupConfirmed) {
             attempt.ensureSettled { _, _ -> finishClose() }
         } else finishClose()

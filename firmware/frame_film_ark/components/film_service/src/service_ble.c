@@ -39,6 +39,7 @@
 
 #include "esp_err.h"
 #include "esp_system.h"
+#include "esp_app_desc.h"
 
 #include "sys_log.h"
 #include "sys_event.h"
@@ -467,9 +468,26 @@ static bool ble_cmd_conflicts_with_direct(uint8_t ch)
 {
     switch(ch)
     {
+    case BLE_FILM_TRANS_CH_FILE_NAME:
+    case BLE_FILM_TRANS_CH_FILE_LEN:
+    case BLE_FILM_TRANS_CH_FILE_DATA:
+    case BLE_FILM_TRANS_CH_FILE_STOP:
     case BLE_FILM_TRANS_CH_FILE_START:
     case BLE_FILM_TRANS_CH_FILE_DELETE:
+    case BLE_FILM_TRANS_CH_OTA_LEN:
+    case BLE_FILM_TRANS_CH_OTA_DATA:
+    case BLE_FILM_TRANS_CH_OTA_STOP:
     case BLE_FILM_TRANS_CH_OTA_START:
+    case BLE_FILM_TRANS_CH_DEVICE_NAME_SET:
+    case BLE_FILM_TRANS_CH_CTRL_APP_SWITCH:
+    case BLE_FILM_TRANS_CH_CTRL_KEY_INJECT:
+    case BLE_FILM_TRANS_CH_APP_IMAGE_PARAM:
+    case BLE_FILM_TRANS_CH_APP_TEMPLATE_PARAM:
+    case BLE_FILM_TRANS_CH_APP_ANIM_PARAM:
+    case BLE_FILM_TRANS_CH_CTRL_TIME_SYNC:
+    case BLE_FILM_TRANS_CH_CTRL_SLEEPONOFF:
+    case BLE_FILM_TRANS_CH_CTRL_SLEEPMODE:
+    case BLE_FILM_TRANS_CH_CTRL_SLEEPMODE_TIME:
     case BLE_FILM_TRANS_CH_CTRL_RESET:
     case BLE_FILM_TRANS_CH_CTRL_REBOOT:
     case BLE_FILM_TRANS_CH_CTRL_SDRESET:
@@ -496,8 +514,12 @@ static uint8_t ble_direct_start(const ble_cmd_t *cmd)
     if((m_film_trans_state > BLE_FILM_TRANS_IDLE && m_film_trans_state < BLE_FILM_TRANS_STOPPED) ||
        (m_ota_trans_state > BLE_OTA_TRANS_IDLE && m_ota_trans_state < BLE_OTA_TRANS_STOPPED)) return 1;
 
-    const uint8_t *cursor = cmd->pdata;
-    size_t remaining = cmd->len;
+    bool ota = cmd->ch == BLE_FILM_TRANS_CH_DIRECT_OTA_START;
+    if(ota && cmd->len <= 36) return 2;
+    uint32_t size = ota ? ((uint32_t)cmd->pdata[0] << 24) | ((uint32_t)cmd->pdata[1] << 16) |
+                         ((uint32_t)cmd->pdata[2] << 8) | cmd->pdata[3] : 0;
+    const uint8_t *cursor = cmd->pdata + (ota ? 36 : 0);
+    size_t remaining = cmd->len - (ota ? 36 : 0);
     const char *fields[3];
     for(size_t i = 0; i < 3; i++)
     {
@@ -509,7 +531,8 @@ static uint8_t ble_direct_start(const ble_cmd_t *cmd)
         remaining -= consumed;
     }
     if(remaining != 0) return 2;
-    return service_wifi_direct_start(fields[0], fields[1], fields[2]);
+    return ota ? service_wifi_direct_ota_start(fields[0], fields[1], fields[2], size, &cmd->pdata[4]) :
+                 service_wifi_direct_start(fields[0], fields[1], fields[2]);
 }
 
 /*
@@ -627,6 +650,29 @@ static void ble_cmd_process(ble_cmd_t *cmd)
 
     switch(cmd->ch)
     {
+        case BLE_FILM_TRANS_CH_BUILD_INFO_GET:
+        {
+            if(cmd->len != 0) break;
+            const esp_app_desc_t *desc = esp_app_get_description();
+            uint32_t max = service_ota_direct_max();
+            uint8_t data[37 + sizeof(desc->version) + sizeof(desc->project_name)] = {1};
+            for(unsigned i = 0; i < 4; ++i) data[1 + i] = (uint8_t)(max >> (24 - i * 8));
+            memcpy(data + 5, desc->app_elf_sha256, 32);
+            size_t version_len = strnlen(desc->version, sizeof(desc->version) - 1);
+            size_t project_len = strnlen(desc->project_name, sizeof(desc->project_name) - 1);
+            memcpy(data + 37, desc->version, version_len);
+            memcpy(data + 38 + version_len, desc->project_name, project_len);
+            service_ble_send_resp(cmd->ch, data, (uint8_t)(39 + version_len + project_len));
+            break;
+        }
+        case BLE_FILM_TRANS_CH_DIRECT_OTA_APPLY:
+        {
+            if(cmd->len != 0) break;
+            uint8_t result = service_wifi_direct_ota_apply();
+            service_ble_send_resp(cmd->ch, &result, 1);
+            break;
+        }
+        case BLE_FILM_TRANS_CH_DIRECT_OTA_START:
         case BLE_FILM_TRANS_CH_DIRECT_START:
         {
             uint8_t result = ble_direct_start(cmd);

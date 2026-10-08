@@ -28,6 +28,31 @@ class ImportedFilm {
   final int? height;
 }
 
+class ImportedFirmware {
+  const ImportedFirmware({
+    required this.name,
+    required this.size,
+    required this.version,
+    required this.project,
+    required this.elfSha256,
+    required this.fileSha256,
+  });
+  factory ImportedFirmware.fromMap(Map data) => ImportedFirmware(
+    name: data['name'] as String? ?? 'firmware.bin',
+    size: (data['size'] as num?)?.toInt() ?? 0,
+    version: data['version'] as String? ?? '',
+    project: data['project'] as String? ?? '',
+    elfSha256: data['elfSha256'] as String? ?? '',
+    fileSha256: data['fileSha256'] as String? ?? '',
+  );
+  final String name;
+  final int size;
+  final String version;
+  final String project;
+  final String elfSha256;
+  final String fileSha256;
+}
+
 class FilmTransfer {
   const FilmTransfer({
     this.phase = 'idle',
@@ -38,6 +63,10 @@ class FilmTransfer {
     this.canRetry = false,
     this.cleanupCompleted = false,
     this.success = false,
+    this.kind = 'film',
+    this.targetVersion,
+    this.targetBuild,
+    this.canConfirm = false,
   });
   factory FilmTransfer.fromMap(Map data) => FilmTransfer(
     phase: data['phase'] as String? ?? 'idle',
@@ -48,6 +77,10 @@ class FilmTransfer {
     canRetry: data['canRetry'] == true,
     cleanupCompleted: data['cleanupCompleted'] == true,
     success: data['success'] == true,
+    kind: data['kind'] as String? ?? 'film',
+    targetVersion: data['targetVersion'] as String?,
+    targetBuild: data['targetBuild'] as String?,
+    canConfirm: data['canConfirm'] == true,
   );
   final String phase;
   final String message;
@@ -57,6 +90,10 @@ class FilmTransfer {
   final bool canRetry;
   final bool cleanupCompleted;
   final bool success;
+  final String kind;
+  final String? targetVersion;
+  final String? targetBuild;
+  final bool canConfirm;
   bool get active =>
       canCancel ||
       const {
@@ -66,6 +103,11 @@ class FilmTransfer {
         'restoring',
         'cancelling',
         'cleanup',
+        'validating',
+        'ready',
+        'applying',
+        'rebooting',
+        'confirming',
       }.contains(phase);
   double? get progress => total > 0 ? (received / total).clamp(0.0, 1.0) : null;
 }
@@ -80,9 +122,11 @@ class DeviceSnapshot {
     this.width,
     this.height,
     this.importedFile,
+    this.importedFirmware,
     this.importing = false,
     this.transfer = const FilmTransfer(),
     this.hasFilmState = false,
+    this.hasFirmwareState = false,
     this.hasImportingState = false,
     this.hasTransferState = false,
   });
@@ -106,10 +150,14 @@ class DeviceSnapshot {
           ? ImportedFilm.fromMap(data['importedFile'] as Map)
           : null,
       importing: data['importing'] == true,
+      importedFirmware: data['importedFirmware'] is Map
+          ? ImportedFirmware.fromMap(data['importedFirmware'] as Map)
+          : null,
       transfer: data['transfer'] is Map
           ? FilmTransfer.fromMap(data['transfer'] as Map)
           : const FilmTransfer(),
       hasFilmState: data.containsKey('importedFile'),
+      hasFirmwareState: data.containsKey('importedFirmware'),
       hasImportingState: data.containsKey('importing'),
       hasTransferState: data.containsKey('transfer'),
     );
@@ -123,9 +171,11 @@ class DeviceSnapshot {
   final int? width;
   final int? height;
   final ImportedFilm? importedFile;
+  final ImportedFirmware? importedFirmware;
   final bool importing;
   final FilmTransfer transfer;
   final bool hasFilmState;
+  final bool hasFirmwareState;
   final bool hasImportingState;
   final bool hasTransferState;
 
@@ -141,6 +191,9 @@ class DeviceSnapshot {
         ? importedFile
         : previous.importedFile,
     importing: hasImportingState || importing ? importing : previous.importing,
+    importedFirmware: hasFirmwareState || importedFirmware != null
+        ? importedFirmware
+        : previous.importedFirmware,
     transfer: hasTransferState || transfer.phase != 'idle'
         ? transfer
         : previous.transfer,
@@ -201,7 +254,7 @@ class DeviceController extends ChangeNotifier {
   Future<void> command(String method, [Map<String, Object?>? arguments]) async {
     final cancelling = method == 'cancelTransfer';
     if (!gateway.supported || (busy && !cancelling)) return;
-    if (snapshot.transfer.active &&
+    if ((snapshot.transfer.active || snapshot.transfer.canConfirm) &&
         const {
           'pickFilm',
           'clearFilm',
@@ -209,6 +262,9 @@ class DeviceController extends ChangeNotifier {
           'disconnect',
           'scan',
           'startTransfer',
+          'pickFirmware',
+          'clearFirmware',
+          'startFirmwareTransfer',
         }.contains(method)) {
       return;
     }
@@ -218,6 +274,9 @@ class DeviceController extends ChangeNotifier {
           'clearFilm',
           'startTransfer',
           'retryTransfer',
+          'pickFirmware',
+          'clearFirmware',
+          'startFirmwareTransfer',
         }.contains(method)) {
       return;
     }
@@ -225,16 +284,33 @@ class DeviceController extends ChangeNotifier {
         (snapshot.importedFile == null || !snapshot.connected)) {
       return;
     }
+    if (method == 'startFirmwareTransfer' &&
+        (snapshot.importedFirmware == null || !snapshot.connected)) {
+      return;
+    }
     if (snapshot.transfer.canRetry &&
         !snapshot.transfer.cleanupCompleted &&
-        const {'pickFilm', 'clearFilm', 'startTransfer'}.contains(method)) {
+        const {
+          'pickFilm',
+          'clearFilm',
+          'startTransfer',
+          'pickFirmware',
+          'clearFirmware',
+          'startFirmwareTransfer',
+        }.contains(method)) {
       return;
     }
     if (method == 'retryTransfer' &&
         (!snapshot.transfer.canRetry ||
             snapshot.transfer.active ||
-            snapshot.importedFile == null ||
+            (snapshot.transfer.kind == 'firmware'
+                ? snapshot.importedFirmware == null
+                : snapshot.importedFile == null) ||
             !snapshot.connected)) {
+      return;
+    }
+    if (method == 'confirmFirmwareTransfer' &&
+        (!snapshot.transfer.canConfirm || snapshot.transfer.active)) {
       return;
     }
     if (cancelling && !snapshot.transfer.canCancel) return;

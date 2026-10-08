@@ -18,24 +18,36 @@
 实机结果：3.2.5 修复版 OTA 成功，档案保留；新图提交后仅排队 id=5，提交到显示请求 70ms，未重刷旧 id=3（该旧图彩刷耗时 28.95s）。手机 WiFi 保存 43232/43232、error=0、清理完成，用户确认显示正常且方向正确。证据：`ark-display-order-fix-20261008.json`。
 
 ## 阶段 B：共用传输流程与 App OTA
-- [ ] 确定固件/客户端边界与协议：会话共用，film 与 OTA 分别提交；保留 BLE OTA 备用。
-- [ ] 整理连接、实际进度、取消、清理、重试；加入 OTA 分支的大小/目标/完整性检查。
-- [ ] App 导入固件、显示升级阶段、重启后确认版本；保持 Android 9 最低支持。
+- [x] 确定固件/客户端边界与协议：会话共用，film 与 OTA 分别提交；保留 BLE OTA 备用。
+- [x] 整理连接、实际进度、取消、清理、重试；加入 OTA 分支的大小/目标/完整性检查。
+- [x] App 导入固件、显示升级阶段、重启后确认构建指纹；保持 Android 9 最低支持。
 - [ ] 针对受影响路径做最小验证，编译产物与实机结果分开记录。
-- [ ] 更新协议/使用文档，提交 main。
+- [x] 更新协议/使用文档，记录已通过与待实测项；本地提交并合入 main，不推送。
 
 约束：100% 仅表示传输完成；只有文件提交或 OTA 重连确认才成功。当前自动启动回滚未启用，不能声称已支持。正式实现之前核对其范围及启动确认策略，不仅修改配置开关。取消后第一版可从头重试，无需推测性加入断点续传。
-### 下一阶段待实现设计（尚未落代码、未部署）
+### 已实现的接口合同（手机 WiFi OTA 实机验收进行中）
 
-以下为实施合同草案，命令和新增状态均未实现。当前 Ark 实现与协议文档未发现 0x56~0x58 已分配；保留 film 的 0x50~0x52 和旧 BLE OTA 0x10~0x13，新增仅用于 Ark。
+以下合同已在固件和 App 实现。当前 Ark 实现与协议文档未发现 0x56~0x58 已分配；保留 film 的 0x50~0x52 和旧 BLE OTA 0x10~0x13，新增仅用于 Ark。
 
-| 新命令 | 拟定合同 |
+| 新命令 | 合同 |
 |---|---|
 | 0x56 BUILD_INFO_GET | 返回能力版本、项目身份、运行镜像 version 与实际 app ELF SHA256；升级不能仅靠版本字符串确认。 |
 | 0x57 DIRECT_OTA_START | size(u32 BE) + 文件SHA256(32B) + SSID\0PASSWORD\0URL\0，总 DATA ≤192B；只接受 Ark app .bin，沿用 BLE 控制、手机 HTTP 服务、设备 WiFi 拉流。 |
 | 0x58 DIRECT_OTA_APPLY | 仅在镜像校验完成、原 WiFi 已恢复的 READY 阶段提交启动分区，回包后安排重启；提交点之后不承诺取消。 |
 
-- **阶段语义**：共用 0x51 的 11B 状态格式和 0x52 取消，保留 film 状态 0~6，OTA 拟新增 READY=7。流式写 inactive Flash，检查目标、容量、长度和 SHA256，通过 esp_ota_end 后才 READY，apply 才切 boot partition。取消/失败 abort，旧启动分区不变，清理后从头重试。App 重连同一设备并核对实际 ELF SHA 才成功，超时显示结果待确认；本阶段不启用或宣称自动回滚。
+- **阶段语义**：共用 0x51 的 11B 状态格式和 0x52 取消，保留 film 状态 0~6，OTA 新增 READY=7、APPLYING=8。流式写 inactive Flash，检查目标、容量、长度和 SHA256，通过 esp_ota_end 后才 READY，apply 才切 boot partition。取消/失败 abort，旧启动分区不变，清理后从头重试。App 重连同一设备并核对实际 ELF SHA 才成功，超时显示结果待确认；本阶段不启用或宣称自动回滚。
 - **固件边界**：service_wifi.{h,c} 共用连接/HTTP/取消/恢复，仅按 kind 分流 film 保存与 OTA 写入；保持 film PSRAM 缓冲、保存所有权、提交事件及原状态语义。service_ota.{h,c} 增加可报错、abort、校验结束与延后 activate 内部接口；service_ble.{h,c} 增加命令、互斥并同步协议文档。WiFi 下载结束不可直接调用当前会重启的 service_ota_stop。
 - **客户端边界**：共享 DirectTransferCoordinator/ArkSession 增加 kind、固件元数据和 rebooting/confirming，复用 P2P、清理、重试；HTTP server 支持 .bin 路径，保留 film 命名。Flutter ArkBridge/device_gateway.dart/app.dart 增加固件导入与阶段展示，固件不走 film 转换校验。保持 minSdk 28 和现有 Android 9 P2P/权限分支。
 - **最小验证**：少量直接协议/镜像解析及错误路径检查，Ark 增量构建和受影响 Android/Flutter 编译各一轮；实机验证升级后 ELF SHA 匹配、取消后旧版本可用且能重试、错误镜像不切启动分区。共享 HTTP 路径改动后补一次 film WiFi 保存冒烟，核对最新图显示与原 WiFi 恢复；分别记录构建与实机证据。
+2026-10-08：用户明确不推送，后续只本地提交/合入 main。3.2.5 是彩蛋，不作为版本比较或更新判断；身份使用实际 ELF SHA256，文件 SHA256 用于完整性。静态/定向测试和两端编译通过；首次 BLE 部署支持 WiFi OTA 的构建已成功，ELF 2739efdaaa94435eac9faf2242d87ae58426b26b0c988d44ef3e84171ed800e5。固件已放 Download/ark_wifi_ota.bin，后续实机结果见下节。
+
+### 2026-10-08 手机 WiFi OTA 与后续方向
+
+- 手机 App 已实际完成 WiFi OTA：1,854,672/1,854,672 字节，重连后显示实际 ELF SHA256 匹配；被动串口记录重启及新 ELF 前缀 df9b5eabd。升级前后显示版本均为 3.2.5。
+- 最终镜像文件 SHA256：df51ff0065f9b1dd8148722390ac4ec000782e3379ab96fa4de625257a215824；ELF SHA256：df9b5eabd7cd44ec957af7549f220c69501a3f888cb681ec64bb7810f05a1673。
+- 新 OTA 中途取消/重试、同构建跳过的手机实测及本轮共享流程改动后的 film 冒烟尚未完成，不将 host/Widget 测试当作实机验收。旧图重复刷新修复及此前 film 保存/显示验收继续有效。
+- 被动串口采集已自然结束；手机临时插电常亮设置已恢复原值 0。
+- 用户要求升级页不显示“版本彩蛋”，界面改为“固件版本”；此文案修改尚未重新安装到手机。
+- 下一阶段先统一 Flutter 功能：补明确标注演示数据的 Web 设备模式，电脑预览同份 UI 与状态流程，再编译 Android 实测 BLE/WiFi/OTA。当前 Web 的 PlatformDeviceGateway 不支持设备操作，不能把静态预览视为完整功能验证。
+- GitHub 在线获取列入下一阶段：当前 CI 只上传 Actions artifact，尚无 Release 发布。计划 Release 提供原始 Ark app.bin 及构建摘要，下载后复用现有解析、完整性校验和 OTA；不以 3.2.5 或版本大小作为更新依据。
+- 功能缺项顺序：设备参数/时间/遥控、通行证实际读写、图片转换、动画编辑，最后统一两套主题细节。维持 Android 9 下限、构建在 D 盘、暂不推送。

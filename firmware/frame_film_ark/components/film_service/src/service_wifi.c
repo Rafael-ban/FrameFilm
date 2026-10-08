@@ -52,6 +52,7 @@
 #include "service_param.h"
 #include "service_file.h"
 #include "service_wifi.h"
+#include "service_ota.h"
 #include "service_ble.h"       /* service_ble_apply_enable：心跳下发 ble_enable 时同款起停 */
 
 /*********************************************************************
@@ -83,12 +84,16 @@ typedef struct {
     char ssid[33];
     char password[64];
     char url[512];
+    bool ota;
+    uint32_t size;
+    uint8_t sha[32];
 } wifi_direct_args_t;
 
 static portMUX_TYPE g_direct_lock = portMUX_INITIALIZER_UNLOCKED;
 static wifi_direct_status_t g_direct_status;
 static bool g_direct_busy;
 static bool g_direct_cancel;
+static bool g_direct_apply;
 static bool g_heartbeat_active;
 static bool g_wifi_shutting_down;
 static bool g_wifi_deinit_running;
@@ -311,7 +316,7 @@ static void wifi_direct_status(uint8_t state, uint8_t error, uint32_t received, 
     portEXIT_CRITICAL(&g_direct_lock);
 }
 
-uint8_t service_wifi_direct_start(const char *ssid, const char *password, const char *url)
+static uint8_t wifi_direct_start(const char *ssid, const char *password, const char *url, uint32_t size, const uint8_t *sha)
 {
     if(!ssid || !password || !url || !ssid[0] ||
        strlen(ssid) > 32 || strlen(password) > 63 || strlen(url) >= 512 ||
@@ -333,6 +338,10 @@ uint8_t service_wifi_direct_start(const char *ssid, const char *password, const 
     }
     g_direct_busy = true;
     g_direct_cancel = false;
+    g_direct_apply = false;
+    args->ota = sha != NULL;
+    args->size = size;
+    if(sha) memcpy(args->sha, sha, 32);
     g_wifi_shutting_down = false;
     g_direct_status = (wifi_direct_status_t){.state = WIFI_DIRECT_CONNECTING};
     portEXIT_CRITICAL(&g_direct_lock);
@@ -347,6 +356,39 @@ uint8_t service_wifi_direct_start(const char *ssid, const char *password, const 
         free(args);
         return 3;
     }
+    return 0;
+}
+
+uint8_t service_wifi_direct_start(const char *ssid, const char *password, const char *url)
+{
+    return wifi_direct_start(ssid, password, url, 0, NULL);
+}
+uint8_t service_wifi_direct_ota_start(const char *ssid, const char *password, const char *url, uint32_t size,
+                                      const uint8_t sha[32])
+{
+    if(!sha || !size || size > service_ota_direct_max())
+        return 2;
+    return wifi_direct_start(ssid, password, url, size, sha);
+}
+uint8_t service_wifi_direct_ota_apply(void)
+{
+    portENTER_CRITICAL(&g_direct_lock);
+    bool ready = g_direct_busy && !g_direct_cancel && g_direct_status.state == WIFI_DIRECT_READY;
+    if(ready)
+        g_direct_status.state = WIFI_DIRECT_APPLYING;
+    portEXIT_CRITICAL(&g_direct_lock);
+    if(!ready)
+        return 1;
+    if(service_ota_direct_activate() != ESP_OK)
+    {
+        portENTER_CRITICAL(&g_direct_lock);
+        g_direct_status.state = WIFI_DIRECT_READY;
+        portEXIT_CRITICAL(&g_direct_lock);
+        return 2;
+    }
+    portENTER_CRITICAL(&g_direct_lock);
+    g_direct_apply = true;
+    portEXIT_CRITICAL(&g_direct_lock);
     return 0;
 }
 
@@ -417,7 +459,7 @@ static uint8_t wifi_direct_download(const char *url, uint32_t *received_out, uin
             if(got <= 0) { vPortFree(chunk); break; }
             if(chunk_index < 3)
             {
-                sys_logi(WIFI_SERVICE_TAG, "HTTP chunk trace: index=%u want=%u got=%d buffer=%p dma=%d aligned4=%d",
+                sys_logd(WIFI_SERVICE_TAG, "HTTP chunk trace: index=%u want=%u got=%d buffer=%p dma=%d aligned4=%d",
                          chunk_index, (unsigned)want, got, (void *)chunk,
                          esp_ptr_dma_capable(chunk), ((uintptr_t)chunk & 3u) == 0);
             }
@@ -438,7 +480,7 @@ static uint8_t wifi_direct_download(const char *url, uint32_t *received_out, uin
                         hex[i * 2 + 1] = digits[header[i] & 15];
                     }
                     hex[header_len * 2] = '\0';
-                    sys_logi(WIFI_SERVICE_TAG, "Film header trace stage=http owner=%u bytes=%u hex=%s",
+                    sys_logd(WIFI_SERVICE_TAG, "Film header trace stage=http owner=%u bytes=%u hex=%s",
                              (unsigned)FILE_SAVE_WIFI, (unsigned)header_len, hex);
                 }
             }
@@ -462,6 +504,82 @@ static uint8_t wifi_direct_download(const char *url, uint32_t *received_out, uin
         error = WIFI_DIRECT_ERR_NONE;
     } while(false);
     if(saving) service_file_save_abort(FILE_SAVE_WIFI);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return error;
+}
+
+static uint8_t wifi_direct_ota_download(const wifi_direct_args_t *args, uint32_t *received, uint32_t *total)
+{
+    esp_http_client_config_t cfg = {.url = args->url, .timeout_ms = 5000};
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if(!client)
+        return WIFI_DIRECT_ERR_RESOURCE;
+    uint8_t error = WIFI_DIRECT_ERR_HTTP;
+    uint8_t *chunk = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
+    if(!chunk)
+    {
+        esp_http_client_cleanup(client);
+        return WIFI_DIRECT_ERR_RESOURCE;
+    }
+    do
+    {
+        if(esp_http_client_open(client, 0) != ESP_OK)
+            break;
+        int64_t length = esp_http_client_fetch_headers(client);
+        if(esp_http_client_get_status_code(client) != 200 || length != args->size)
+        {
+            error = WIFI_DIRECT_ERR_INTEGRITY;
+            break;
+        }
+        *total = args->size;
+        if(wifi_direct_cancelled())
+        {
+            error = WIFI_DIRECT_ERR_CANCELLED;
+            break;
+        }
+        if(service_ota_direct_begin(args->size, args->sha) != ESP_OK)
+        {
+            error = WIFI_DIRECT_ERR_OTA;
+            break;
+        }
+        TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(120000);
+        while(*received < args->size)
+        {
+            if(wifi_direct_cancelled())
+            {
+                error = WIFI_DIRECT_ERR_CANCELLED;
+                break;
+            }
+            if((int32_t)(xTaskGetTickCount() - deadline) >= 0)
+                break;
+            uint32_t remaining = args->size - *received;
+            int got = esp_http_client_read(client, (char *)chunk, remaining < 4096 ? remaining : 4096);
+            if(got <= 0)
+                break;
+            if(service_ota_direct_write(chunk, got) != ESP_OK)
+            {
+                error = WIFI_DIRECT_ERR_OTA;
+                break;
+            }
+            *received += got;
+            wifi_direct_status(WIFI_DIRECT_DOWNLOADING, 0, *received, args->size);
+        }
+        if(wifi_direct_cancelled())
+        {
+            error = WIFI_DIRECT_ERR_CANCELLED;
+            break;
+        }
+        if(*received != args->size)
+            break;
+        esp_err_t result = service_ota_direct_finish();
+        error = result == ESP_OK                ? 0
+                : result == ESP_ERR_INVALID_CRC ? WIFI_DIRECT_ERR_INTEGRITY
+                                                : WIFI_DIRECT_ERR_OTA;
+    } while(false);
+    if(error)
+        service_ota_direct_abort();
+    free(chunk);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return error;
@@ -506,7 +624,8 @@ static void wifi_direct_task(void *arg)
         error = WIFI_DIRECT_ERR_CONNECT;
     if(!error && !wifi_direct_wait_connected(25000, true))
         error = wifi_direct_cancelled() ? WIFI_DIRECT_ERR_CANCELLED : WIFI_DIRECT_ERR_CONNECT;
-    if(!error) error = wifi_direct_download(args->url, &received, &total);
+    if(!error) error = args->ota ? wifi_direct_ota_download(args, &received, &total) :
+                                wifi_direct_download(args->url, &received, &total);
 
     wifi_direct_status(WIFI_DIRECT_RESTORING, error, received, total);
     if(wifi_touched && was_initialized)
@@ -525,6 +644,33 @@ static void wifi_direct_task(void *arg)
     }
     else if(wifi_touched && hal_wifi_initialized()) hal_wifi_deinit();
 
+    if(args->ota && !error)
+    {
+        wifi_direct_status(WIFI_DIRECT_READY, 0, received, total);
+        TickType_t start = xTaskGetTickCount();
+        while(true)
+        {
+            portENTER_CRITICAL(&g_direct_lock);
+            bool apply = g_direct_apply;
+            bool activating = g_direct_status.state == WIFI_DIRECT_APPLYING;
+            if(!activating && g_direct_cancel) error = WIFI_DIRECT_ERR_CANCELLED;
+            if(!activating && !error && xTaskGetTickCount() - start >= pdMS_TO_TICKS(120000))
+                error = WIFI_DIRECT_ERR_READY_TIMEOUT;
+            /* Claim the terminal state under the same lock as apply, preventing
+             * timeout/cancel from aborting a concurrently activated image. */
+            if(error) g_direct_status.state = WIFI_DIRECT_RESTORING;
+            portEXIT_CRITICAL(&g_direct_lock);
+            if(apply)
+            {
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                sys_reboot();
+                break;
+            }
+            if(error) break;
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
+    if(args->ota) service_ota_direct_abort();
     uint8_t state = error == WIFI_DIRECT_ERR_NONE ? WIFI_DIRECT_DONE :
                     error == WIFI_DIRECT_ERR_CANCELLED ? WIFI_DIRECT_CANCELLED : WIFI_DIRECT_ERROR;
     wifi_direct_status(state, error, received, total);

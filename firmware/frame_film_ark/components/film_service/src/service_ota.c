@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -39,6 +40,8 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_app_format.h"
+#include "esp_app_desc.h"
+#include "mbedtls/sha256.h"
 
 #include "sys_log.h"
 #include "sys_event.h"
@@ -265,4 +268,105 @@ void service_ota_stop(void)
     sys_logi(OTA_TAG, "OTA completed successfully, rebooting...");
 
     sys_reboot();
+}
+
+/* Staged WiFi OTA. Boot rollback is not enabled. */
+static struct
+{
+    esp_ota_handle_t handle;
+    const esp_partition_t *part;
+    uint32_t size, received;
+    uint8_t sha[32];
+    mbedtls_sha256_context hash;
+    bool writing, hashing, ready;
+} direct_ota;
+uint32_t service_ota_direct_max(void)
+{
+    const esp_partition_t *p = esp_ota_get_next_update_partition(NULL);
+    return p ? p->size : 0;
+}
+void service_ota_direct_abort(void)
+{
+    if(direct_ota.writing)
+        esp_ota_abort(direct_ota.handle);
+    if(direct_ota.hashing)
+        mbedtls_sha256_free(&direct_ota.hash);
+    memset(&direct_ota, 0, sizeof(direct_ota));
+}
+esp_err_t service_ota_direct_begin(uint32_t size, const uint8_t sha[32])
+{
+    if(direct_ota.writing || direct_ota.ready)
+        return ESP_ERR_INVALID_STATE;
+    const esp_partition_t *p = esp_ota_get_next_update_partition(NULL);
+    if(!p || p->address == esp_ota_get_running_partition()->address || !size || size > p->size)
+        return ESP_ERR_INVALID_SIZE;
+    service_ota_direct_abort();
+    esp_err_t e = esp_ota_begin(p, size, &direct_ota.handle);
+    if(e != ESP_OK)
+        return e;
+    direct_ota.writing = true;
+    direct_ota.part = p;
+    direct_ota.size = size;
+    memcpy(direct_ota.sha, sha, 32);
+    mbedtls_sha256_init(&direct_ota.hash);
+    direct_ota.hashing = true;
+    if(mbedtls_sha256_starts(&direct_ota.hash, 0))
+    {
+        service_ota_direct_abort();
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+esp_err_t service_ota_direct_write(const uint8_t *data, size_t len)
+{
+    if(!direct_ota.writing || !data || !len)
+        return ESP_ERR_INVALID_STATE;
+    if(len > direct_ota.size - direct_ota.received)
+        return ESP_ERR_INVALID_SIZE;
+    esp_err_t e = esp_ota_write(direct_ota.handle, data, len);
+    if(e != ESP_OK)
+        return e;
+    if(mbedtls_sha256_update(&direct_ota.hash, data, len))
+        return ESP_FAIL;
+    direct_ota.received += len;
+    return ESP_OK;
+}
+esp_err_t service_ota_direct_finish(void)
+{
+    if(!direct_ota.writing)
+        return ESP_ERR_INVALID_STATE;
+    uint8_t sha[32];
+    if(direct_ota.received != direct_ota.size || mbedtls_sha256_finish(&direct_ota.hash, sha) ||
+       memcmp(sha, direct_ota.sha, 32))
+        return ESP_ERR_INVALID_CRC;
+    mbedtls_sha256_free(&direct_ota.hash);
+    direct_ota.hashing = false;
+    esp_err_t e = esp_ota_end(direct_ota.handle);
+    direct_ota.writing = false;
+    if(e != ESP_OK)
+        return e;
+    esp_image_header_t header;
+    esp_app_desc_t desc;
+    if(esp_partition_read(direct_ota.part, 0, &header, sizeof(header)) != ESP_OK ||
+       header.chip_id != ESP_CHIP_ID_ESP32S3 ||
+       esp_ota_get_partition_description(direct_ota.part, &desc) != ESP_OK ||
+       strncmp(desc.project_name, "frame_film_ark", sizeof(desc.project_name)))
+        return ESP_ERR_INVALID_ARG;
+    direct_ota.ready = true;
+    sys_logi(OTA_TAG, "WiFi OTA verified: %lu bytes, awaiting activation",
+             (unsigned long)direct_ota.received);
+    return ESP_OK;
+}
+esp_err_t service_ota_direct_activate(void)
+{
+    if(!direct_ota.ready)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t result = esp_ota_set_boot_partition(direct_ota.part);
+    if(result == ESP_OK)
+    {
+        sys_logi(OTA_TAG, "WiFi OTA activated; restart pending");
+    }
+    return result;
 }

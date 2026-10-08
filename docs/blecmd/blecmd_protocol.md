@@ -1,5 +1,16 @@
 # FrameFilm BLE 通信协议详细规范
 
+## 目录
+
+- [1. 概述](#1-概述)
+- [2. 协议框架](#2-协议框架)
+- [3. 通道定义](#3-通道定义)
+- [4. 命令详解](#4-命令详解)
+- Ark 扩展：[临时 WiFi 直传](#411-ark-临时-wifi-直传)、[通行证资料](#412-ark-通行证资料读取0x53)、[设备名称](#413-ark-设备名称0x54--0x55)、[WiFi OTA](#414-ark-wifi-ota0x560x58)
+- [5. 校验和计算](#5-校验和计算)
+- [6. C 语言示例](#6-c-语言示例)
+- [7. 版本历史](#7-版本历史)
+
 ## 1. 概述
 
 本文档定义 FrameFilm 设备与上位机之间的 BLE（蓝牙低功耗）通信协议。协议采用 GATT 方式进行数据传输，支持 FILM 文件传输、OTA 固件升级、设备控制、WiFi 网络配置等功能。
@@ -281,6 +292,16 @@
 | 0x55 | DEVICE_NAME_SET | 名称后缀 UTF-8 + NUL | status(1) + 已配置完整名称 UTF-8 + NUL |
 
 仅 Ark 实现；详情见 §4.13。
+
+### 3.14 Ark WiFi OTA 通道（0x56~0x58）
+
+仅 `frame_film_ark` 支持，完整状态和提交语义见 [§4.14](#414-ark-wifi-ota0x560x58)。
+
+| 通道 | 名称 | 请求 | 响应 |
+|---|---|---|---|
+| 0x56 | BUILD_INFO_GET | 空 | 能力版本、OTA容量、实际ELF SHA256、version、project |
+| 0x57 | DIRECT_OTA_START | size(u32 BE) + 文件SHA256(32B) + SSID\0PASSWORD\0URL\0 | 0接受 / 1忙 / 2参数 / 3资源 |
+| 0x58 | DIRECT_OTA_APPLY | 空 | 0已激活 / 1非READY / 2激活失败 |
 
 ## 4. 命令详解
 
@@ -1421,6 +1442,22 @@ SUM  = (0x55 + 0x4E + 0x01 + 0x02) & 0xFF = 0xA6
 
 名称后缀存于独立 NVS key `ble_name`，不改变原有参数 blob 布局，也不修改 SD 通行证资料。SET 成功即表示已提交 NVS；当前连接不重启或断开。新广播名与 GATT Device Name（0x2A00）在下次蓝牙初始化时生效，客户端提示重启设备即可。GET 返回**已保存配置**，可能与本次连接缓存的旧广播名不同。设备入睡门闸期间不应答；旧固件不支持命令时，客户端应超时提示升级，不能把 GATT 写成功当作保存成功。
 
+### 4.14 Ark WiFi OTA（0x56~0x58）
+
+仅 Ark 支持；保留 film 0x50/0x51/0x52 与旧 BLE OTA 0x10~0x13。BLE 控制、手机 WiFi Direct GO HTTP 提供原始 app `.bin`、设备流式拉取到 inactive OTA partition，不需要 SD。当前未启用 boot rollback，不承诺启动失败后自动回滚。
+
+| CH | 请求 DATA | 响应 DATA |
+|---|---|---|
+| 0x56 BUILD_INFO_GET | 空 | capVersion=1(u8), otaMax(u32 BE), 当前 app ELF SHA256(32B), version(NUL ASCII), project(NUL ASCII) |
+| 0x57 DIRECT_OTA_START | size(u32 BE), 文件SHA256(32B), SSID\0PASSWORD\0URL\0 | 0接受 / 1忙 / 2参数或容量无效 / 3资源不足 |
+| 0x58 DIRECT_OTA_APPLY | 空 | 0已激活待重启 / 1非READY或已取消 / 2激活失败 |
+
+0x57 DATA 总长仍须 ≤192B，三字符串约束与0x50一致；OTA大小必须非零且不超过0x56的otaMax。只接受项目名 `frame_film_ark`、ESP32-S3的app镜像，不支持merged flash镜像。HTTP必须200且Content-Length等于请求size；逐块写入并验证完整文件SHA256，ESP-IDF镜像检查通过后才能准备提交。version（含3.2.5彩蛋）仅供展示，不作为升级限制或成功标识；同项目、同S3且合法的镜像可升级。
+
+0x51仍返回11B（state,progress,error,received:u32 BE,total:u32 BE）。原0~6不变，新增7=READY、8=APPLYING。READY表示完整镜像已校验、原WiFi已恢复、启动分区尚未改变；该状态仍独占会话，120秒未apply/cancel自动清理。APPLYING表示正在激活/待重启。百分比100仅表示数据接收完成。新增error：7=OTA写入/镜像/目标检查失败，8=HTTP声明长度或SHA256不符，9=READY等待超时；0~6沿用原定义。
+
+0x52共用取消；下载或READY取消均abort暂存并保持旧boot partition，清理后可以从头重试，无断点续传。apply提交点之后取消不能撤销启动分区。0x58返回0后设备延迟约1.5秒重启，为BLE应答留出发送时间；App应释放HTTP服务/GO，重连同一设备后读0x56并核对导入镜像的实际ELF SHA256，匹配才表示升级成功，不能只比较version或把断连/100%当成功。超时应显示“结果待确认”，允许重连确认。
+
 ## 5. 校验和计算
 
 校验和采用 **简单求和法**（Sum Check），计算公式：
@@ -1581,6 +1618,7 @@ int parse_response(uint8_t* in_buf, int in_len, uint8_t* out_ch, uint8_t* out_da
 
 | 版本 | 日期 | 描述 |
 |------|------|------|
+| 1.14 | 2026-10-08 | Ark WiFi OTA 0x56~0x58：实际ELF SHA构建身份、inactive Flash流式校验、READY/apply、取消与超时；未启用boot rollback |
 | 1.13 | 2026-10-07 | Ark 3.2.5 设备名称读取/保存 0x54/0x55：UTF-8 后缀、独立 NVS、重启后广播生效 |
 | 1.12 | 2026-10-07 | Ark 通行证固定资料读取 0x53：分块读取 SD 上的 profile.json，不改变既有上传或其他固件命令 |
 | 1.11 | 2026-10-07 | 新增 Ark 临时 WiFi 直传 0x50–0x52：RAM 网络会话、下载进度、取消与恢复；Android GO 提供临时 HTTP 文件服务 |
