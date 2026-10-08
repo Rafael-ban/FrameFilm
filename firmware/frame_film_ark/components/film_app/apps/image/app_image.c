@@ -261,6 +261,13 @@ static void app_image_on_event(const app_event_t *e)
         break;
 
     case SYS_EVT_FILE_LIST:
+        /* 保存刷新与 FILE_SAVED 成对；由后者决定显示新图或静默保存。
+           load_complete 在保存后失效，不能把它当作需要补显旧图的依据。 */
+        if(e->len > sizeof(uint32_t) &&
+           e->payload[sizeof(uint32_t)] == SYS_FILE_LIST_SAVE_PENDING)
+        {
+            break;
+        }
         /* 列表刷新完成：若尚未显示过（首帧竞态/列表晚于超时到达），补显一次 */
         if(service_file_get_count() > 0 &&
            service_file_get_load_complete() != FILE_LOAD_STATE_DONE)

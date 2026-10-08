@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-08",
+  "purpose": "Avoid an extra old-film refresh after committing a new film",
+  "firmware": {
+    "version": "3.2.5",
+    "image_bytes": 1853248,
+    "image_sha256": "f4e9b81711a885d83a4e7e7ef591019172a8e7b373ae64742ca579eca63383de",
+    "running_elf_sha256_prefix": "6f22f17b5",
+    "ota_completed": true,
+    "post_restart_ble_verified": true,
+    "profile_preserved": true
+  },
+  "regression": {
+    "old_file": "frame.film",
+    "old_file_id": 3,
+    "old_color_refresh_ms": 28950,
+    "uploaded_file": "ark_portrait_test.film",
+    "uploaded_bytes": 43232,
+    "new_file_id": 5,
+    "committed_at_device_ms": 788507,
+    "new_display_request_at_device_ms": 788577,
+    "commit_to_display_request_ms": 70,
+    "new_file_loaded_at_device_ms": 788617,
+    "post_commit_display_ids": [
+      5
+    ],
+    "old_file_reloaded_after_commit": false,
+    "final_wifi_state": 4,
+    "error": 0,
+    "wifi_configuration_preserved": true,
+    "temporary_phone_resources_cleaned": true
+  },
+  "physical": {
+    "verified": true,
+    "user_confirmation": "显示正常，方向正确",
+    "full_file_readback_hash_verified": false
+  },
+  "validation": [
+    "Focused image event host regression passed: new, overwrite, silent, first file, initial, recovery, delete",
+    "ESP-IDF 5.5.2 Ark incremental build passed",
+    "One WiFi same-name overwrite from Flutter App with old color film selected",
+    "Passive UART: file committed -> saved event id 5 -> display id 5; no old id 3 queued"
+  ],
+  "local_evidence": [
+    ".output/ark/logs/display-order-paced-ota-serial.log",
+    ".output/ark/logs/upgrade-display-order-paced-result.json",
+    ".output/ark/logs/pass-device-display-order-wifi-serial.log",
+    ".output/ark/logs/display-order-baseline.json"
+  ]
+}

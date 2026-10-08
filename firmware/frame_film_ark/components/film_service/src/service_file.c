@@ -152,7 +152,7 @@ static void file_free_buffer(void);
 static int file_validate_film(uint16_t *frame_count);
 static int file_target_by_frame_count(char *dst_path, size_t dst_size);
 static void file_invalidate_buffer(void);
-static void file_publish_list_event(void);
+static void file_publish_list_event(uint8_t save_pending);
 static int  file_mkdir_parents(const char *filepath);
 static void file_save_discard(void);
 static int file_save_commit(const char *target);
@@ -319,7 +319,7 @@ static void file_task_handle(void *pvParameters)
             {
             case MSG_FILE_LIST_REFRESH:
                 file_list_refresh_event();
-                file_publish_list_event();
+                file_publish_list_event(0);
                 break;
             case MSG_FILE_LOAD:
                 file_load_event(msg.file_id);
@@ -333,7 +333,7 @@ static void file_task_handle(void *pvParameters)
                 file_clean_dir(ANIM_DIR);
                 file_clean_dir("/sdcard/app");
                 file_list_refresh_event();
-                file_publish_list_event();
+                file_publish_list_event(0);
                 sys_event_publish(SYS_EVT_SD_MOUNT, NULL, 0);
                 break;
             case MSG_SD_UNMOUNTED:
@@ -470,7 +470,7 @@ save_start_done:
                         if(!m_file_state.save_skip_relocate)
                         {
                             file_list_refresh_event();
-                            file_publish_list_event();
+                            file_publish_list_event(SYS_FILE_LIST_SAVE_PENDING);
                             uint8_t auto_load = 0;
                             const char *target_name = strrchr(target, '/');
                             if(msg.file_id && target_name &&
@@ -751,10 +751,13 @@ static void file_list_refresh_event(void)
 /**
  * @brief 广播文件列表刷新完成事件（须在 file_list_refresh_event 之后、锁外调用）
  */
-static void file_publish_list_event(void)
+static void file_publish_list_event(uint8_t save_pending)
 {
     uint32_t count = service_file_get_count();
-    sys_event_publish(SYS_EVT_FILE_LIST, &count, sizeof(count));
+    uint8_t payload[sizeof(count) + 1];
+    memcpy(payload, &count, sizeof(count));
+    payload[sizeof(count)] = save_pending;
+    sys_event_publish(SYS_EVT_FILE_LIST, payload, save_pending ? sizeof(payload) : sizeof(count));
 }
 
 /**

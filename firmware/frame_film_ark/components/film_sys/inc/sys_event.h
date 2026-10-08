@@ -18,6 +18,7 @@ extern "C" {
  * MACROS
  */
 #define SYS_EVENT_MAX_SUBSCRIBERS   (8)     // 订阅槽上限（固定表，免动态内存）
+#define SYS_FILE_LIST_SAVE_PENDING  (1)     // FILE_LIST 第 5 字节：随后 FILE_SAVED 决定是否显示
 #define SYS_EVENT_PAYLOAD_MAX       (16)    // 内联负载上限，值语义 memcpy
 
 /*********************************************************************
@@ -31,7 +32,7 @@ typedef enum {
     SYS_EVT_NONE         = 0x0000,
 
     SYS_EVT_FILE_SAVED   = 0x0101,  // film 落盘完成（BLE/WiFi/TF 通用）
-    SYS_EVT_FILE_LIST    = 0x0102,  // 文件列表刷新完成，payload: u32 count
+    SYS_EVT_FILE_LIST    = 0x0102,  // 文件列表刷新完成，payload: u32 count [+ u8 SYS_FILE_LIST_SAVE_PENDING]
     SYS_EVT_SD_MOUNT     = 0x0103,  // TF 卡挂载
     SYS_EVT_SD_UNMOUNT   = 0x0104,  // TF 卡卸载
     SYS_EVT_FILM_FRAME_DONE = 0x0105, // 动图某一帧已上屏（按帧推屏的 app 据此立刻推下一帧）
