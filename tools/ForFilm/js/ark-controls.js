@@ -4,9 +4,19 @@
     const $ = id => document.getElementById(id);
     const locks = new Map();
     let wasBusy = false;
+    let wasConnected = false;
+    let directSession = 0;
     let sawArk = false;
     const DIRECT_STATES = ['空闲', '正在连接临时 WiFi', '正在下载', '正在保存或恢复网络', '已完成', '失败', '已取消'];
     const DIRECT_ERRORS = ['', 'WiFi 连接失败', 'HTTP 下载失败', '文件保存失败', '已请求取消', '网络恢复失败', '设备资源不足'];
+
+    // Async producers update availability without releasing the current operation lock.
+    window.arkSetControlDisabled = (el, disabled) => {
+        if (locks.has(el)) {
+            locks.set(el, disabled);
+            el.disabled = true;
+        } else el.disabled = disabled;
+    };
 
     function status(message, error = false) {
         $('ark-operation-status').textContent = message;
@@ -17,6 +27,12 @@
         const api = window.ArkDevice;
         const connected = !!api?.connected();
         const busy = !!api?.busy();
+        if (connected !== wasConnected) {
+            wasConnected = connected;
+            directSession++;
+            $('ark-direct-status').textContent = connected ? '尚未查询当前设备' : '设备已断开，请连接后重新查询';
+            $('ark-direct-progress').value = 0;
+        }
         sawArk ||= connected;
         // Keep navigation available; cancel remains usable while other actions lock.
         if (busy && !wasBusy) {
@@ -71,6 +87,7 @@
     }
 
     async function queryDirect(cancel) {
+        const session = directSession;
         try {
             await window.ArkDevice.run(cancel ? '取消设备 WiFi 直传' : '查询 WiFi 直传', async ctx => {
                 if (cancel) {
@@ -79,14 +96,18 @@
                 }
                 const until = Date.now() + 45000;
                 do {
-                    const state = renderDirect(await ctx.request(0x51, new Uint8Array()));
+                    const payload = await ctx.request(0x51, new Uint8Array());
+                    if (session !== directSession) return;
+                    const state = renderDirect(payload);
                     if (!cancel || state === 0 || state >= 4) return;
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 } while (Date.now() < until);
                 throw new Error('取消已请求，但设备尚未确认清理完成；请稍后重新查询状态。');
             });
         } catch (error) {
+            if (session !== directSession) return;
             $('ark-direct-status').textContent = error.message;
+            $('ark-direct-progress').value = 0;
             throw error;
         }
     }

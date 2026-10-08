@@ -2,7 +2,27 @@
 
 当前开发阶段是 M2 原生 Android 客户端：按 `tools/ForFilm` 的五页结构与 Ark 黑白黄风格重新实现 Android Views，**不使用 WebView**。BLE 保持设备控制连接，传图时临时建立 2.4GHz WiFi Direct GO，由 Ark 下载手机提供的 `.film`。
 
-当前开发优先级（2026-10-07）：基础 App 阶段暂告一段落，主线回到 `firmware/frame_film_ark`。先稳定固件基础功能，再完善设备端通行证界面；Android 暂保留为联调工具，后续只按固件联调需要修复阻塞问题，其余界面与高级功能迁移放到固件阶段之后。取消与重试的实机验收仍为待完成，不因切换主线而视为通过。
+当前开发优先级（2026-10-08）：网页主题统一与状态收敛后，开始研究 **Flutter 原生界面重构**。现有 Android Views 工程保留为通信实现基线；下述 M1/M2 是已有工程的验证记录，不是 Flutter 的完成记录。取消与重试的实机验收仍为待完成，不因切换框架而视为通过。
+
+## Flutter 重构方案（研究完成，尚未创建工程）
+
+- 视觉：提供 **明日方舟 / PRTS** 与 **原 ForFilm** 两套完整主题，共享功能、页面状态与草稿；Arknights 采用当前网页已确认的炭灰、黑白、冷蓝体系，不复用旧 Android 黑白黄外观。连接 Ark 成功后进入主题加载界面，同一会话内切页不重复播放。
+- 页面：连接、Frame、Film、动画、通行证、设置。全部使用 Flutter widgets，不使用 WebView；手机使用适合触控的导航布局，保留网页功能分组和操作语义。
+- 平台内核：复用 Kotlin `ArkSession`、`ArkBleController`、`ArkP2pController`、`FilmHttpServer`、`DirectTransferCoordinator`。Flutter 不再通过另一 BLE 插件建立第二条设备连接。WiFi Direct 群组密码留在原生层。
+- 桥接：MethodChannel 发起操作，EventChannel 推送发现设备、连接和 `TransferSnapshot`。发起操作、GATT 写完成、设备回包与最终完成是不同状态；设备改名必须保留现有同通道回包确认。
+- 生命周期：会话由 App 级服务对象持有，不随页面切换销毁；终止传输先完成固件取消和临时网络清理。首版不承诺后台常驻、杀进程续传或分片断点续传。
+- 图像：首阶段保留 Kotlin `FilmConverter` 的六色/黑白 v1 转换，跨通道传受管理的文件路径和状态；预览变化采用只处理最新请求的调度，避免滑杆积压。高级算法、GIF 编辑与批量队列后续单独迁移。
+
+实施顺序：
+
+1. 配置 Flutter SDK，建立工程和双主题，完成六页导航、连接状态及主题加载预览；接入真实扫描、连接、屏幕参数和设备名称读取。
+2. 接入现成 `.film` 文件传输：开始、进度、取消、清理中、失败、重试。使用系统蓝牙稳定的手机完成 START 后取消与同文件重试验收。
+3. 接入通行证编辑和 SD 读写、图片转换、设备设置；个人资料沿用网页与固件的格式，读取失败不覆盖草稿，部分文件发送成功明确提示。
+4. 再补齐高级图像算法、动画编辑和批量队列；OTA 单独处理已有擦除/超时问题后再验收。
+
+开发环境检查：Android SDK 目录与 platform-tools 已存在；本轮终端 PATH 未找到 `flutter` / `dart`，尚未执行 Flutter 构建。现有 Android 项目为 compile/target SDK 35、min SDK 29、JVM 17，Flutter 宿主配置应由正式模板生成后整合现有内核。
+
+技术依据：[Flutter platform channels](https://docs.flutter.dev/platform-integration/platform-channels)、[Android WiFi Direct](https://developer.android.com/develop/connectivity/wifi/wifip2p)。Android 13+ 的附近 WiFi 权限、旧系统的定位要求及 BLE 权限仍由平台层按系统版本处理。
 
 ## M2 实施范围与进度
 

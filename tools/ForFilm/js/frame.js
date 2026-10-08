@@ -47,7 +47,7 @@ function initFrameUpload() {
                 frameOriginalImage = img;
                 frameSetupImage('frame-canvas', false);
                 frameUpdateImage('frame-canvas');
-                document.getElementById('frameUploadBtn').disabled = false;
+                window.arkSetControlDisabled(document.getElementById('frameUploadBtn'), false);
             };
             img.src = ev.target.result;
         };
@@ -108,7 +108,7 @@ function frameCapturePhoto() {
         frameOriginalImage = img;
         frameSetupImage('frame-camera-canvas', true);
         frameUpdateImage('frame-camera-canvas');
-        document.getElementById('frameCameraUploadBtn').disabled = false;
+        window.arkSetControlDisabled(document.getElementById('frameCameraUploadBtn'), false);
     };
     img.src = tempCanvas.toDataURL('image/png');
 

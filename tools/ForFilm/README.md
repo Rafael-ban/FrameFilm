@@ -58,10 +58,12 @@ node tools/ForFilm/tests/ark-intro.test.cjs
 node tools/ForFilm/tests/ark-polish.test.cjs
 # 仅检查 Frame 子页面、Film、动画与设置的主题覆盖
 node tools/ForFilm/tests/ark-pages.test.cjs
+# 异步图片完成与 busy 锁、直传状态的断连/重连归属
+node tools/ForFilm/tests/ark-state.test.cjs
 ```
 
 浏览器用模拟 BLE 验证共享连接、读失败保留草稿、取消/重连/发送、直传状态与取消、OTA 文件拦截及移动端布局，不写入真实设备。真实蓝牙和 SD 保存行为需要单独验收。
 
 ## 后续 App
 
-先完成当前网页适配，再将 App 用 **Flutter 原生界面重构**，不使用 WebView 包装网页。按用户要求规划可切换的两套视觉：**明日方舟／罗德岛风格**与**保留现有网页 UI 风格**；复用协议、操作语义和资料格式。本轮不改 Android 工程，Flutter 的页面细节与实机传输在 App 阶段落实。
+网页完成本轮主题和状态收敛后，App 进入 **Flutter 原生界面重构研究**，不使用 WebView 包装网页。可切换的两套视觉为 **明日方舟／罗德岛风格**与**原 ForFilm UI 风格**；复用协议、操作语义和资料格式。具体迁移边界与实施顺序见 [Android README](../../android/README.md)。Flutter 工程与实机验收尚未开始。

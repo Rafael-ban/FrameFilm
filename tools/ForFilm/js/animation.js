@@ -911,7 +911,7 @@ function animSyncTransformTools() {
     if (box) {
         box.classList.toggle('is-disabled', !usable);
         var btns = box.querySelectorAll('button');
-        for (var i = 0; i < btns.length; i++) btns[i].disabled = !usable;
+        for (var i = 0; i < btns.length; i++) window.arkSetControlDisabled(btns[i], !usable);
     }
     if (label) label.classList.toggle('is-on', animTransformAll);
     if (hint) {
