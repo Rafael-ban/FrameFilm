@@ -25,6 +25,22 @@
   let nameWriteInProgress = false;
   let parentState = { connected: false, busy: false, label: '' };
 
+  // The embedded editor follows the host skin; the device canvas stays monochrome.
+  function syncParentTheme() {
+    if (!embedded) return;
+    const host = window.parent.document.body;
+    const style = window.parent.getComputedStyle(host);
+    document.body.classList.toggle('theme-ark', host.classList.contains('theme-ark'));
+    const tokens = {
+      '--ink': '--ink', '--muted': '--ink-soft', '--paper': '--paper',
+      '--editor-accent': '--sky', '--editor-radius': '--r',
+      '--editor-field-radius': '--r-xs', '--editor-font': '--font-body'
+    };
+    for (const [local, parent] of Object.entries(tokens)) {
+      document.body.style.setProperty(local, style.getPropertyValue(parent).trim());
+    }
+  }
+
   function deviceAvailable() {
     if (!embedded) return !!characteristic;
     const arkDevice = getArkDevice();
@@ -557,6 +573,8 @@
   function init() {
     if (embedded) {
       document.body.classList.add('embedded');
+      window.parent.addEventListener('ark-theme-changed', syncParentTheme);
+      syncParentTheme();
       window.parent.addEventListener('ark-device-state', updateParentState);
       $('back-to-connect').addEventListener('click', () => {
         window.parent.document.querySelector('[data-page="bluetooth-page"]')?.click();

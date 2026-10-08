@@ -2,6 +2,10 @@
 
 沿用 ForFilm 的连接、Frame、Film、动画和设置布局，新增“通行证”入口。Ark 连接后的品牌统一为 ARKNIGHTS / RHODES ISLAND，保持原有网页结构；其他机型保留原页面。
 
+Ark 专属主题采用罗德岛终端的黑白灰层次与蓝色点缀，连接页、制作工具、设置和嵌入的通行证编辑器使用同一套主题。设置中的主题开关可恢复原 ForFilm 外观，切换不会断开设备或丢弃通行证草稿。通行证画布保持设备实际的黑白显示，不随网页主题重新着色。
+
+无需连接设备即可查看外观：`http://127.0.0.1:8768/ForFilm/?theme=ark`。此入口仅预览主题，不模拟设备在线，也不启用需要连接的操作；正常使用入口不带查询参数。
+
 ## 本地使用
 
 从仓库根目录启动静态服务（服务根必须是 `tools`，以提供通行证编辑器和共享资源）：
@@ -36,6 +40,8 @@ node --test tools/ForFilm/tests/ark-device.test.cjs
 # 需先启动上述静态服务，安装/提供 Playwright，并可启动 Edge
 node tools/ForFilm/tests/ark-browser.test.cjs
 node tools/ForFilm/tests/ark-upload-ui.test.cjs
+# 仅检查主题连接/断开、开关、编辑器同步和移动端布局
+node tools/ForFilm/tests/ark-theme.test.cjs
 ```
 
 浏览器用模拟 BLE 验证共享连接、读失败保留草稿、取消/重连/发送、直传状态与取消、OTA 文件拦截及移动端布局，不写入真实设备。真实蓝牙和 SD 保存行为需要单独验收。

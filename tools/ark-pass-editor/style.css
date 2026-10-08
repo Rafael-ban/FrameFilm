@@ -4,6 +4,19 @@ body.embedded .masthead,body.embedded #connect,body.embedded .device-name-panel,
 body.embedded .embedded-nav{display:block;max-width:1240px;margin:0 auto;padding:16px 24px 0}
 body.embedded .embedded-connection-hint{display:block}
 body.embedded .workspace{padding-top:16px}
+/* Embedded controls share the host palette and geometry, without recoloring the device preview. */
+body.embedded{background:transparent;font-family:var(--editor-font)}
+body.embedded .embedded-nav{padding:0 0 16px}
+body.embedded .workspace{padding:0 0 24px;gap:20px}
+body.embedded .editor,body.embedded .preview-panel{background:var(--paper);border:1px solid var(--line);border-radius:var(--editor-radius);padding:20px}
+body.embedded .section-head{border-top:0;border-bottom:1px solid var(--line);padding:0 0 14px}
+body.embedded input[type=text],body.embedded textarea,body.embedded input[type=file],body.embedded button,body.embedded .file-button{border-radius:var(--editor-field-radius)}
+body.embedded button:focus-visible,body.embedded input:focus-visible,body.embedded textarea:focus-visible{outline-color:var(--editor-accent)}
+body.embedded.theme-ark{--line:#d6dce1}
+body.embedded.theme-ark .section-head{border-left:3px solid var(--editor-accent);padding-left:12px}
+body.embedded.theme-ark .section-head span{color:#526875}
+body.embedded.theme-ark .preview-frame{background:#e7ebef}
+@media(max-width:560px){body.embedded .editor,body.embedded .preview-panel{padding:16px}}
 *{box-sizing:border-box}body{margin:0;background:var(--ground);color:var(--ink)}
 .masthead{max-width:1240px;margin:0 auto;padding:34px 24px 28px;border-bottom:2px solid var(--ink)}
 .mastline,.section-head span{font:700 11px/1.4 ui-monospace,Consolas,monospace;letter-spacing:.16em}.mastline{display:flex;justify-content:space-between;gap:12px}

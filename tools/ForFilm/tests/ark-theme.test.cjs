@@ -1,0 +1,60 @@
+// Visual theme lifecycle only; simulated BLE never touches hardware.
+const { chromium } = require('playwright');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { mockBluetooth } = require('./ark-browser.test.cjs');
+
+(async () => {
+    const browser = await chromium.launch({ headless: true, channel: 'msedge' });
+    const output = path.resolve('.output/ark/rhodes-web-theme');
+    fs.mkdirSync(output, { recursive: true });
+    try {
+        const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+        const errors = [];
+        page.on('pageerror', error => errors.push(error.message));
+        await page.route(/fonts\.(googleapis|gstatic)\.com/, route => route.abort());
+        await page.addInitScript(mockBluetooth);
+        await page.goto('http://127.0.0.1:8768/ForFilm/', { waitUntil: 'networkidle' });
+        assert.equal(await page.locator('body').evaluate(el => el.classList.contains('theme-ark')), false);
+        await page.locator('#scan-button').click();
+        await page.waitForFunction(() => ArkDevice.connected() && document.body.classList.contains('theme-ark'));
+        assert.equal(await page.locator('[id^="ark-ef-"]').count(), 0);
+        assert.equal(await page.locator('.ark-rec, .ark-giant').count(), 0);
+        await page.screenshot({ path: path.join(output, 'connected-desktop.png'), fullPage: true });
+        await page.locator('[data-page="pass-page"]').click();
+        const editor = page.frameLocator('#ark-pass-editor');
+        await editor.locator('body.theme-ark').waitFor();
+        await editor.locator('#codename').fill('主题检查草稿');
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('#ark-pass-editor')).opacity === '1');
+        const accent = await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--sky').trim());
+        assert.equal(await editor.locator('body').evaluate(el => getComputedStyle(el).getPropertyValue('--editor-accent').trim()), accent);
+        await page.screenshot({ path: path.join(output, 'pass-desktop.png'), fullPage: true });
+        await page.locator('[data-page="config-page"]').click();
+        await page.locator('label.switch:has(#ark-theme-switch)').click();
+        assert.equal(await page.locator('#ark-theme-switch').isChecked(), false);
+        await page.waitForFunction(() => !document.body.classList.contains('theme-ark'));
+        assert.equal(await editor.locator('body').evaluate(el => el.classList.contains('theme-ark')), false);
+        assert.equal(await editor.locator('#codename').inputValue(), '主题检查草稿');
+        assert(await page.evaluate(() => ArkDevice.connected()));
+        await page.locator('label.switch:has(#ark-theme-switch)').click();
+        assert(await page.locator('#ark-theme-switch').isChecked());
+        await page.waitForFunction(() => document.body.classList.contains('theme-ark'));
+        await page.screenshot({ path: path.join(output, 'settings-desktop.png'), fullPage: true });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.locator('[data-page="pass-page"]').click();
+        await editor.locator('body.theme-ark').waitFor();
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('#ark-pass-editor')).opacity === '1');
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        assert(await editor.locator('body').evaluate(el => el.ownerDocument.documentElement.scrollWidth <= el.ownerDocument.defaultView.innerWidth));
+        await page.screenshot({ path: path.join(output, 'pass-mobile.png'), fullPage: true });
+        await page.evaluate(() => device.gatt.disconnect());
+        await page.waitForFunction(() => !document.body.classList.contains('theme-ark'));
+        assert.equal(await editor.locator('#codename').inputValue(), '主题检查草稿');
+        await page.goto('http://127.0.0.1:8768/ForFilm/?theme=ark', { waitUntil: 'networkidle' });
+        await page.waitForFunction(() => document.body.classList.contains('theme-ark'));
+        assert.equal(await page.evaluate(() => ArkDevice.connected()), false);
+        assert.deepEqual(errors, []);
+        console.log('PASS: Ark connection, theme toggle, embedded editor, disconnect, mobile layout and offline preview.');
+    } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });
