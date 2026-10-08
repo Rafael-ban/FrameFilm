@@ -30,6 +30,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include <dirent.h>
 #include <sys/stat.h>
 
@@ -403,19 +404,43 @@ save_start_done:
                 if(m_file_state.save_owner == msg.owner && m_file_state.save_file_handle)
                 {
                     int close_result = fclose(m_file_state.save_file_handle);
+                    int close_errno = errno;
                     m_file_state.save_file_handle = NULL;
                     char target[sizeof(m_file_state.save_path)];
                     snprintf(target, sizeof(target), "%s", m_file_state.save_path);
                     int is_film = !m_file_state.save_skip_relocate ||
                                   file_has_suffix(m_file_state.save_path, ".film");
-                    if(close_result == 0 && !m_file_state.save_failed &&
-                       m_file_state.save_written == m_file_state.save_file_size &&
-                       (m_file_state.save_skip_relocate ?
-                        (!is_film || file_validate_film(NULL) == 0) :
-                        file_target_by_frame_count(target, sizeof(target)) == 0) &&
-                       file_save_commit(target) == 0)
+                    if(close_result != 0)
+                    {
+                        sys_loge(FILE_TAG, "Save close failed: %s (errno=%d)",
+                                 m_file_state.save_part_path, close_errno);
+                    }
+                    else if(m_file_state.save_failed)
+                    {
+                        sys_loge(FILE_TAG, "Save write failed: %s", m_file_state.save_part_path);
+                    }
+                    else if(m_file_state.save_written != m_file_state.save_file_size)
+                    {
+                        sys_loge(FILE_TAG, "Save size mismatch: %s (%lu/%lu)",
+                                 m_file_state.save_part_path,
+                                 (unsigned long)m_file_state.save_written,
+                                 (unsigned long)m_file_state.save_file_size);
+                    }
+                    else if(m_file_state.save_skip_relocate ?
+                            (is_film && file_validate_film(NULL) != 0) :
+                            file_target_by_frame_count(target, sizeof(target)) != 0)
+                    {
+                        sys_loge(FILE_TAG, "Save validation/target failed: %s", m_file_state.save_part_path);
+                    }
+                    else if(file_save_commit(target) != 0)
+                    {
+                        sys_loge(FILE_TAG, "Save commit failed: %s -> %s",
+                                 m_file_state.save_part_path, target);
+                    }
+                    else
                     {
                         m_save_result = 0;
+                        sys_logi(FILE_TAG, "File committed: %s", target);
                         if(!m_file_state.save_skip_relocate)
                         {
                             file_list_refresh_event();
@@ -448,6 +473,12 @@ save_start_done:
                             sys_event_publish(SYS_EVT_FILE_SAVED, &auto_load, sizeof(auto_load));
                         }
                     }
+                }
+                else
+                {
+                    sys_loge(FILE_TAG, "Save stop state mismatch: request_owner=%u save_owner=%u handle=%p",
+                             (unsigned)msg.owner, (unsigned)m_file_state.save_owner,
+                             (void *)m_file_state.save_file_handle);
                 }
                 if(m_file_state.save_owner == msg.owner) file_save_discard();
                 xSemaphoreGive(m_save_done);
@@ -765,13 +796,28 @@ static int file_mkdir_parents(const char *filepath)
 static int file_validate_film(uint16_t *frame_count_out)
 {
     FILE *fp = fopen(m_file_state.save_part_path, "rb");
-    if(fp == NULL) return -1;
+    if(fp == NULL)
+    {
+        int err = errno;
+        sys_loge(FILE_TAG, "Film header open failed: %s (errno=%d)",
+                 m_file_state.save_part_path, err);
+        return -1;
+    }
 
     uint8_t hdr[FILM_HEADER_SIZE];
+    errno = 0;
     size_t rd = fread(hdr, 1, sizeof(hdr), fp);
+    int read_error = ferror(fp);
+    int read_errno = errno;
     fclose(fp);
 
-    if(rd != FILM_HEADER_SIZE || m_file_state.save_written < FILM_HEADER_SIZE) return -1;
+    if(rd != FILM_HEADER_SIZE || m_file_state.save_written < FILM_HEADER_SIZE)
+    {
+        sys_loge(FILE_TAG, "Film header read failed: %s (read=%u/%d, written=%lu, ferror=%d, errno=%d)",
+                 m_file_state.save_part_path, (unsigned)rd, FILM_HEADER_SIZE,
+                 (unsigned long)m_file_state.save_written, read_error, read_errno);
+        return -1;
+    }
 
     uint32_t body_size = m_file_state.save_written - FILM_HEADER_SIZE;
     uint32_t header_size = (uint32_t)hdr[FILM_HDR_OFFSET_SIZE]
@@ -790,7 +836,12 @@ static int file_validate_film(uint16_t *frame_count_out)
     switch(hdr[FILM_HDR_OFFSET_FORMAT])
     {
     case 0x00:
-        if(hdr[FILM_HDR_OFFSET_COLORCOUNT] < 2 || hdr[FILM_HDR_OFFSET_COLORCOUNT] > 6) return -1;
+        if(hdr[FILM_HDR_OFFSET_COLORCOUNT] < 2 || hdr[FILM_HDR_OFFSET_COLORCOUNT] > 6)
+        {
+            sys_loge(FILE_TAG, "Invalid film color count: %u (format=0)",
+                     (unsigned)hdr[FILM_HDR_OFFSET_COLORCOUNT]);
+            return -1;
+        }
         frame_size = (EPD_WIDTH * EPD_HEIGHT) / 2;
         break;
     case 0x01:
@@ -801,12 +852,20 @@ static int file_validate_film(uint16_t *frame_count_out)
         frame_size = EPD_WIDTH * EPD_HEIGHT;
         break;
     default:
+        sys_loge(FILE_TAG, "Invalid film format: %u (file=%s)",
+                 (unsigned)hdr[FILM_HDR_OFFSET_FORMAT], m_file_state.save_part_path);
         return -1;
     }
     if(width != EPD_WIDTH || height != EPD_HEIGHT || header_size != body_size ||
        body_size % frame_size != 0 || body_size / frame_size != frame_count)
     {
-        sys_loge(FILE_TAG, "Invalid film header: %s", m_file_state.save_part_path);
+        sys_loge(FILE_TAG, "Invalid film header: %s (size=%lu/%lu, dimensions=%ux%u/%ux%u, color=%u, format=%u, frames=%u, frame_size=%lu)",
+                 m_file_state.save_part_path, (unsigned long)header_size,
+                 (unsigned long)body_size, (unsigned)width, (unsigned)height,
+                 (unsigned)EPD_WIDTH, (unsigned)EPD_HEIGHT,
+                 (unsigned)hdr[FILM_HDR_OFFSET_COLORCOUNT],
+                 (unsigned)hdr[FILM_HDR_OFFSET_FORMAT], (unsigned)frame_count,
+                 (unsigned long)frame_size);
         return -1;
     }
 
@@ -823,9 +882,19 @@ static int file_target_by_frame_count(char *dst_path, size_t dst_size)
 
     if(strcmp(m_file_state.save_dir, dst_dir) == 0) return 0;
     DIR *dir = opendir(dst_dir);
-    if(dir == NULL && mkdir(dst_dir, 0777) != 0) return -1;
+    if(dir == NULL && mkdir(dst_dir, 0777) != 0)
+    {
+        int err = errno;
+        sys_loge(FILE_TAG, "Save target directory failed: %s (errno=%d)", dst_dir, err);
+        return -1;
+    }
     if(dir) closedir(dir);
-    return snprintf(dst_path, dst_size, "%s/%s", dst_dir, m_file_state.save_filename) < dst_size ? 0 : -1;
+    if(snprintf(dst_path, dst_size, "%s/%s", dst_dir, m_file_state.save_filename) >= dst_size)
+    {
+        sys_loge(FILE_TAG, "Save target path too long: %s/%s", dst_dir, m_file_state.save_filename);
+        return -1;
+    }
+    return 0;
 }
 
 static void file_save_discard(void)
@@ -850,9 +919,16 @@ static int file_recover_target(const char *target)
     if(snprintf(backup, sizeof(backup), "%s.ffupload.bak", target) >= sizeof(backup)) return -1;
     struct stat st;
     if(stat(backup, &st) != 0) return 0;
-    if(stat(target, &st) == 0) return remove(backup) == 0 ? 0 : -1;
+    if(stat(target, &st) == 0)
+    {
+        if(remove(backup) == 0) return 0;
+        int err = errno;
+        sys_loge(FILE_TAG, "Remove stale backup failed: %s (errno=%d)", backup, err);
+        return -1;
+    }
     if(rename(backup, target) == 0) return 0;
-    sys_loge(FILE_TAG, "Restore failed: %s", target);
+    int err = errno;
+    sys_loge(FILE_TAG, "Restore rename failed: %s -> %s (errno=%d)", backup, target, err);
     return -1;
 }
 
@@ -863,11 +939,23 @@ static int file_save_commit(const char *target)
     if(file_recover_target(target) != 0) return -1;
     struct stat st;
     int had_old = stat(target, &st) == 0;
-    if(had_old && rename(target, backup) != 0) return -1;
+    if(had_old && rename(target, backup) != 0)
+    {
+        int err = errno;
+        sys_loge(FILE_TAG, "Backup rename failed: %s -> %s (errno=%d)", target, backup, err);
+        return -1;
+    }
     if(rename(m_file_state.save_part_path, target) != 0)
     {
+        int err = errno;
+        sys_loge(FILE_TAG, "Commit rename failed: %s -> %s (errno=%d)",
+                 m_file_state.save_part_path, target, err);
         if(had_old && rename(backup, target) != 0)
-            sys_loge(FILE_TAG, "Restore after commit failure failed: %s", target);
+        {
+            int restore_err = errno;
+            sys_loge(FILE_TAG, "Restore after commit failure failed: %s -> %s (errno=%d)",
+                     backup, target, restore_err);
+        }
         return -1;
     }
     if(had_old) remove(backup);

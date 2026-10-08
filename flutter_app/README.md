@@ -84,6 +84,14 @@ $env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电
 - Android 9 分支本轮完成源码与 APK 编译检查，尚无 Android 9 真机结果；不能用 Android 17 手机代替该项验收。
 - 自动构建配置及产物说明见 [Ark 自动构建](../docs/development/ci-builds.md)。分别构建 Android debug APK 和 ESP-IDF 5.5.2 Ark 固件，保留构建日志；首次远端 [Ark builds](https://github.com/Rafael-ban/FrameFilm/actions/runs/37736539292) 的两项编译及产物上传已通过。
 
+## 保存故障定位补充（2026-10-08）
+
+- 本轮接入过 Android 9 `TYH201H` 和 `25042PN24C` 两台手机，测试结果分开记录。Android 9 扫描无结果的原因尚未确定，不能判定为权限或机型不兼容。
+- `25042PN24C` 已覆盖安装当前本地 APK，手机安装包与本地 SHA-256 均为 `174326575dbc265ebe73bbadc9ecd8db0f0fc336aad5e06424134fbd95c570d6`；扫描、连接成功。
+- 当前 APK 导入缓存与仓库测试 film SHA-256 相同，发送名为 `ark_flutter_test.film`。WiFi 实测 UART 仍返回 `state=5 bytes=43232/43232 error=3`，不是仅凭手机 100% 进度判断。
+- 同一份 film、同一文件名通过 BLE 静默保存成功，UART 确认 `Film transfer saved: 43232 bytes`。此结果支持继续调查 WiFi 保存路径，不能据此宣称 WiFi 保存已修复。
+- 已为固件保存流程增加关闭、头校验、目标目录和文件提交的诊断日志，增量编译通过；设备升级及后续定位结果待补充。
+
 ## 下一步
 
 1. 继续完成功能后，再按现有网页统一手机 UI。
