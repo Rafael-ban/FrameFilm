@@ -90,7 +90,9 @@ $env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电
 - `25042PN24C` 已覆盖安装当前本地 APK，手机安装包与本地 SHA-256 均为 `174326575dbc265ebe73bbadc9ecd8db0f0fc336aad5e06424134fbd95c570d6`；扫描、连接成功。
 - 当前 APK 导入缓存与仓库测试 film SHA-256 相同，发送名为 `ark_flutter_test.film`。WiFi 实测 UART 仍返回 `state=5 bytes=43232/43232 error=3`，不是仅凭手机 100% 进度判断。
 - 同一份 film、同一文件名通过 BLE 静默保存成功，UART 确认 `Film transfer saved: 43232 bytes`。此结果支持继续调查 WiFi 保存路径，不能据此宣称 WiFi 保存已修复。
-- 已为固件保存流程增加关闭、头校验、目标目录和文件提交的诊断日志，增量编译通过；设备升级及后续定位结果待补充。
+- 保存诊断固件已增量编译并通过 BLE OTA 部署，大小 1,852,064 字节，镜像 SHA-256 `c4b0c586d0a2cb18330817ef50200f9f63729d7bda80faf0729f474ac66e5abf`，启动 ELF 摘要前缀 `da7026223`；设备恢复蓝牙，通行证档案回读与升级前一致。
+- 诊断实测明确失败于文件头校验：`Invalid film color count: 0 (format=0)`，路径 `/sdcard/film/ark_flutter_test.film.ffupload.part`。导入源应为 format=1，故目前证据是 WiFi 路径最终读回头部与源不符；尚未确定差异出现在 HTTP 接收还是存储写入/读回，不能宣称根因或修复完成。
+- 下一步只需对照手机实际 HTTP 响应、设备接收缓冲的头部和 SD 临时文件头，定位首次差异；不要通过放宽 film 校验来让损坏文件通过。当前无扫描逻辑修改。
 
 ## 下一步
 
