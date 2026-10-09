@@ -7,7 +7,7 @@ import 'frame_algorithms.dart';
 import 'frame_lut.dart';
 export 'frame_algorithms.dart' show FrameAlgorithm;
 
-enum FrameFormat { sixColor, monoFast }
+enum FrameFormat { sixColor, monoFast, colorFast55, colorQual }
 
 enum FrameFit { cover, contain }
 
@@ -127,22 +127,32 @@ Uint8List packFramePixels(
     throw ArgumentError('像素尺寸不匹配');
   }
   final mono = format == FrameFormat.monoFast;
-  final bodySize = (indices.length + (mono ? 7 : 1)) ~/ (mono ? 8 : 2);
+  final indexed =
+      format == FrameFormat.colorFast55 || format == FrameFormat.colorQual;
+  final bodySize = indexed
+      ? indices.length
+      : (indices.length + (mono ? 7 : 1)) ~/ (mono ? 8 : 2);
   final result = Uint8List(32 + bodySize);
   final header = ByteData.sublistView(result);
   header.setUint32(0, bodySize, Endian.little);
   header.setUint16(4, height, Endian.little);
   header.setUint16(6, width, Endian.little);
-  result[8] = mono ? 2 : 6;
-  result[9] = mono ? 1 : 0;
-  header.setUint16(10, 1, Endian.little);
-  if (!mono) result.setRange(16, 22, [0, 255, 252, 224, 3, 28]);
+  result[8] = indexed ? 0 : (mono ? 2 : 6);
+  result[9] = indexed
+      ? (format == FrameFormat.colorFast55 ? 3 : 2)
+      : (mono ? 1 : 0);
+  header.setUint16(10, indexed ? 0 : 1, Endian.little);
+  if (!mono && !indexed) result.setRange(16, 22, [0, 255, 252, 224, 3, 28]);
   for (var y = 0; y < height; y++) {
     for (var x = 0; x < width; x++) {
       final value = indices[y * width + x];
-      if (value >= (mono ? 2 : 6)) throw ArgumentError('无效颜色索引');
+      if (value >= (indexed ? 64 : (mono ? 2 : 6))) {
+        throw ArgumentError('无效颜色索引');
+      }
       final physical = x * height + height - 1 - y;
-      if (mono) {
+      if (indexed) {
+        result[32 + physical] = value;
+      } else if (mono) {
         if (value == 0) result[32 + physical ~/ 8] |= 128 >> (physical % 8);
       } else {
         result[32 + physical ~/ 2] |= value << (physical.isEven ? 4 : 0);
@@ -291,8 +301,22 @@ Future<FrameResult> convertFrame(
   } finally {
     image.dispose();
   }
-  _adjustRgba(rgba, options);
+  if (!(options.dither && options.algorithm == FrameAlgorithm.szEnhanced)) {
+    _adjustRgba(rgba, options);
+  }
   _check(isCancelled);
+  final format = options.format == FrameFormat.monoFast
+      ? FrameFormat.monoFast
+      : options.algorithm == FrameAlgorithm.colorFast55
+      ? FrameFormat.colorFast55
+      : options.algorithm == FrameAlgorithm.colorQual
+      ? FrameFormat.colorQual
+      : options.format;
+  final algorithm = format == FrameFormat.colorFast55
+      ? FrameAlgorithm.colorFast55
+      : format == FrameFormat.colorQual
+      ? FrameAlgorithm.colorQual
+      : options.algorithm;
   Uint8List indices;
   if (options.format == FrameFormat.monoFast) {
     // MonoFast is a Flutter extension; retain its existing luminance/FS path.
@@ -310,7 +334,7 @@ Future<FrameResult> convertFrame(
       rgba,
       480,
       720,
-      algorithm: options.algorithm,
+      algorithm: algorithm,
       strength: options.ditherStrength,
       dither: options.dither,
       correctionLut: usesAe ? forFilmCorrectionLut : null,
@@ -323,7 +347,7 @@ Future<FrameResult> convertFrame(
   _check(isCancelled);
   final png = await _encodeRgba(rgba);
   _check(isCancelled);
-  final film = packFramePixels(indices, format: options.format);
+  final film = packFramePixels(indices, format: format);
   onProgress?.call(1);
-  return FrameResult(png: png, film: film, format: options.format);
+  return FrameResult(png: png, film: film, format: format);
 }

@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'frame_codec.dart';
+import 'workbench_widgets.dart';
 import 'frame_quick_page.dart';
 import 'frame_io.dart' as io;
 import 'passport_storage.dart' as storage;
@@ -41,6 +42,11 @@ const frameAlgorithmLabels = {
   FrameAlgorithm.jarvis: 'Jarvis-Judice-Ninke',
   FrameAlgorithm.gammaFloydSteinberg: 'Gamma 感知 FS（线性）',
   FrameAlgorithm.bayer: 'Bayer 4×4 有序抖动',
+  FrameAlgorithm.adaptive: '自适应',
+  FrameAlgorithm.colorFast55: 'ColorFast · 55 色',
+  FrameAlgorithm.colorQual: 'ColorQual · 46 色',
+  FrameAlgorithm.szEnhanced: 'SZ 增强',
+  FrameAlgorithm.atkinsonSzCalib: 'Atkinson SZ 校色',
 };
 
 class FrameEditor extends StatefulWidget {
@@ -184,7 +190,7 @@ class _FrameEditorState extends State<FrameEditor> {
     _generation++;
     setState(() {
       c.options = FrameOptions(
-        format: format ?? o.format,
+        format: algorithm != null ? FrameFormat.sixColor : (format ?? o.format),
         fit: fit ?? o.fit,
         quarterTurns: turns ?? o.quarterTurns,
         zoom: zoom ?? o.zoom,
@@ -194,7 +200,9 @@ class _FrameEditorState extends State<FrameEditor> {
         contrast: contrast ?? o.contrast,
         saturation: saturation ?? o.saturation,
         dither: dither ?? o.dither,
-        algorithm: algorithm ?? o.algorithm,
+        algorithm: format != null
+            ? FrameAlgorithm.atkinsonEnhanced
+            : (algorithm ?? o.algorithm),
         ditherStrength: strength ?? o.ditherStrength,
       );
       c.revision++;
@@ -290,7 +298,8 @@ class _FrameEditorState extends State<FrameEditor> {
     }
   }
 
-  Widget _section(String title, List<Widget> children) => Card(
+  Widget _section(String title, List<Widget> children) => WorkbenchPanel(
+    padding: EdgeInsets.zero,
     child: Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -325,253 +334,282 @@ class _FrameEditorState extends State<FrameEditor> {
   @override
   Widget build(BuildContext context) {
     final o = c.options;
-    final png = (o.dither || o.format == FrameFormat.monoFast)
+    final devicePreview =
+        o.dither ||
+        o.format != FrameFormat.sixColor ||
+        o.algorithm == FrameAlgorithm.colorFast55 ||
+        o.algorithm == FrameAlgorithm.colorQual;
+    final png = devicePreview
         ? (c.hasCurrentResult ? c.result!.png : null)
         : c.crop;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _section('上传与算法', [
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            children: [
-              FilledButton.icon(
-                onPressed: locked ? null : _pick,
-                icon: const Icon(Icons.add_photo_alternate_outlined),
-                label: const Text('上传图像'),
-              ),
-              const Text('支持常见图片格式，选择后自动更新预览'),
-            ],
-          ),
-          const SizedBox(height: 20),
-          DropdownButtonFormField<FrameAlgorithm>(
-            initialValue: o.algorithm,
-            decoration: const InputDecoration(labelText: '抖动算法'),
-            items: frameAlgorithmLabels.entries
-                .map(
-                  (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
-                )
-                .toList(),
-            onChanged: _sending || _exporting
-                ? null
-                : (v) => _change(algorithm: v),
-          ),
-          const SizedBox(height: 12),
-          if (o.algorithm != FrameAlgorithm.atkinsonEnhanced)
-            _slider(
-              '抖动强度',
-              o.ditherStrength,
-              0,
-              5,
-              (v) => _change(strength: v),
+    final sections = <Widget>[
+      _section('上传与算法', [
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              onPressed: locked ? null : _pick,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: const Text('上传图像'),
             ),
-          _slider('对比度', o.contrast, .5, 2, (v) => _change(contrast: v)),
-          _slider('饱和度', o.saturation, 0, 3, (v) => _change(saturation: v)),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton(
-                onPressed: _sending || _exporting
-                    ? null
-                    : () => _change(dither: !o.dither),
-                child: Text(o.dither ? '禁用抖动' : '启用抖动'),
-              ),
-              OutlinedButton(
-                onPressed: locked || c.source == null
-                    ? null
-                    : () => _change(
-                        turns: (o.quarterTurns + 1) % 4,
-                        zoom: 1,
-                        x: 0,
-                        y: 0,
-                      ),
-                child: const Text('旋转90度'),
-              ),
-              TextButton(
-                onPressed: locked
-                    ? null
-                    : () {
-                        _generation++;
-                        _previewTimer?.cancel();
-                        setState(() {
-                          c.clear();
-                          _status = '已重置';
-                        });
-                      },
-                child: const Text('重置'),
-              ),
-              TextButton(
-                onPressed: locked || c.source == null
-                    ? null
-                    : () => _change(zoom: 1, x: 0, y: 0),
-                child: const Text('重置缩放'),
-              ),
-            ],
-          ),
-          const Text('关闭抖动时可拖动、双指或滚轮缩放；开启后预览设备色彩。'),
-          ExpansionTile(
-            title: const Text('扩展选项'),
-            tilePadding: EdgeInsets.zero,
-            children: [
-              SegmentedButton<FrameFormat>(
-                segments: const [
-                  ButtonSegment(value: FrameFormat.sixColor, label: Text('六色')),
-                  ButtonSegment(
-                    value: FrameFormat.monoFast,
-                    label: Text('黑白 MonoFast'),
-                  ),
-                ],
-                selected: {o.format},
-                onSelectionChanged: locked
-                    ? null
-                    : (v) => _change(format: v.first),
-              ),
-              const SizedBox(height: 8),
-              SegmentedButton<FrameFit>(
-                segments: const [
-                  ButtonSegment(value: FrameFit.cover, label: Text('铺满')),
-                  ButtonSegment(value: FrameFit.contain, label: Text('完整显示')),
-                ],
-                selected: {o.fit},
-                onSelectionChanged: locked
-                    ? null
-                    : (v) => _change(fit: v.first),
-              ),
-              _slider('亮度', o.brightness, -1, 1, (v) => _change(brightness: v)),
-            ],
-          ),
-          const Text('待迁移：自适应、46/55 色、SZ 增强与 SZ 校色。'),
-        ]),
-        const SizedBox(height: 16),
-        _section('预览', [
-          Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: LayoutBuilder(
-                builder: (context, constraints) => Listener(
-                  onPointerSignal: (event) {
-                    if (event is PointerScrollEvent &&
-                        !o.dither &&
-                        !_sending &&
-                        !_exporting &&
-                        c.source != null) {
-                      _change(
-                        zoom: (o.zoom * (event.scrollDelta.dy > 0 ? .9 : 1.1))
-                            .clamp(.05, 10),
-                      );
-                    }
-                  },
-                  child: GestureDetector(
-                    onScaleStart:
-                        o.dither || _sending || _exporting || c.source == null
-                        ? null
-                        : (d) {
-                            _gestureZoom = o.zoom;
-                            _gesturePan = Offset(o.panX, o.panY);
-                            _gestureStart = d.localFocalPoint;
-                          },
-                    onScaleUpdate:
-                        o.dither || _sending || _exporting || c.source == null
-                        ? null
-                        : (d) {
-                            final delta =
-                                (d.localFocalPoint - _gestureStart) *
-                                (480 / constraints.maxWidth);
-                            _change(
-                              zoom: (_gestureZoom * d.scale).clamp(.05, 10),
-                              x: _gesturePan.dx + delta.dx,
-                              y: _gesturePan.dy + delta.dy,
-                            );
-                          },
-                    child: AspectRatio(
-                      aspectRatio: 2 / 3,
-                      child: ColoredBox(
-                        color: Colors.white,
-                        child: png == null
-                            ? const Center(
-                                child: Icon(
-                                  Icons.image_outlined,
-                                  color: Colors.black38,
-                                ),
-                              )
-                            : Image.memory(
-                                png,
-                                fit: BoxFit.contain,
-                                gaplessPlayback: true,
-                                errorBuilder: (_, e, s) =>
-                                    const Center(child: Text('预览不可用')),
+            const Text('支持常见图片格式，选择后自动更新预览'),
+          ],
+        ),
+        const SizedBox(height: 20),
+        DropdownButtonFormField<FrameAlgorithm>(
+          key: ValueKey(o.algorithm),
+          initialValue: o.algorithm,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: '抖动算法'),
+          items: frameAlgorithmLabels.entries
+              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+              .toList(),
+          onChanged: _sending || _exporting
+              ? null
+              : (v) => _change(algorithm: v),
+        ),
+        const SizedBox(height: 12),
+        if ([
+          FrameAlgorithm.floydSteinberg,
+          FrameAlgorithm.atkinson,
+          FrameAlgorithm.stucki,
+          FrameAlgorithm.jarvis,
+          FrameAlgorithm.gammaFloydSteinberg,
+          FrameAlgorithm.bayer,
+        ].contains(o.algorithm))
+          _slider('抖动强度', o.ditherStrength, 0, 5, (v) => _change(strength: v)),
+        _slider('对比度', o.contrast, .5, 2, (v) => _change(contrast: v)),
+        _slider('饱和度', o.saturation, 0, 3, (v) => _change(saturation: v)),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton(
+              onPressed: _sending || _exporting
+                  ? null
+                  : () => _change(dither: !o.dither),
+              child: Text(o.dither ? '禁用抖动' : '启用抖动'),
+            ),
+            OutlinedButton(
+              onPressed: locked || c.source == null
+                  ? null
+                  : () => _change(
+                      turns: (o.quarterTurns + 1) % 4,
+                      zoom: 1,
+                      x: 0,
+                      y: 0,
+                    ),
+              child: const Text('旋转90度'),
+            ),
+            TextButton(
+              onPressed: locked
+                  ? null
+                  : () {
+                      _generation++;
+                      _previewTimer?.cancel();
+                      setState(() {
+                        c.clear();
+                        _status = '已重置';
+                      });
+                    },
+              child: const Text('重置'),
+            ),
+            TextButton(
+              onPressed: locked || c.source == null
+                  ? null
+                  : () => _change(zoom: 1, x: 0, y: 0),
+              child: const Text('重置缩放'),
+            ),
+          ],
+        ),
+        const Text('关闭抖动时可拖动、双指或滚轮缩放；开启后预览设备色彩。'),
+        ExpansionTile(
+          title: const Text('扩展选项'),
+          tilePadding: EdgeInsets.zero,
+          children: [
+            SegmentedButton<FrameFormat>(
+              segments: const [
+                ButtonSegment(value: FrameFormat.sixColor, label: Text('六色')),
+                ButtonSegment(
+                  value: FrameFormat.monoFast,
+                  label: Text('黑白 MonoFast'),
+                ),
+              ],
+              selected: {o.format},
+              onSelectionChanged: locked
+                  ? null
+                  : (v) => _change(format: v.first),
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<FrameFit>(
+              segments: const [
+                ButtonSegment(value: FrameFit.cover, label: Text('铺满')),
+                ButtonSegment(value: FrameFit.contain, label: Text('完整显示')),
+              ],
+              selected: {o.fit},
+              onSelectionChanged: locked ? null : (v) => _change(fit: v.first),
+            ),
+            _slider('亮度', o.brightness, -1, 1, (v) => _change(brightness: v)),
+          ],
+        ),
+        if (o.algorithm == FrameAlgorithm.szEnhanced)
+          const Text('SZ 增强使用原图色彩进行校正，启用抖动时不叠加亮度、对比度及饱和度。'),
+        if (o.algorithm == FrameAlgorithm.colorFast55 ||
+            o.algorithm == FrameAlgorithm.colorQual)
+          const Text('46 / 55 色使用 Ark 的 Film 2.0 索引色格式；关闭抖动仍保留对应色板。'),
+      ]),
+      const SizedBox(height: 16),
+      _section('预览', [
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: LayoutBuilder(
+              builder: (context, constraints) => Listener(
+                onPointerSignal: (event) {
+                  if (event is PointerScrollEvent &&
+                      !o.dither &&
+                      !_sending &&
+                      !_exporting &&
+                      c.source != null) {
+                    _change(
+                      zoom: (o.zoom * (event.scrollDelta.dy > 0 ? .9 : 1.1))
+                          .clamp(.05, 10),
+                    );
+                  }
+                },
+                child: GestureDetector(
+                  onScaleStart:
+                      o.dither || _sending || _exporting || c.source == null
+                      ? null
+                      : (d) {
+                          _gestureZoom = o.zoom;
+                          _gesturePan = Offset(o.panX, o.panY);
+                          _gestureStart = d.localFocalPoint;
+                        },
+                  onScaleUpdate:
+                      o.dither || _sending || _exporting || c.source == null
+                      ? null
+                      : (d) {
+                          final delta =
+                              (d.localFocalPoint - _gestureStart) *
+                              (480 / constraints.maxWidth);
+                          _change(
+                            zoom: (_gestureZoom * d.scale).clamp(.05, 10),
+                            x: _gesturePan.dx + delta.dx,
+                            y: _gesturePan.dy + delta.dy,
+                          );
+                        },
+                  child: AspectRatio(
+                    aspectRatio: 2 / 3,
+                    child: ColoredBox(
+                      color: Colors.white,
+                      child: png == null
+                          ? const Center(
+                              child: Icon(
+                                Icons.image_outlined,
+                                color: Colors.black38,
                               ),
-                      ),
+                            )
+                          : Image.memory(
+                              png,
+                              fit: BoxFit.contain,
+                              gaplessPlayback: true,
+                              errorBuilder: (_, e, s) =>
+                                  const Center(child: Text('预览不可用')),
+                            ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            o.dither || o.format == FrameFormat.monoFast
-                ? '设备色彩预览'
-                : '原色构图预览 · 下载和发送会转换为设备色彩',
+        ),
+        const SizedBox(height: 8),
+        Text(devicePreview ? '设备色彩预览' : '原色构图预览 · 下载和发送会转换为设备色彩'),
+      ]),
+      const SizedBox(height: 16),
+      _section('输出', [
+        TextField(
+          controller: c.fileName,
+          enabled: !locked,
+          decoration: const InputDecoration(labelText: '文件名'),
+        ),
+        const SizedBox(height: 12),
+        if (_working)
+          LinearProgressIndicator(value: _progress > 0 ? _progress : null),
+        if (_status.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(_status),
           ),
-        ]),
-        const SizedBox(height: 16),
-        _section('输出', [
-          TextField(
-            controller: c.fileName,
-            enabled: !locked,
-            decoration: const InputDecoration(labelText: '文件名'),
-          ),
-          const SizedBox(height: 12),
-          if (_working)
-            LinearProgressIndicator(value: _progress > 0 ? _progress : null),
-          if (_status.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(_status),
-            ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (io.canDownloadFrame)
-                OutlinedButton(
-                  onPressed: !locked && c.hasCurrentResult
-                      ? () => _export('download')
-                      : null,
-                  child: const Text('下载'),
-                ),
-              FilledButton(
-                onPressed:
-                    !locked &&
-                        c.hasCurrentResult &&
-                        widget.canSend &&
-                        widget.onSendFilm != null
-                    ? () => _export('send')
-                    : null,
-                child: const Text('发送到设备'),
-              ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (io.canDownloadFrame)
               OutlinedButton(
-                onPressed: !locked && c.hasCurrentResult && widget.canImportFilm
-                    ? () => _export('import')
+                onPressed: !locked && c.hasCurrentResult
+                    ? () => _export('download')
                     : null,
-                child: const Text('导入直传区'),
+                child: const Text('下载'),
               ),
-              if (_working)
-                TextButton(onPressed: _cancel, child: const Text('取消生成')),
-              if (_sending && widget.onCancelSend != null)
-                TextButton(
-                  onPressed: widget.onCancelSend,
-                  child: const Text('取消发送'),
+            FilledButton(
+              onPressed:
+                  !locked &&
+                      c.hasCurrentResult &&
+                      widget.canSend &&
+                      widget.onSendFilm != null
+                  ? () => _export('send')
+                  : null,
+              child: const Text('发送到设备'),
+            ),
+            OutlinedButton(
+              onPressed: !locked && c.hasCurrentResult && widget.canImportFilm
+                  ? () => _export('import')
+                  : null,
+              child: const Text('导入直传区'),
+            ),
+            if (_working)
+              TextButton(onPressed: _cancel, child: const Text('取消生成')),
+            if (_sending && widget.onCancelSend != null)
+              TextButton(
+                onPressed: widget.onCancelSend,
+                child: const Text('取消发送'),
+              ),
+            if (!_working && c.source != null && !c.hasCurrentResult)
+              TextButton(onPressed: _generate, child: const Text('重新生成')),
+          ],
+        ),
+      ]),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Original ForFilm layout: parameters and output on the left, preview on the right.
+        if (constraints.maxWidth >= 860) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    sections[0],
+                    const SizedBox(height: 20),
+                    sections[4],
+                  ],
                 ),
-              if (!_working && c.source != null && !c.hasCurrentResult)
-                TextButton(onPressed: _generate, child: const Text('重新生成')),
+              ),
+              const SizedBox(width: 24),
+              SizedBox(width: 360, child: sections[2]),
             ],
-          ),
-        ]),
-      ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: sections,
+        );
+      },
     );
   }
 }

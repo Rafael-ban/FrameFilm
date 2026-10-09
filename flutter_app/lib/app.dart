@@ -4,10 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
 import 'device_gateway.dart';
+import 'app_update.dart';
+import 'about_panel.dart';
 import 'preview_device_gateway.dart';
 import 'github_release_service.dart';
 import 'passport_editor.dart';
 import 'frame_editor.dart';
+import 'animation_workshop.dart';
+import 'device_files.dart';
+import 'forfilm_theme.dart';
+import 'workbench_widgets.dart';
+import 'frame_io.dart' as frame_io;
 import 'frame_quick_page.dart';
 import 'frame_media.dart' as frame_media;
 
@@ -23,6 +30,7 @@ class FrameFilmApp extends StatefulWidget {
 
 class _FrameFilmAppState extends State<FrameFilmApp> {
   late DeviceController device;
+  late AppUpdateController appUpdate;
   final releases = GitHubReleaseService();
   GitHubFirmwareRelease? onlineFirmware;
   bool checkingReleases = false;
@@ -52,12 +60,14 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
 
   FilmTheme selectedTheme = FilmTheme.automatic;
   int page = 0;
+  final scrollControllers = List.generate(6, (_) => ScrollController());
   bool loading = false;
   bool wasConnected = false;
   Timer? loadingTimer;
   final passportEditor = PassportEditorController();
   final frameEditor = FrameEditorController();
   final frameQuick = FrameQuickController();
+  final animation = AnimationWorkshopController();
   int frameSendEpoch = 0;
 
   final deviceSuffix = TextEditingController();
@@ -82,7 +92,11 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   void initState() {
     super.initState();
     frameQuick.addListener(onQuickChanged);
+    animation.addListener(onQuickChanged);
     device = DeviceController(widget.gateway ?? PlatformDeviceGateway());
+    appUpdate = AppUpdateController(
+      preview: device.gateway is PreviewDeviceGateway,
+    );
     device.addListener(onDeviceChanged);
   }
 
@@ -91,7 +105,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   }
 
   void navigate(int value) {
-    if (!frameQuick.busy) setState(() => page = value);
+    if (!frameQuick.busy && !animation.busy) setState(() => page = value);
   }
 
   void onDeviceChanged() {
@@ -136,6 +150,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   @override
   void dispose() {
     releases.dispose();
+    appUpdate.dispose();
     loadingTimer?.cancel();
     device.removeListener(onDeviceChanged);
     device.dispose();
@@ -146,6 +161,12 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     frameQuick.removeListener(onQuickChanged);
     frameQuick.dispose();
     frameEditor.dispose();
+    animation.removeListener(onQuickChanged);
+    animation.clear();
+    animation.dispose();
+    for (final controller in scrollControllers) {
+      controller.dispose();
+    }
     deviceSuffix.dispose();
     wakeInterval.dispose();
     super.dispose();
@@ -153,89 +174,16 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ark
-        ? const ColorScheme.dark(
-            primary: Color(0xff83afc1),
-            onPrimary: Color(0xff151719),
-            secondary: Color(0xff83afc1),
-            onSecondary: Color(0xff151719),
-            tertiary: Color(0xff83afc1),
-            primaryContainer: Color(0xff41484d),
-            onPrimaryContainer: Color(0xfff0f1f2),
-            secondaryContainer: Color(0xff41484d),
-            onSecondaryContainer: Color(0xfff0f1f2),
-            surface: Color(0xff222629),
-            onSurface: Color(0xfff0f1f2),
-            onSurfaceVariant: Color(0xfff0f1f2),
-            outline: Color(0xff41484d),
-            surfaceContainerHighest: Color(0xff222629),
-          )
-        : ColorScheme.fromSeed(
-            seedColor: const Color(0xff577baa),
-            surface: const Color(0xfffffcf5),
-          );
-    final controlShape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(ark ? 0 : 20),
-    );
     return MaterialApp(
       title: 'FrameFilm',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: scheme,
-        scaffoldBackgroundColor: ark
-            ? const Color(0xff151719)
-            : const Color(0xfff4f1e9),
-        useMaterial3: true,
-        cardTheme: CardThemeData(
-          elevation: 0,
-          margin: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(ark ? 0 : 24),
-          ),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(shape: controlShape),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(shape: controlShape),
-        ),
-        segmentedButtonTheme: SegmentedButtonThemeData(
-          style: ButtonStyle(shape: WidgetStatePropertyAll(controlShape)),
-        ),
-        chipTheme: ChipThemeData(shape: controlShape),
-        navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: scheme.surface,
-          indicatorShape: controlShape,
-          indicatorColor: scheme.secondaryContainer,
-        ),
-        navigationRailTheme: NavigationRailThemeData(
-          backgroundColor: scheme.surface,
-          indicatorShape: controlShape,
-          indicatorColor: scheme.secondaryContainer,
-        ),
-        appBarTheme: AppBarTheme(
-          backgroundColor: scheme.surface,
-          foregroundColor: scheme.onSurface,
-          surfaceTintColor: Colors.transparent,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(ark ? 0 : 12),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(ark ? 0 : 12),
-            borderSide: BorderSide(color: scheme.outline),
-          ),
-          fillColor: scheme.surface,
-          filled: true,
-        ),
-      ),
+      theme: buildForFilmTheme(ark),
       home: LayoutBuilder(
         builder: (context, constraints) {
           final wide = constraints.maxWidth >= 760;
           return Scaffold(
             appBar: AppBar(
-              title: Text(ark ? 'RHODES ISLAND / PRTS' : 'FrameFilm'),
+              title: WorkbenchBrand(ark: ark),
               actions: [
                 Padding(
                   padding: const EdgeInsets.only(right: 16),
@@ -246,7 +194,11 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                           : Icons.bluetooth_disabled,
                       size: 16,
                     ),
-                    label: Text(device.snapshot.connected ? '已连接' : '离线'),
+                    label: Text(
+                      device.snapshot.connected
+                          ? '${device.snapshot.battery == null ? '' : '${device.snapshot.battery}% · '}已连接'
+                          : '离线',
+                    ),
                   ),
                 ),
               ],
@@ -262,51 +214,47 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                       Row(
                         children: [
                           if (wide)
-                            NavigationRail(
-                              selectedIndex: page,
-                              onDestinationSelected: navigate,
-                              labelType: NavigationRailLabelType.all,
-                              destinations: destinations
-                                  .map(
-                                    (item) => NavigationRailDestination(
-                                      icon: Icon(item.$2),
-                                      label: Text(item.$1),
-                                    ),
-                                  )
-                                  .toList(),
+                            WorkbenchNavigation(
+                              items: destinations,
+                              selected: page,
+                              onSelected: navigate,
                             ),
                           Expanded(
                             child: Align(
                               alignment: Alignment.topCenter,
                               child: ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 980,
+                                constraints: BoxConstraints(
+                                  maxWidth: page == 0 ? 720 : 1240,
                                 ),
-                                child: ListView(
-                                  key: const Key('workbench-content'),
-                                  padding: EdgeInsets.all(wide ? 32 : 20),
-                                  children: [
-                                    Text(
-                                      ark
-                                          ? 'TERMINAL / 0${page + 1}'
-                                          : '你的电子纸工作台',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelMedium,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      destinations[page].$1,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .headlineLarge
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                    ),
-                                    const SizedBox(height: 24),
-                                    ...pageContent(context),
-                                  ],
+                                child: KeyedSubtree(
+                                  key: ValueKey(page),
+                                  child: ListView(
+                                    key: const Key('workbench-content'),
+                                    controller: scrollControllers[page],
+                                    padding: EdgeInsets.all(wide ? 32 : 20),
+                                    children: [
+                                      Text(
+                                        ark
+                                            ? 'TERMINAL / 0${page + 1}'
+                                            : '你的电子纸工作台',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelMedium,
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        destinations[page].$1,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .headlineLarge
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 24),
+                                      ...pageContent(context),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -346,13 +294,15 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     device.removeListener(onDeviceChanged);
     device.dispose();
     device = DeviceController(PreviewDeviceGateway());
+    appUpdate.dispose();
+    appUpdate = AppUpdateController(preview: true);
     device.addListener(onDeviceChanged);
     setState(() {});
   }
 
   Widget previewControls(BuildContext context, PreviewDeviceGateway preview) =>
       Material(
-        color: Theme.of(context).colorScheme.secondaryContainer,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: SafeArea(
           bottom: false,
           child: Padding(
@@ -409,21 +359,50 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
         ),
       );
 
-  Widget panel(BuildContext context, {required Widget child}) => Card(
-    child: Padding(padding: const EdgeInsets.all(24), child: child),
-  );
+  Widget panel(BuildContext context, {required Widget child}) =>
+      WorkbenchPanel(child: child);
 
   List<Widget> pageContent(BuildContext context) => switch (page) {
     0 => connectionPage(context),
     1 => framePage(context),
     2 => filmPage(context),
-    3 => stagePage(
-      context,
-      Icons.movie_filter_outlined,
-      '画面，也可以流动',
-      '动画编辑与多帧传输尚未接入。',
-      ['后续接入帧序列与播放参数', '后续接入设备存储与播放控制'],
-    ),
+    3 => [
+      panel(
+        context,
+        child: AnimationWorkshop(
+          controller: animation,
+          pickImages: frame_media.pickFramePhotos,
+          captureImage: () => frame_media.captureFramePhoto(context),
+          sendFilm: sendFrame,
+          cancelSend: cancelFrameSend,
+          saveFilm: frame_io.canDownloadFrame ? frame_io.downloadFrame : null,
+          connected: device.snapshot.connected && device.canImportFilm,
+          disabledReason: !device.snapshot.connected
+              ? '连接 Ark 后可发送动画'
+              : device.canImportFilm
+              ? null
+              : '请等待当前设备操作结束',
+          playOnDevice:
+              ({
+                required intervalMs,
+                required loopSeconds,
+                required playMode,
+              }) async {
+                await device.command('playAnimation', {
+                  'intervalMs': intervalMs,
+                  'loopSeconds': loopSeconds,
+                  'playMode': playMode,
+                });
+                if (device.errorMessage != null) {
+                  throw StateError(device.errorMessage!);
+                }
+              },
+        ),
+      ),
+      if (device.snapshot.transfer.kind == 'film' &&
+          device.snapshot.transfer.phase != 'idle')
+        transferStatus(context, kind: 'film'),
+    ],
     4 => passportPage(context),
     _ => settingsPage(context),
   };
@@ -632,6 +611,8 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
             ? '演示中的扫描、文件选择、传输及升级均为模拟。Film 页体验直传，设置页体验 OTA。'
             : '原生连接与文件传输\n扫描、连接和读取由 Android 蓝牙服务提供。film 文件直传请进入 Film 页。',
       ),
+      const SizedBox(height: 20),
+      connectionInfoPanel(context),
     ];
   }
 
@@ -1285,29 +1266,51 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     );
   }
 
-  List<Widget> settingsPage(BuildContext context) => [
-    panel(
-      context,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('界面主题', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 8),
-          const Text('自动模式在连接 Ark 后启用明日方舟主题；断连回到 ForFilm。选择仅在本次应用会话内生效。'),
-          const SizedBox(height: 20),
-          SegmentedButton<FilmTheme>(
-            segments: const [
-              ButtonSegment(value: FilmTheme.automatic, label: Text('自动')),
-              ButtonSegment(value: FilmTheme.forFilm, label: Text('原 ForFilm')),
-              ButtonSegment(value: FilmTheme.arknights, label: Text('明日方舟预览')),
-            ],
-            selected: {selectedTheme},
-            onSelectionChanged: (value) =>
-                setState(() => selectedTheme = value.first),
-          ),
-        ],
-      ),
+  Widget themePanel(BuildContext context) => panel(
+    context,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('界面主题', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        const Text('自动模式在连接 Ark 后启用明日方舟主题；断连回到 ForFilm。选择仅在本次应用会话内生效。'),
+        const SizedBox(height: 20),
+        SegmentedButton<FilmTheme>(
+          segments: const [
+            ButtonSegment(value: FilmTheme.automatic, label: Text('自动')),
+            ButtonSegment(value: FilmTheme.forFilm, label: Text('原 ForFilm')),
+            ButtonSegment(value: FilmTheme.arknights, label: Text('明日方舟')),
+          ],
+          selected: {selectedTheme},
+          onSelectionChanged: (value) =>
+              setState(() => selectedTheme = value.first),
+        ),
+      ],
     ),
+  );
+
+  Widget connectionInfoPanel(BuildContext context) => panel(
+    context,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('连接信息', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 16),
+        Text(
+          device.snapshot.connected ? device.snapshot.name ?? '已连接设备' : '未连接设备',
+        ),
+        const SizedBox(height: 8),
+        Text(
+          device.gateway.supported
+              ? device.snapshot.message
+              : '当前平台无蓝牙连接能力，仅供界面预览',
+        ),
+      ],
+    ),
+  );
+
+  List<Widget> settingsPage(BuildContext context) => [
+    panel(context, child: DeviceFilesPage(controller: device)),
     const SizedBox(height: 20),
     deviceSettingsPanel(context),
     const SizedBox(height: 20),
@@ -1317,86 +1320,15 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     const SizedBox(height: 20),
     transferStatus(context, kind: 'firmware'),
     const SizedBox(height: 20),
-    panel(
-      context,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('连接信息', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 16),
-          Text(
-            device.snapshot.connected
-                ? device.snapshot.name ?? '已连接设备'
-                : '未连接设备',
-          ),
-          const SizedBox(height: 8),
-          Text(
-            device.gateway.supported
-                ? device.snapshot.message
-                : '当前平台无蓝牙连接能力，仅供界面预览',
-          ),
-          const Divider(height: 32),
-          const Text(
-            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息与休眠设置、改名和时间同步、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、设备遥控、通行证读取/发送与本地草稿、Frame 拾光/定影/一言/批量入口与 Film 图片处理。\n\n后续阶段\n按原网页继续迁移高级算法、动画工坊、设备文件管理及统一 UI。',
-          ),
-        ],
-      ),
-    ),
+    panel(context, child: AppUpdatePanel(controller: appUpdate)),
+    const SizedBox(height: 20),
+    const AboutPanel(),
+    const SizedBox(height: 20),
+    themePanel(context),
   ];
 
-  Widget connectionTransition() => ColoredBox(
+  Widget connectionTransition() => PrtsConnectionIntro(
     key: const Key('connection-transition'),
-    color: const Color(0xff151719),
-    child: Center(
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: 1),
-        duration: const Duration(milliseconds: 700),
-        builder: (context, value, child) => Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, 16 * (1 - value)),
-            child: child,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Image.asset(
-                'assets/rhodes_logo.png',
-                width: 100,
-                height: 100,
-                errorBuilder: (_, _, _) => const Icon(
-                  Icons.change_history,
-                  color: Color(0xfff0f1f2),
-                  size: 80,
-                ),
-              ),
-              const SizedBox(height: 28),
-              const Text(
-                'PRTS / TERMINAL ONLINE',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Color(0xfff0f1f2),
-                  letterSpacing: 3,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                device.snapshot.name ?? 'FrameFilm',
-                style: const TextStyle(color: Color(0xff83afc1)),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                '连接已建立 · 正在进入工作台',
-                style: TextStyle(color: Color(0xff83afc1)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
+    deviceName: device.snapshot.name ?? 'FrameFilm Ark',
   );
 }

@@ -1,0 +1,62 @@
+// JS typed-array stores coerce numbers; Float64Array also accepts integer values.
+class _NumericArray extends ListBase<dynamic> {
+  _NumericArray(this.kind, dynamic lengthOrData)
+    : values = lengthOrData is num ? List<num>.filled(lengthOrData.toInt(), 0)
+      : List<num>.from(lengthOrData as Iterable);
+  final String kind;
+  final List<num> values;
+  @override int get length => values.length;
+  @override set length(int n) => values.length=n;
+  @override dynamic operator [](int i) => values[i];
+  @override void operator []=(int i, dynamic v) {
+    final n=v as num;
+    if(kind=='Uint8ClampedArray') {
+      final f=n.toDouble().clamp(0,255), low=f.floor(), part=f-low;
+      values[i]=part>.5 || (part==.5 && low.isOdd) ? low+1 : low;
+    } else if(kind=='Uint8Array') { values[i]=n.toInt() & 255; }
+    else { values[i]=n.toDouble(); }
+  }
+}
+dynamic _array(String kind,dynamic size) => _NumericArray(kind,size);
+bool _truth(dynamic value) => value != null && value != false && value != 0;
+dynamic _image(dynamic width,dynamic height) => <String,dynamic>{'width':width,'height':height,'data':_NumericArray('Uint8ClampedArray',width*height*4)};
+dynamic _set(dynamic target,dynamic source) {for(var i=0;i<source.length;i++){target[i]=source[i];}return target;}
+dynamic _push(dynamic target,dynamic value) {target.add(value);return target.length;}
+dynamic _mathpow(dynamic x,dynamic p)=>math.pow(x as num,p as num);
+dynamic _mathmin(dynamic x,dynamic y)=>math.min(x as num,y as num);
+dynamic _mathmax(dynamic x,dynamic y)=>math.max(x as num,y as num);
+dynamic _mathsqrt(dynamic x)=>math.sqrt(x as num);
+dynamic _mathcbrt(dynamic x)=>(x as num)<0?-math.pow(-x,1/3):math.pow(x,1/3);
+dynamic _mathabs(dynamic x)=>(x as num).abs();
+dynamic _mathfloor(dynamic x)=>(x as num).floor();
+dynamic _mathceil(dynamic x)=>(x as num).ceil();
+dynamic _mathround(dynamic x)=>((x as num)+.5).floor();
+dynamic _mathexp(dynamic x)=>math.exp(x as num);
+dynamic _mathhypot(dynamic x,dynamic y)=>math.sqrt(x*x+y*y);
+dynamic _mathatan2(dynamic y,dynamic x)=>math.atan2(y as num,x as num);
+dynamic _mathcos(dynamic x)=>math.cos(x as num);
+dynamic _mathsin(dynamic x)=>math.sin(x as num);
+
+/// Frozen YRD0370 V7.5 seed, structure refinement and sparkle/chroma cleanup.
+Future<Uint8List> quantizeSz(Uint8List rgba,int width,int height,{
+  void Function()? checkCancelled,void Function(double)? onProgress,
+}) async {
+  checkCancelled?.call();
+  final engine=_SzEngine(checkCancelled,onProgress);
+  final input=<String,dynamic>{'width':width,'height':height,'data':rgba};
+  final output=await engine.szEnhancedDither(input);
+  final data=output['data'];
+  const display=[[0,0,0],[255,255,255],[255,255,0],[255,0,0],[0,255,0],[0,0,255]];
+  const toFilm=[0,1,2,3,5,4];
+  final indices=Uint8List(width*height);
+  for(var i=0;i<indices.length;i++) {
+    final p=i*4;
+    final index=display.indexWhere((c)=>c[0]==data[p] && c[1]==data[p+1] && c[2]==data[p+2]);
+    indices[i]=toFilm[index];
+    rgba[p]=data[p];rgba[p+1]=data[p+1];rgba[p+2]=index==4?20:data[p+2];
+    if(index==4){rgba[p]=41;rgba[p+1]=204;}
+    rgba[p+3]=255;
+  }
+  checkCancelled?.call();onProgress?.call(.9);
+  return indices;
+}

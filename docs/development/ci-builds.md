@@ -14,7 +14,9 @@
 
 仓库忽略 Gradle wrapper 脚本和 jar。CI 使用同版本 Flutter 在临时目录生成 Android 项目，仅复制 wrapper 脚本/jar，不覆盖仓库中的 Gradle 配置和业务代码。
 
-产物 `ark-flutter-release-apk` 包含 `app-release.apk`，使用 Release/AOT 编译并暂时沿用 debug 签名。签名可能与本地或其他 CI 运行不同，正式可更新包后续再配置稳定发行签名。上传前检查 `libapp.so` 与 `libflutter.so` 存在且没有 debug 的 `kernel_blob.bin`。日志位于 `ark-flutter-build-logs`。
+产物 `ark-flutter-release-apk` 包含构建原件 `app-release.apk`，以及用于 GitHub Release 的精确命名附件 `framefilm-ark-flutter.apk`、`framefilm-ark-flutter.json`。JSON 记录包名、versionName、versionCode、最低 Android 版本、APK 大小和 SHA-256；上传前检查 `libapp.so` 与 `libflutter.so` 存在且没有 debug 的 `kernel_blob.bin`。日志位于 `ark-flutter-build-logs`。
+
+Release/AOT APK 暂用 Android debug 签名。普通构建未配置密钥时可使用 CI 临时 debug keystore，但手动勾选发布前，必须把现有 App 对应 debug keystore 的 Base64 设为仓库 Secret `ARK_DEBUG_KEYSTORE_BASE64`；缺少此 Secret 时 Android job 明确失败，不会发布签名不兼容的更新包。此密钥仅作为当前临时签名的稳定来源，正式发行密钥仍待后续配置；已有其他签名或 `.dev` 包不能直接覆盖安装。
 
 ## Ark 固件
 
@@ -37,15 +39,15 @@
 
 ## 可选 GitHub Release 固件发布
 
-`workflow_dispatch` 新增 `publish_release`，默认 false。只有手动选择 main 并勾选此项，且该次 firmware job 成功，才运行 release job；普通 push/PR 继续只构建并上传 Artifacts。仅 release job 获得 contents:write。手动任务不启用运行中自动取消。
+`workflow_dispatch` 提供 `publish_release`，默认 false。只有手动选择 main 并勾选此项，且该次 firmware 与 Android job 均成功，才运行 release job；普通 push/PR 继续只构建并上传 Artifacts。仅 release job 获得 contents:write。手动任务不启用运行中自动取消。
 
-- 发布附件只有原始 `frame_film_ark.bin`，不上传合并串口镜像作为在线升级包；发布不依赖 Android job，APK 仍从 Actions Artifacts 获取。
+- 发布附件包含原始 `frame_film_ark.bin`、`framefilm-ark-flutter.apk` 和 `framefilm-ark-flutter.json`，不上传合并串口镜像作为在线升级包；release job 同时依赖 firmware 和 Android job 成功。
 - 发布 tag 为 `ark-build-运行号-尝试号`，标题按构建编号显示，target 指向本次源码 SHA；重跑使用新尝试号，不覆盖旧发布附件。
 - Release notes 记录源码提交和完整文件 SHA256。保留仓库原有 Latest 标记，客户端从最近20个正式发布中按 published_at 选含精确 Ark 资产的最新候选。
 - `3.2.5` 不参与发布选择或升级判断。文件摘要用于下载完整性，实际 ELF SHA256 用于同构建跳过及重启后确认。
 - 客户端无登录查询公开 Releases；只下载后校验导入，不自动刷机。若 GitHub 资产 digest 存在则同时核对；未提供时仍检查应用镜像自身完整性、ESP32-S3和Ark项目身份。
 
-本次仅本地修改并检查 YAML 与发布开关，未推送、未触发远端 CI、未发布 Release。2026-10-08 公开 API 实测 HTTP 200，列表为空，因此目前线上暂无可下载固件；发布能力不能当作已远端验证。
+2026-10-09 本轮 App 更新附件与固定临时 debug 签名要求仅完成本地配置；未推送、未触发本轮远端 CI、未发布 Release，也未编译本轮新增的 Android 原生更新代码。2026-10-08 公开 API 实测 HTTP 200，列表为空；这项历史查询不代表当前线上发布状态。发布与覆盖安装能力尚待远端及设备验证。
 
 参考：[GitHub Releases API](https://docs.github.com/en/rest/releases/releases)、[gh release create](https://cli.github.com/manual/gh_release_create)。
 

@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import java.io.File
@@ -32,6 +33,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private val methods = MethodChannel(messenger, "org.framefilm.ark/methods")
     private val events = EventChannel(messenger, "org.framefilm.ark/events")
     private var sink: EventChannel.EventSink? = null
+    private val appUpdates by lazy { AppUpdateManager(activity) { emit() } }
     private var closed = false
     private val worker = Executors.newSingleThreadExecutor()
     private val cache = File(activity.cacheDir, "flutter-film").apply {
@@ -80,6 +82,12 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         var response: ByteArray? = null
         var timeout: Runnable? = null
     }
+    private var fileListing = false
+    private val deviceFiles = linkedMapOf<Int, String>()
+    private var fileDirectory = "current"
+    private var filesLoaded = false
+    private var currentFileId: Int? = null
+    private var filesMessage = "刷新设备当前目录"
     private var pending: Read? = null
     private class PassportJob(val result: MethodChannel.Result, val expected: String? = null) {
         val bytes = java.io.ByteArrayOutputStream()
@@ -97,6 +105,8 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private var passportMessage = ""
     private var avatarResult: MethodChannel.Result? = null
     private var frameResult: MethodChannel.Result? = null
+    private var saveFilmResult: MethodChannel.Result? = null
+    private var saveFilmBytes: ByteArray? = null
     private var frameCameraUri: Uri? = null
     private val frameCameraFile = File(activity.cacheDir, "ark-camera/photo.jpg")
     private val drafts get() = activity.getSharedPreferences("ark-passport", Activity.MODE_PRIVATE)
@@ -135,6 +145,15 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
             if (becameReady && !session.transferActive) beginRefresh(null)
         }
         override fun onPacket(packet: ByteArray) {
+            if (fileListing && packet.size >= 6 && (packet[1].toInt() and 255) == 0x06) {
+                val length = packet[2].toInt() and 255
+                val nameLength = packet[4].toInt() and 255
+                if (packet.size == length + 4 && nameLength > 0 && nameLength + 2 == length) {
+                    val id = packet[3].toInt() and 255
+                    deviceFiles[id] = packet.copyOfRange(5, 5 + nameLength).toString(Charsets.UTF_8).trimEnd('\u0000')
+                }
+                return
+            }
             val read = pending ?: return
             if (closed || !connected || packet.size < 4) return
             val size = packet[2].toInt() and 255
@@ -150,6 +169,10 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
 
     private fun snapshot(): Map<String, Any?> = mapOf(
+        "appUpdate" to appUpdates.snapshot(),
+        "files" to mapOf("loaded" to filesLoaded, "directory" to fileDirectory,
+            "currentId" to currentFileId, "message" to filesMessage,
+            "entries" to deviceFiles.map { mapOf("id" to it.key, "name" to it.value) }),
         "connected" to connected, "message" to message, "devices" to devices,
         "name" to name, "battery" to battery, "width" to width, "height" to height,
         "autoSleep" to autoSleep, "timedWake" to timedWake, "wakeMinutes" to wakeMinutes,
@@ -181,15 +204,46 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         if (closed) { result.error("closed", "蓝牙会话已关闭", null); return }
         try {
+            when (call.method) {
+                "openExternalLink" -> {
+                    val uri = Uri.parse(requireNotNull(call.argument<String>("url")) { "缺少链接地址" })
+                    require(uri.scheme.equals("https", true) && !uri.host.isNullOrBlank()) { "仅支持 HTTPS 链接" }
+                    try {
+                        activity.startActivity(Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE))
+                        result.success(null)
+                    } catch (error: android.content.ActivityNotFoundException) {
+                        result.error("no_browser", "没有可用于打开此链接的浏览器", null)
+                    }
+                    return
+                }
+                "getAppInfo", "getAppUpdateInfo" -> { result.success(appUpdates.appInfo()); return }
+                "getAppUpdateState" -> { result.success(appUpdates.snapshot()); return }
+                "downloadAppUpdate" -> { appUpdates.download(call, result); return }
+                "cancelAppUpdate" -> { appUpdates.cancel(); result.success(appUpdates.snapshot()); return }
+                "installAppUpdate" -> { appUpdates.install(result); return }
+            }
             if (call.method in setOf("scan", "connect", "refresh") && session.transferActive) {
                 result.error("busy", "直传期间请等待传输结束", null)
                 return
             }
-            if (refreshing && call.method !in setOf("snapshot", "refresh", "disconnect", "cancelTransfer", "cancelFirmwareDownload", "cancelPassport", "loadPassportDraft", "savePassportDraft")) {
+            if (refreshing && call.method !in setOf("snapshot", "refresh", "saveGeneratedFilm", "disconnect", "cancelTransfer", "cancelFirmwareDownload", "cancelPassport", "loadPassportDraft", "savePassportDraft")) {
                 result.error("busy", "设备读写正在进行，请稍后重试", null)
                 return
             }
             when (call.method) {
+                "saveGeneratedFilm" -> {
+                    check(saveFilmResult == null) { "正在保存文件" }
+                    val bytes = requireNotNull(call.argument<ByteArray>("bytes")) { "缺少 film 数据" }
+                    require(bytes.size in 32..(32 * 1024 * 1024)) { "film 文件大小无效" }
+                    val name = (call.argument<String>("name") ?: "frame.film").substringAfterLast('/').substringAfterLast('\\')
+                    saveFilmResult = result; saveFilmBytes = bytes
+                    try {
+                        activity.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE); type = "application/octet-stream"
+                            putExtra(Intent.EXTRA_TITLE, if (name.endsWith(".film")) name else "$name.film")
+                        }, SAVE_FILM)
+                    } catch (error: Exception) { saveFilmResult = null; saveFilmBytes = null; throw error }
+                }
                 "loadPassportDraft" -> result.success(drafts.getString("json", null))
                 "savePassportDraft" -> {
                     val json = requireNotNull(call.argument<String>("json"))
@@ -236,6 +290,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                         throw error
                     }
                 }
+                "listDeviceFiles", "displayDeviceFile", "deleteDeviceFile", "setDeviceFileDirectory", "playAnimation" -> filesCommand(call, result)
                 "readPassport" -> beginPassport(result)
                 "savePassport" -> savePassport(call, result)
                 "cancelPassport" -> {
@@ -488,6 +543,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
 
     private fun clearRead(code: String, detail: String) {
+        fileListing = false
         if (passportJob != null) finishPassport("error", detail)
         pending?.timeout?.let(main::removeCallbacks)
         pending = null
@@ -498,6 +554,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
 
     private fun clearDetails() {
+        fileListing = false; deviceFiles.clear(); filesLoaded = false; currentFileId = null; fileDirectory = "current"
         name = null; battery = null; width = null; height = null
         autoSleep = null; timedWake = null; wakeMinutes = null; syncedAt = null; settingsMessage = null
     }
@@ -745,9 +802,107 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         }
     }
 
+    // FILE_LIST has no terminal packet. The subsequent 0x08 reply is the
+    // ordered end marker, including for an empty directory.
+    private fun listDeviceFiles() {
+        deviceFiles.clear(); filesLoaded = false; currentFileId = null
+        fileListing = true; filesMessage = "正在读取当前目录"
+        writeFilesCommand(0x06, byteArrayOf()) {
+            request(0x08) { data ->
+                require(data.size == 1) { "显示文件响应无效" }
+                currentFileId = (data[0].toInt() and 255).takeIf { it != 255 }
+                fileListing = false; filesLoaded = true
+                filesMessage = "已读取当前目录；文件 ID 会随删除或设备操作变化"
+                finishSettings(filesMessage)
+            }
+            pending?.let { read ->
+                read.timeout?.let(main::removeCallbacks)
+                read.timeout = Runnable { if (pending === read) failRead("timeout", "文件列表读取超时，请重新连接后刷新") }
+                    .also { main.postDelayed(it, 30_000) }
+            }
+        }
+    }
+
+    private fun writeFilesCommand(channel: Int, payload: ByteArray, done: () -> Unit) {
+        val marker = Read(channel); pending = marker
+        marker.timeout = Runnable { if (pending === marker) failRead("timeout", "文件命令写入超时") }
+            .also { main.postDelayed(it, 7000) }
+        session.writePacket(packet(channel, payload)) { outcome ->
+            if (pending !== marker || closed) return@writePacket
+            marker.timeout?.let(main::removeCallbacks); pending = null
+            outcome.fold(onSuccess = { done() }, onFailure = { failRead("write_failed", it.message ?: "文件命令写入失败") })
+        }
+    }
+
+    private fun filesCommand(call: MethodCall, result: MethodChannel.Result) {
+        checkPassportAvailable()
+        val id = call.argument<Number>("id")?.toInt()
+        if (call.method in setOf("displayDeviceFile", "deleteDeviceFile")) {
+            require(id != null && id in 0..255 && filesLoaded && deviceFiles[id] == call.argument<String>("name")) {
+                "文件列表已变化，请刷新后重试"
+            }
+        }
+        val appId = call.argument<Number>("appId")?.toInt()
+        if (call.method == "setDeviceFileDirectory") require(appId == 0 || appId == 3) { "仅支持图片或动画目录" }
+        val intervalMs = call.argument<Number>("intervalMs")?.toInt()
+        val loopSeconds = call.argument<Number>("loopSeconds")?.toInt()
+        val playMode = call.argument<Number>("playMode")?.toInt() ?: 0
+        require(playMode in 0..1) { "动画播放模式无效" }
+        if (call.method == "playAnimation") require(intervalMs != null && intervalMs in 100..2000 && loopSeconds != null && loopSeconds in 0..600) { "动画参数需为100–2000毫秒、循环间隔0–600秒" }
+        refreshing = true; refreshResult = result
+        when (call.method) {
+            "playAnimation" -> writeFilesCommand(0x49, byteArrayOf(2, 2, (intervalMs!! ushr 8).toByte(), intervalMs.toByte(), 3, 2, (loopSeconds!! ushr 8).toByte(), loopSeconds.toByte())) {
+                main.postDelayed({ if (connected && refreshing) writeFilesCommand(0x49, byteArrayOf(1, 1, playMode.toByte())) {
+                    main.postDelayed({ if (connected && refreshing) request(0x4A) { data ->
+                        val values = mutableMapOf<Int, Int>(); var offset = 0
+                        while (offset + 2 <= data.size) {
+                            val tag = data[offset++].toInt() and 255
+                            val length = data[offset++].toInt() and 255
+                            require(length in 1..4 && offset + length <= data.size) { "动画参数响应无效" }
+                            var value = 0
+                            repeat(length) { value = (value shl 8) or (data[offset++].toInt() and 255) }
+                            values[tag] = value
+                        }
+                        require(offset == data.size && values[1] == playMode && values[2] == intervalMs && values[3] == loopSeconds) { "动画参数回读不一致，请重试" }
+                        writeFilesCommand(0x4B, byteArrayOf(3)) {
+                            main.postDelayed({ if (connected && refreshing) request(0x4C) { page ->
+                                require(page.size == 1) { "当前页面响应无效" }
+                                if (page[0].toInt() == 3) {
+                                    fileDirectory = "animation"; filesLoaded = false; deviceFiles.clear()
+                                    finishSettings("动画参数已回读确认，设备已进入动画 app")
+                                } else finishSettings("参数已保存，但动画 app 未进入；请先上传至少一个多帧 film", true)
+                            } }, 400)
+                        }
+                    } }, 150)
+                } }, 150)
+            }
+
+            "listDeviceFiles" -> listDeviceFiles()
+            "setDeviceFileDirectory" -> writeFilesCommand(0x4B, byteArrayOf(appId!!.toByte())) {
+                main.postDelayed({
+                    if (connected && refreshing) request(0x4C) { data ->
+                        require(data.size == 1) { "当前页面响应无效" }
+                        if ((data[0].toInt() and 255) != appId) {
+                            finishSettings("目录未切换：目标 app 可能为空、未注册或设备正忙", true)
+                        } else {
+                            fileDirectory = if (appId == 3) "animation" else "film"
+                            listDeviceFiles()
+                        }
+                    }
+                }, 400)
+            }
+            else -> writeFilesCommand(if (call.method == "deleteDeviceFile") 0x05 else 0x07, byteArrayOf(id!!.toByte())) {
+                filesMessage = if (call.method == "deleteDeviceFile") "删除命令已发送，正在重新读取列表" else "显示命令已发送；回读 ID 不代表屏幕刷新完成"
+                main.postDelayed({ if (connected && refreshing) listDeviceFiles() }, 400)
+            }
+        }
+        emit()
+    }
+
     private fun remoteCommand(call: MethodCall, result: MethodChannel.Result) {
         checkPassportAvailable()
         val remote = call.method == "remoteKey"
+        if (!remote) { filesLoaded = false; deviceFiles.clear(); currentFileId = null; fileDirectory = "current" }
         val value = requireNotNull(call.argument<Number>(if (remote) "key" else "appId")).toInt()
         require(value in if (remote) 0..4 else 0..6) { "不支持的按键或页面 ID" }
         refreshing = true; refreshResult = result
@@ -983,6 +1138,38 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
 
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == SAVE_FILM) {
+            val result = saveFilmResult ?: return true
+            val bytes = saveFilmBytes
+            val uri = data?.data
+            saveFilmBytes = null
+            if (resultCode != Activity.RESULT_OK || uri == null || bytes == null) {
+                saveFilmResult = null
+                result.error("cancelled", "保存已取消", null)
+                return true
+            }
+            worker.execute {
+                try {
+                    check(!closed) { "会话已关闭" }
+                    activity.contentResolver.openOutputStream(uri, "wt").use { stream ->
+                        checkNotNull(stream) { "无法打开目标文件" }
+                        var offset = 0
+                        while (offset < bytes.size) {
+                            check(!closed && !Thread.currentThread().isInterrupted) { "保存已中断" }
+                            val count = minOf(65536, bytes.size - offset)
+                            stream.write(bytes, offset, count); offset += count
+                        }
+                        stream.flush()
+                    }
+                    main.post { if (!closed && saveFilmResult === result) { saveFilmResult = null; result.success(null) } }
+                } catch (error: Exception) {
+                    // ACTION_CREATE_DOCUMENT creates a new document: discard an incomplete export.
+                    runCatching { DocumentsContract.deleteDocument(activity.contentResolver, uri) }
+                    main.post { if (!closed && saveFilmResult === result) { saveFilmResult = null; result.error("save_failed", error.message, null) } }
+                }
+            }
+            return true
+        }
         if (requestCode == PICK_FRAME_PHOTOS) {
             val result = frameResult ?: return true
             if (resultCode != Activity.RESULT_OK) {
@@ -1162,6 +1349,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
 
     fun close() {
+        appUpdates.close()
         if (closed) return
         closed = true
         download?.let {
@@ -1171,6 +1359,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         }
         download = null
         avatarResult?.error("closed", "会话已关闭", null); avatarResult = null
+        saveFilmResult?.error("closed", "会话已关闭", null); saveFilmResult = null; saveFilmBytes = null
         frameResult?.error("closed", "会话已关闭", null); frameResult = null
         cleanupFrameCamera()
         clearRead("closed", "蓝牙会话已关闭")
@@ -1190,6 +1379,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
 
     private companion object {
         const val PERMISSION_REQUEST = 4207
+        const val SAVE_FILM = 4212
         const val PICK_FILM = 4208
         const val PICK_AVATAR = 4209
         const val PICK_FRAME_PHOTOS = 4210

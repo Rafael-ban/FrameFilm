@@ -1,3 +1,6 @@
+import 'workbench_widgets.dart';
+import 'forfilm_theme.dart';
+
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -847,8 +850,16 @@ class _FrameQuickPageState extends State<FrameQuickPage> {
             SizedBox(
               width: cardWidth,
               height: 142,
-              child: Card(
-                clipBehavior: Clip.antiAlias,
+              child: WorkbenchPanel(
+                padding: EdgeInsets.zero,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? null
+                    : switch (section) {
+                        FrameQuickSection.photo => ForFilmColors.lemon,
+                        FrameQuickSection.camera => ForFilmColors.coral,
+                        FrameQuickSection.quote => ForFilmColors.sky,
+                        _ => ForFilmColors.mint,
+                      },
                 child: InkWell(
                   onTap: widget.controller.busy ? null : () => _open(section),
                   child: Padding(

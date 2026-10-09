@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'frame_palettes.dart';
+import 'frame_sz.dart';
+
 /// Names mirror the options in tools/ForFilm/js/convert.js.
 enum FrameAlgorithm {
   atkinsonEnhanced,
@@ -10,6 +13,11 @@ enum FrameAlgorithm {
   jarvis,
   gammaFloydSteinberg,
   bayer,
+  adaptive,
+  colorFast55,
+  colorQual,
+  szEnhanced,
+  atkinsonSzCalib,
 }
 
 // Film code order: black, white, yellow, red, blue, green.
@@ -449,6 +457,85 @@ Future<Uint8List> quantizeFramePixels(
   if (width <= 0 || height <= 0 || rgba.length != width * height * 4) {
     throw ArgumentError('像素尺寸不匹配');
   }
+  if (dither && algorithm == FrameAlgorithm.szEnhanced) {
+    return quantizeSz(
+      rgba,
+      width,
+      height,
+      checkCancelled: checkCancelled,
+      onProgress: onProgress,
+    );
+  }
+  if (algorithm == FrameAlgorithm.colorFast55 ||
+      algorithm == FrameAlgorithm.colorQual) {
+    final fast = algorithm == FrameAlgorithm.colorFast55;
+    final palette = fast ? colorFastPalette : colorQualPalette;
+    final candidates = fast ? colorFastCandidates : colorQualCandidates;
+    final labs = palette.map((c) => _lab(c[0], c[1], c[2], ae: true)).toList();
+    int select(int r, int g, int b) {
+      final lab = _lab(r, g, b, ae: true);
+      var best = candidates.first, distance = double.infinity;
+      for (final index in candidates) {
+        final p = labs[index];
+        final dl = lab[0] - p[0], da = lab[1] - p[1], db = lab[2] - p[2];
+        final d = 2 * dl * dl + da * da + db * db;
+        if (d < distance) {
+          distance = d;
+          best = index;
+        }
+      }
+      return best;
+    }
+
+    return _rollingQuantize(
+      rgba,
+      width,
+      height,
+      select,
+      palette,
+      palette,
+      dither ? strength : 0,
+      checkCancelled,
+      onProgress,
+    );
+  }
+  if (dither && algorithm == FrameAlgorithm.atkinsonSzCalib) {
+    await _compressSz(rgba, width, height, checkCancelled);
+    int select(int r, int g, int b) {
+      var best = 0, distance = double.infinity;
+      for (var i = 0; i < _szPalette.length; i++) {
+        final p = _szPalette[i];
+        final dr = r - p[0], dg = g - p[1], db = b - p[2];
+        final d =
+            (dr * dr + dg * dg + db * db) * (i == 2 || i == 4 ? 1.8 : 1.0);
+        if (d < distance) {
+          distance = d;
+          best = i;
+        }
+      }
+      return best;
+    }
+
+    final indices = await _rollingQuantize(
+      rgba,
+      width,
+      height,
+      select,
+      _szPalette,
+      _aeDisplay,
+      1,
+      checkCancelled,
+      onProgress,
+    );
+    for (var i = 0; i < indices.length; i++) {
+      indices[i] = _aeToFilm[indices[i]];
+      _paint(rgba, i, indices[i]);
+    }
+    return indices;
+  }
+  if (dither && algorithm == FrameAlgorithm.adaptive) {
+    return _adaptiveQuantize(rgba, width, height, checkCancelled, onProgress);
+  }
   if (!dither) {
     final codes = Uint8List(width * height);
     for (var y = 0; y < height; y++) {
@@ -483,5 +570,257 @@ Future<Uint8List> quantizeFramePixels(
     strength,
     checkCancelled,
     onProgress,
+  );
+}
+
+const _szPalette = <List<int>>[
+  [2, 2, 2],
+  [190, 200, 200],
+  [197, 194, 7],
+  [89, 10, 6],
+  [36, 75, 24],
+  [0, 18, 148],
+];
+
+/// The web Atkinson kernel accumulates unscaled residuals in Int32Array;
+/// each compound assignment truncates toward zero, including fractional strength.
+Future<Uint8List> _rollingQuantize(
+  Uint8List data,
+  int width,
+  int height,
+  int Function(int, int, int) select,
+  List<List<int>> residual,
+  List<List<int>> preview,
+  double strength,
+  void Function()? checkCancelled,
+  void Function(double)? onProgress,
+) async {
+  final codes = Uint8List(width * height);
+  final stride = (width + 3) * 3;
+  var current = Int32List(stride),
+      next = Int32List(stride),
+      second = Int32List(stride);
+  for (var y = 0; y < height; y++) {
+    for (var x = 0; x < width; x++) {
+      final slot = (x + 1) * 3, pixel = y * width + x, pos = pixel * 4;
+      final rgb = List<int>.generate(
+        3,
+        (c) => _clamp(data[pos + c] + ((current[slot + c] + 4) >> 3)),
+      );
+      final code = select(rgb[0], rgb[1], rgb[2]);
+      codes[pixel] = code;
+      for (var c = 0; c < 3; c++) {
+        final error = (rgb[c] - residual[code][c]) * strength;
+        current[slot + 3 + c] = (current[slot + 3 + c] + error).truncate();
+        current[slot + 6 + c] = (current[slot + 6 + c] + error).truncate();
+        next[slot - 3 + c] = (next[slot - 3 + c] + error).truncate();
+        next[slot + c] = (next[slot + c] + error).truncate();
+        next[slot + 3 + c] = (next[slot + 3 + c] + error).truncate();
+        second[slot + c] = (second[slot + c] + error).truncate();
+      }
+      final color = preview[code];
+      data[pos] = color[0];
+      data[pos + 1] = color[1];
+      data[pos + 2] = color[2];
+      data[pos + 3] = 255;
+    }
+    final old = current;
+    current = next;
+    next = second;
+    second = old;
+    second.fillRange(0, stride, 0);
+    await _afterRow(y, height, .05, .9, checkCancelled, onProgress);
+  }
+  return codes;
+}
+
+Future<void> _compressSz(
+  Uint8List data,
+  int width,
+  int height,
+  void Function()? checkCancelled,
+) async {
+  final black = _lab(2, 2, 2, ae: true)[0];
+  final white = _lab(190, 200, 200, ae: true)[0];
+  for (var y = 0; y < height; y++) {
+    for (var x = 0; x < width; x++) {
+      final p = (y * width + x) * 4;
+      final lab = _lab(data[p], data[p + 1], data[p + 2], ae: true);
+      final fy = (black + lab[0] / 100 * (white - black) + 16) / 116;
+      double pivot(double v) =>
+          v > .206897 ? v * v * v : (v - 16 / 116) / 7.787;
+      final xx = pivot(lab[1] / 500 + fy) * .95047;
+      final yy = pivot(fy), zz = pivot(fy - lab[2] / 200) * 1.08883;
+      final linear = [
+        xx * 3.2404542 - yy * 1.5371385 - zz * .4985314,
+        -xx * .969266 + yy * 1.8760108 + zz * .041556,
+        xx * .0556434 - yy * .2040259 + zz * 1.0572252,
+      ];
+      for (var c = 0; c < 3; c++) {
+        final v = linear[c];
+        data[p + c] = _clamp(
+          ((v > .0031308 ? 1.055 * math.pow(v, 1 / 2.4) - .055 : 12.92 * v) *
+                  255)
+              .round(),
+        );
+      }
+    }
+    await _afterRow(y, height, 0, .05, checkCancelled, null);
+  }
+}
+
+Float32List _edges(Uint8List data, int width, int height) {
+  final gray = Float64List(width * height);
+  for (var i = 0; i < gray.length; i++) {
+    final p = i * 4;
+    gray[i] = data[p] * .299 + data[p + 1] * .587 + data[p + 2] * .114;
+  }
+  final edges = Float32List(width * height);
+  for (var y = 1; y < height - 1; y++) {
+    for (var x = 1; x < width - 1; x++) {
+      final p = y * width + x;
+      final gx =
+          -gray[p - width - 1] -
+          2 * gray[p - 1] -
+          gray[p + width - 1] +
+          gray[p - width + 1] +
+          2 * gray[p + 1] +
+          gray[p + width + 1];
+      final gy =
+          -gray[p - width - 1] -
+          2 * gray[p - width] -
+          gray[p - width + 1] +
+          gray[p + width - 1] +
+          2 * gray[p + width] +
+          gray[p + width + 1];
+      edges[p] = math.sqrt(gx * gx + gy * gy);
+    }
+  }
+  return edges;
+}
+
+/// Same candidate search and perceptual/edge/entropy score as convert.js.
+/// A bilinear evaluation sample is used in place of browser canvas resizing.
+Future<Uint8List> _adaptiveQuantize(
+  Uint8List data,
+  int width,
+  int height,
+  void Function()? checkCancelled,
+  void Function(double)? onProgress,
+) async {
+  final ew = math.max(30, width ~/ 3), eh = math.max(30, height ~/ 3);
+  final sample = Uint8List(ew * eh * 4);
+  for (var y = 0; y < eh; y++) {
+    final sy = ((y + .5) * height / eh - .5).clamp(0, height - 1).toDouble();
+    final y0 = sy.floor(),
+        y1 = math.min(height - 1, sy.floor() + 1),
+        fy = sy - y0;
+    for (var x = 0; x < ew; x++) {
+      final sx = ((x + .5) * width / ew - .5).clamp(0, width - 1).toDouble();
+      final x0 = sx.floor(),
+          x1 = math.min(width - 1, sx.floor() + 1),
+          fx = sx - x0;
+      for (var c = 0; c < 3; c++) {
+        final a =
+            data[(y0 * width + x0) * 4 + c] * (1 - fx) +
+            data[(y0 * width + x1) * 4 + c] * fx;
+        final b =
+            data[(y1 * width + x0) * 4 + c] * (1 - fx) +
+            data[(y1 * width + x1) * 4 + c] * fx;
+        sample[(y * ew + x) * 4 + c] = _clamped(a * (1 - fy) + b * fy);
+      }
+      sample[(y * ew + x) * 4 + 3] = 255;
+    }
+    await _afterRow(y, eh, 0, .03, checkCancelled, null);
+  }
+  final originalEdges = _edges(sample, ew, eh);
+  var count = 0, saturation = 0.0;
+  for (final e in originalEdges) {
+    if (e > 20) count++;
+  }
+  for (var i = 0; i < sample.length; i += 4) {
+    final hi = math.max(sample[i], math.max(sample[i + 1], sample[i + 2]));
+    final lo = math.min(sample[i], math.min(sample[i + 1], sample[i + 2]));
+    saturation += hi > 0 ? (hi - lo) / hi : 0;
+  }
+  final strengths = count / ((ew - 2) * (eh - 2)) > .2
+      ? [.6, .8, 1.0, 1.2, 1.4, 1.6]
+      : saturation / (ew * eh) > .3
+      ? [.7, .9, 1.0, 1.2, 1.4, 1.6, 1.8]
+      : [.6, .8, 1.0, 1.2, 1.5, 1.8, 2.0];
+  const algorithms = [
+    FrameAlgorithm.floydSteinberg,
+    FrameAlgorithm.atkinson,
+    FrameAlgorithm.stucki,
+    FrameAlgorithm.jarvis,
+  ];
+  final originalLabs = List.generate(
+    ew * eh,
+    (i) => _lab(sample[i * 4], sample[i * 4 + 1], sample[i * 4 + 2]),
+  );
+  var best = FrameAlgorithm.floydSteinberg,
+      bestStrength = strengths.first,
+      bestScore = double.infinity,
+      done = 0;
+  for (final algorithm in algorithms) {
+    for (final strength in strengths) {
+      final copy = Uint8List.fromList(sample);
+      final codes = await _regular(
+        copy,
+        ew,
+        eh,
+        algorithm,
+        strength,
+        checkCancelled,
+        null,
+      );
+      final edges = _edges(copy, ew, eh), counts = List<int>.filled(6, 0);
+      var error = 0.0, correlation = 0.0, originalEnergy = 0.0, energy = 0.0;
+      for (var i = 0; i < codes.length; i++) {
+        error += _labDistance(
+          originalLabs[i],
+          _lab(copy[i * 4], copy[i * 4 + 1], copy[i * 4 + 2]),
+        );
+        counts[codes[i]]++;
+        correlation += originalEdges[i] * edges[i];
+        originalEnergy += originalEdges[i] * originalEdges[i];
+        energy += edges[i] * edges[i];
+      }
+      final preservation = originalEnergy > 0 && energy > 0
+          ? correlation / math.sqrt(originalEnergy * energy)
+          : 0;
+      var entropy = 0.0, used = 0;
+      for (final count in counts) {
+        if (count > 0) {
+          used++;
+          final p = count / codes.length;
+          entropy -= p * math.log(p) / math.ln2;
+        }
+      }
+      final balance = used > 1 ? entropy / (math.log(used) / math.ln2) : 0;
+      final score =
+          error / codes.length * .4 +
+          (1 - preservation) * 80 * .35 +
+          (1 - balance) * 30 * .25;
+      if (score < bestScore) {
+        bestScore = score;
+        best = algorithm;
+        bestStrength = strength;
+      }
+      done++;
+      onProgress?.call(
+        .03 + .42 * done / (algorithms.length * strengths.length),
+      );
+      checkCancelled?.call();
+    }
+  }
+  return _regular(
+    data,
+    width,
+    height,
+    best,
+    bestStrength,
+    checkCancelled,
+    (p) => onProgress?.call(.45 + (p - .05) / .85 * .45),
   );
 }

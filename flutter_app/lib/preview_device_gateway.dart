@@ -39,10 +39,28 @@ class PreviewDeviceGateway implements DeviceGateway {
   @override
   Stream<DeviceSnapshot> get snapshots => _events.stream;
 
+  int _fileDirectory = 0;
+  int? _displayedFile;
+  final _deviceFiles = <int, List<String>>{
+    0: ['演示画面.film', '风景.film'],
+    3: ['演示动画.film'],
+  };
+  Map<String, Object?> get _fileState => {
+    'directory': _fileDirectory == 3 ? 'animation' : 'film',
+    'loaded': true,
+    'currentId': _displayedFile,
+    'message': warning,
+    'entries': [
+      for (var i = 0; i < _deviceFiles[_fileDirectory]!.length; i++)
+        {'id': i, 'name': _deviceFiles[_fileDirectory]![i]},
+    ],
+  };
+
   void _emit() {
     if (_disposed) return;
     _events.add(
       DeviceSnapshot(
+        files: _connected ? _fileState : const {},
         connected: _connected,
         passport: _passport,
         hasPassportState: true,
@@ -83,6 +101,10 @@ class PreviewDeviceGateway implements DeviceGateway {
     _passportFailed = false;
     scenario = value ?? scenario;
     _connected = false;
+    _fileDirectory = 0;
+    _displayedFile = null;
+    _deviceFiles[0] = ['演示画面.film', '风景.film'];
+    _deviceFiles[3] = ['演示动画.film'];
     _scanned = false;
     _failedOnce = false;
     _film = null;
@@ -116,6 +138,40 @@ class PreviewDeviceGateway implements DeviceGateway {
       throw StateError('请先连接模拟设备并等待当前操作完成');
     }
     switch (method) {
+      case 'playAnimation':
+        final interval = arguments!['intervalMs'] as int;
+        final loop = arguments['loopSeconds'] as int;
+        final mode = arguments['playMode'] as int? ?? 0;
+        if (mode != 0 && mode != 1) throw ArgumentError('不支持的动画播放模式');
+        if (interval < 100 || interval > 2000 || loop < 0 || loop > 600) {
+          throw ArgumentError('动画播放参数超出范围');
+        }
+        _fileDirectory = 3;
+        _settingsMessage = '模拟动画播放设置已保存；未操作真实设备';
+      case 'listDeviceFiles':
+        break;
+      case 'setDeviceFileDirectory':
+        final appId = arguments!['appId'] as int;
+        if (appId != 0 && appId != 3) {
+          throw ArgumentError('不支持的目录');
+        }
+        _fileDirectory = appId;
+        _displayedFile = null;
+      case 'displayDeviceFile':
+      case 'deleteDeviceFile':
+        final id = arguments!['id'] as int;
+        final entries = _deviceFiles[_fileDirectory]!;
+        if (id < 0 ||
+            id >= entries.length ||
+            entries[id] != arguments['name']) {
+          throw StateError('列表已变化，请刷新');
+        }
+        if (method == 'deleteDeviceFile') {
+          entries.removeAt(id);
+          _displayedFile = null;
+        } else {
+          _displayedFile = id;
+        }
       case 'readPassport':
         _startPassport();
       case 'savePassport':

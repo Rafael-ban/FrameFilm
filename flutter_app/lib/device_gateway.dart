@@ -19,6 +19,11 @@ String? validateDeviceSuffix(String suffix) {
 
 const deviceSettingsMethods = {
   'refresh',
+  'playAnimation',
+  'listDeviceFiles',
+  'displayDeviceFile',
+  'deleteDeviceFile',
+  'setDeviceFileDirectory',
   'setAutoSleep',
   'setTimedWake',
   'setWakeMinutes',
@@ -162,6 +167,7 @@ class FirmwareDownload {
 
 class DeviceSnapshot {
   const DeviceSnapshot({
+    this.files = const {},
     this.connected = false,
     this.hasConnectionState = true,
     this.message = '尚未连接设备',
@@ -193,6 +199,9 @@ class DeviceSnapshot {
 
   factory DeviceSnapshot.fromMap(Map<Object?, Object?> data) {
     return DeviceSnapshot(
+      files: data['files'] is Map
+          ? Map<String, Object?>.from(data['files'] as Map)
+          : const {},
       connected: data['connected'] == true,
       hasConnectionState: data.containsKey('connected'),
       message: data['message'] as String? ?? '尚未连接设备',
@@ -239,6 +248,7 @@ class DeviceSnapshot {
     );
   }
 
+  final Map<String, Object?> files;
   final bool connected;
   final bool hasConnectionState;
   final String message;
@@ -277,6 +287,11 @@ class DeviceSnapshot {
           : previous.firmwareDownload,
       passport: hasPassportState ? passport : previous.passport,
       hasPassportState: true,
+      files: !keepConnected
+          ? const {}
+          : (presentKeys.contains('files') || files.isNotEmpty)
+          ? files
+          : previous.files,
       connected: keepConnected,
       message: message,
       devices: devices,
