@@ -1320,11 +1320,11 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     const SizedBox(height: 20),
     transferStatus(context, kind: 'firmware'),
     const SizedBox(height: 20),
+    themePanel(context),
+    const SizedBox(height: 20),
     panel(context, child: AppUpdatePanel(controller: appUpdate)),
     const SizedBox(height: 20),
     const AboutPanel(),
-    const SizedBox(height: 20),
-    themePanel(context),
   ];
 
   Widget connectionTransition() => PrtsConnectionIntro(

@@ -40,7 +40,7 @@ class AboutPanel extends StatelessWidget {
         const SizedBox(height: 8),
         const Text('为彩色电子纸制作、管理与传递画面。'),
         const Divider(height: 32),
-        const Text('开发维护 · Rafael-ban'),
+        const Text('App 开发维护 · Rafael-ban'),
         const SizedBox(height: 4),
         const Text('基于 FrameFilm 开源项目，感谢原项目作者与所有贡献者。'),
         const SizedBox(height: 16),
