@@ -216,6 +216,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                     cancelFirmwareDownload()
                     result.success(snapshot())
                 }
+                "importGeneratedFilm" -> importGeneratedFilm(call, result)
                 "pickFilm" -> pickFilm(result)
                 "pickFirmware", "importFirmware" -> pickFilm(result, firmware = true)
                 "clearFirmware" -> {
@@ -861,6 +862,47 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         }
     }
 
+    @Suppress("DEPRECATION")
+    /** Receives the exact Dart-generated preview file; conversion is shared with Web. */
+    private fun importGeneratedFilm(call: MethodCall, result: MethodChannel.Result) {
+        checkReplace()
+        val bytes = requireNotNull(call.argument<ByteArray>("bytes")) { "缺少 film 数据" }
+        require(bytes.size in 32..(32 * 1024 * 1024)) { "film 文件大小无效" }
+        val requestedName = call.argument<String>("name") ?: "ark_frame.film"
+        importing = true; importResult = result; emit()
+        worker.execute {
+            var temporary: File? = null
+            try {
+                val file = File.createTempFile("import-", ".film", cache)
+                temporary = file
+                file.writeBytes(bytes)
+                if (Thread.currentThread().isInterrupted) error("导入已取消")
+                FilmConverter.validate(file)
+                val sendName = org.framefilm.ark.FilmTransferName.forFile(requestedName, file)
+                main.post {
+                    if (closed) file.delete()
+                    else {
+                        val previous = currentFile
+                        currentFile = file; importedName = sendName
+                        previous?.delete()
+                        importing = false; importResult = null
+                        transfer = TransferSnapshot("idle", "转换结果已导入，请在 Film 页发送",
+                            cleanupCompleted = true, kind = "film")
+                        emit(); result.success(snapshot())
+                    }
+                }
+            } catch (error: Exception) {
+                temporary?.delete()
+                main.post {
+                    if (!closed) {
+                        importing = false; importResult = null
+                        message = error.message ?: "转换结果导入失败"
+                        emit(); result.error("import_failed", message, null)
+                    }
+                }
+            }
+        }
+    }
     @Suppress("DEPRECATION")
     private fun pickFilm(result: MethodChannel.Result, firmware: Boolean = false) {
         checkReplace()

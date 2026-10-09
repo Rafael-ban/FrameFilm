@@ -179,6 +179,35 @@ class PreviewDeviceGateway implements DeviceGateway {
         _connected = false;
         _syncedAt = null;
         _settingsMessage = null;
+      case 'importGeneratedFilm':
+        if (_transfer.active ||
+            _transfer.canConfirm ||
+            _download.canCancel ||
+            (_transfer.canRetry && !_transfer.cleanupCompleted)) {
+          throw StateError('请等待当前传输与清理完成');
+        }
+        final bytes = arguments!['bytes'] as Uint8List;
+        if (bytes.length < 32) throw ArgumentError('film 文件头不完整');
+        final header = ByteData.sublistView(bytes);
+        final format = bytes[9];
+        final body = format == 0
+            ? 172800
+            : format == 1
+            ? 43200
+            : -1;
+        if (header.getUint16(4, Endian.little) != 720 ||
+            header.getUint16(6, Endian.little) != 480 ||
+            header.getUint32(0, Endian.little) != body ||
+            bytes.length != body + 32) {
+          throw ArgumentError('生成的 film 格式无效');
+        }
+        _film = ImportedFilm(
+          name: arguments['name'] as String,
+          size: bytes.length,
+          width: 720,
+          height: 480,
+        );
+        _transfer = const FilmTransfer(message: '已接入真实转换结果；后续发送为模拟操作');
       case 'pickFilm':
         _film = const ImportedFilm(
           name: '演示画面.film',

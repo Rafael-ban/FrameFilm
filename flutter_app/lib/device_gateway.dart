@@ -397,6 +397,17 @@ class DeviceController extends ChangeNotifier {
   bool _disposed = false;
   StreamSubscription<DeviceSnapshot>? _subscription;
 
+  bool get canImportFilm =>
+      gateway.supported &&
+      !busy &&
+      !snapshot.settingsBusy &&
+      !snapshot.passportBusy &&
+      !snapshot.importing &&
+      !snapshot.firmwareDownload.canCancel &&
+      !snapshot.transfer.active &&
+      !snapshot.transfer.canConfirm &&
+      (!snapshot.transfer.canRetry || snapshot.transfer.cleanupCompleted);
+
   bool get canEditSettings =>
       gateway.supported &&
       snapshot.connected &&
@@ -410,6 +421,7 @@ class DeviceController extends ChangeNotifier {
       (!snapshot.transfer.canRetry || snapshot.transfer.cleanupCompleted);
 
   Future<void> command(String method, [Map<String, Object?>? arguments]) async {
+    if (method == 'importGeneratedFilm' && !canImportFilm) return;
     if (deviceSettingsMethods.contains(method) && !canEditSettings) return;
     final cancellingPassport = method == 'cancelPassport';
     if (snapshot.passportBusy && method != 'snapshot' && !cancellingPassport) {

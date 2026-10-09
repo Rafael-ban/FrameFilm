@@ -7,6 +7,7 @@ import 'device_gateway.dart';
 import 'preview_device_gateway.dart';
 import 'github_release_service.dart';
 import 'passport_editor.dart';
+import 'frame_editor.dart';
 
 enum FilmTheme { automatic, forFilm, arknights }
 
@@ -53,6 +54,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   bool wasConnected = false;
   Timer? loadingTimer;
   final passportEditor = PassportEditorController();
+  final frameEditor = FrameEditorController();
 
   final deviceSuffix = TextEditingController();
   final wakeInterval = TextEditingController();
@@ -128,6 +130,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
       preview.dispose();
     }
 
+    frameEditor.dispose();
     deviceSuffix.dispose();
     wakeInterval.dispose();
     super.dispose();
@@ -398,13 +401,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
 
   List<Widget> pageContent(BuildContext context) => switch (page) {
     0 => connectionPage(context),
-    1 => stagePage(
-      context,
-      Icons.dashboard_customize_outlined,
-      '从一张画面开始',
-      'Frame 是设备与画面的工作区。',
-      ['读取设备名称、电量和屏幕参数已接入', '画面排版与设备端设置将在后续阶段接入'],
-    ),
+    1 => framePage(context),
     2 => filmPage(context),
     3 => stagePage(
       context,
@@ -417,6 +414,28 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     _ => settingsPage(context),
   };
 
+  Future<void> importFrame(Uint8List bytes, String name) async {
+    if (!device.canImportFilm) throw StateError('请等待当前设备操作结束');
+    await device.command('importGeneratedFilm', {'bytes': bytes, 'name': name});
+    if (device.errorMessage != null) throw StateError(device.errorMessage!);
+    if (mounted) setState(() => page = 2);
+  }
+
+  List<Widget> framePage(BuildContext context) => [
+    if (device.gateway is PreviewDeviceGateway)
+      const Padding(
+        padding: EdgeInsets.only(bottom: 12),
+        child: Text('图片转换和下载会生成真实文件；转入 Film 页后的设备发送为模拟操作。'),
+      ),
+    panel(
+      context,
+      child: FrameEditor(
+        controller: frameEditor,
+        canImportFilm: device.canImportFilm,
+        onImportFilm: importFrame,
+      ),
+    ),
+  ];
   List<Widget> connectionPage(BuildContext context) {
     final snapshot = device.snapshot;
     final supported = device.gateway.supported;
@@ -1250,7 +1269,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
           const Divider(height: 32),
           const Text(
-            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息与休眠设置、改名和时间同步、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、设备遥控、通行证读取/发送与本地草稿。\n\n后续阶段\n图片与动画编辑、film 转换及统一 UI。',
+            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息与休眠设置、改名和时间同步、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、设备遥控、通行证读取/发送与本地草稿、图片裁剪与 film 转换。\n\n后续阶段\n动画编辑、高级图片算法及统一 UI。',
           ),
         ],
       ),
