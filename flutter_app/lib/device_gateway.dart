@@ -24,6 +24,10 @@ const deviceSettingsMethods = {
   'setWakeMinutes',
   'renameDevice',
   'syncTime',
+  'remoteKey',
+  'openDevicePage',
+  'readPassport',
+  'savePassport',
 };
 
 class DeviceInfo {
@@ -173,6 +177,8 @@ class DeviceSnapshot {
     this.settingsMessage,
     this.settingsBusy = false,
     this.presentKeys = const {},
+    this.passport = const {},
+    this.hasPassportState = false,
     this.importedFile,
     this.importedFirmware,
     this.importing = false,
@@ -208,6 +214,10 @@ class DeviceSnapshot {
       settingsMessage: data['settingsMessage'] as String?,
       settingsBusy: data['settingsBusy'] == true,
       presentKeys: data.keys.toSet(),
+      passport: data['passport'] is Map
+          ? Map<String, Object?>.from(data['passport'] as Map)
+          : const {},
+      hasPassportState: data.containsKey('passport'),
       importedFile: data['importedFile'] is Map
           ? ImportedFilm.fromMap(data['importedFile'] as Map)
           : null,
@@ -244,6 +254,10 @@ class DeviceSnapshot {
   final String? settingsMessage;
   final bool settingsBusy;
   final Set<Object?> presentKeys;
+  final Map<String, Object?> passport;
+  final bool hasPassportState;
+  bool get passportBusy =>
+      const {'reading', 'sending', 'verifying'}.contains(passport['phase']);
   final ImportedFilm? importedFile;
   final ImportedFirmware? importedFirmware;
   final bool importing;
@@ -261,6 +275,8 @@ class DeviceSnapshot {
       firmwareDownload: hasDownloadState || firmwareDownload.phase != 'idle'
           ? firmwareDownload
           : previous.firmwareDownload,
+      passport: hasPassportState ? passport : previous.passport,
+      hasPassportState: true,
       connected: keepConnected,
       message: message,
       devices: devices,
@@ -386,6 +402,7 @@ class DeviceController extends ChangeNotifier {
       snapshot.connected &&
       !busy &&
       !snapshot.settingsBusy &&
+      !snapshot.passportBusy &&
       !snapshot.importing &&
       !snapshot.firmwareDownload.canCancel &&
       !snapshot.transfer.active &&
@@ -394,8 +411,14 @@ class DeviceController extends ChangeNotifier {
 
   Future<void> command(String method, [Map<String, Object?>? arguments]) async {
     if (deviceSettingsMethods.contains(method) && !canEditSettings) return;
+    final cancellingPassport = method == 'cancelPassport';
+    if (snapshot.passportBusy && method != 'snapshot' && !cancellingPassport) {
+      return;
+    }
+    if (cancellingPassport && snapshot.passport['canCancel'] != true) return;
     final cancellingDownload = method == 'cancelFirmwareDownload';
-    final cancelling = method == 'cancelTransfer' || cancellingDownload;
+    final cancelling =
+        method == 'cancelTransfer' || cancellingDownload || cancellingPassport;
     if (!gateway.supported || (busy && !cancelling)) return;
     if ((snapshot.transfer.active || snapshot.transfer.canConfirm) &&
         const {
@@ -460,7 +483,10 @@ class DeviceController extends ChangeNotifier {
       return;
     }
     if (cancellingDownload && !snapshot.firmwareDownload.canCancel) return;
-    if (cancelling && !cancellingDownload && !snapshot.transfer.canCancel) {
+    if (cancelling &&
+        !cancellingDownload &&
+        !cancellingPassport &&
+        !snapshot.transfer.canCancel) {
       return;
     }
     if (!cancelling) busy = true;

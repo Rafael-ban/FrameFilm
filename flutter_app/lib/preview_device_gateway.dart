@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'device_gateway.dart';
 
@@ -10,6 +12,11 @@ class PreviewDeviceGateway implements DeviceGateway {
   final Duration stepDuration;
   final _events = StreamController<DeviceSnapshot>.broadcast();
   Timer? _timer;
+  Timer? _passportTimer;
+  Map<String, Object?> _passport = const {};
+  String? _savedPassport;
+  int _passportRevision = 0;
+  bool _passportFailed = false;
   bool _disposed = false,
       _connected = false,
       _scanned = false,
@@ -37,6 +44,8 @@ class PreviewDeviceGateway implements DeviceGateway {
     _events.add(
       DeviceSnapshot(
         connected: _connected,
+        passport: _passport,
+        hasPassportState: true,
         message: warning,
         devices: _scanned && !_connected
             ? const [
@@ -68,6 +77,10 @@ class PreviewDeviceGateway implements DeviceGateway {
 
   void reset([PreviewScenario? value]) {
     _timer?.cancel();
+    _passportTimer?.cancel();
+    _passport = const {};
+    _savedPassport = null;
+    _passportFailed = false;
     scenario = value ?? scenario;
     _connected = false;
     _scanned = false;
@@ -89,6 +102,11 @@ class PreviewDeviceGateway implements DeviceGateway {
   @override
   Future<void> invoke(String method, [Map<String, Object?>? arguments]) async {
     if (_disposed) return;
+    if (_passport['canCancel'] == true &&
+        method != 'cancelPassport' &&
+        method != 'snapshot') {
+      throw StateError('通行证操作进行中，请等待或取消');
+    }
     if (deviceSettingsMethods.contains(method) &&
         (!_connected ||
             _transfer.active ||
@@ -98,6 +116,31 @@ class PreviewDeviceGateway implements DeviceGateway {
       throw StateError('请先连接模拟设备并等待当前操作完成');
     }
     switch (method) {
+      case 'readPassport':
+        _startPassport();
+      case 'savePassport':
+        final json = arguments!['json'] as String;
+        final bin = arguments['bin'] as Uint8List;
+        if (bin.length != 33456 || utf8.encode(json).length > 350000) {
+          throw ArgumentError('通行证文件大小无效');
+        }
+        _startPassport(json: json);
+      case 'cancelPassport':
+        _passportTimer?.cancel();
+        _passport = {
+          ..._passport,
+          'phase': 'cancelled',
+          'canCancel': false,
+          'message': '模拟操作已取消，草稿保留；重新连接后可从头发送。',
+        };
+        _connected = false;
+      case 'remoteKey':
+        final key = arguments!['key'] as int;
+        if (key < 0 || key > 4) throw ArgumentError('无效按键');
+        _settingsMessage = '模拟按键已收到；未操作真实设备';
+        if (key == 1) _connected = false;
+      case 'openDevicePage':
+        _settingsMessage = '模拟页面切换已收到；未操作真实设备';
       case 'setAutoSleep':
         _autoSleep = arguments!['enabled'] as bool;
         _settingsMessage = '模拟保存并回读确认';
@@ -333,9 +376,83 @@ class PreviewDeviceGateway implements DeviceGateway {
     _timer = Timer.periodic(stepDuration, (_) => advance());
   }
 
+  void _startPassport({String? json}) {
+    final saving = json != null;
+    final oldJson = _passport['json'];
+    final total = saving
+        ? 33456 + utf8.encode(json).length
+        : utf8.encode(_savedPassport ?? '').length;
+    _passport = {
+      'phase': saving ? 'sending' : 'reading',
+      'completed': 0,
+      'total': total,
+      'canCancel': true,
+      'message': saving ? '模拟发送通行证' : '模拟读取设备资料',
+      'json': oldJson,
+      'revision': _passportRevision,
+    };
+    var step = 0;
+    _passportTimer?.cancel();
+    _passportTimer = Timer.periodic(stepDuration, (timer) {
+      if (_disposed) {
+        timer.cancel();
+        return;
+      }
+      step++;
+      if (step == 2 &&
+          scenario == PreviewScenario.transferFailure &&
+          !_passportFailed) {
+        _passportFailed = true;
+        timer.cancel();
+        _passport = {
+          ..._passport,
+          'phase': 'error',
+          'canCancel': false,
+          'message': '模拟连接中断，可能只发送了部分文件；草稿保留，重新连接后从头发送。',
+        };
+        _connected = false;
+      } else if (step >= 4) {
+        timer.cancel();
+        if (saving) _savedPassport = json;
+        final document = _savedPassport;
+        if (document == null) {
+          _passport = {
+            ..._passport,
+            'phase': 'error',
+            'canCancel': false,
+            'message': '模拟设备尚未配置资料，当前草稿保留。',
+          };
+        } else {
+          _passportRevision++;
+          _passport = {
+            'phase': 'done',
+            'completed': total,
+            'total': total,
+            'canCancel': false,
+            'json': document,
+            'revision': _passportRevision,
+            'message': saving ? '模拟发送及资料回读完成；未修改真实设备。' : '模拟资料读取完成。',
+          };
+        }
+      } else {
+        _passport = {
+          ..._passport,
+          'completed': (total * step / 4).round(),
+          'phase': saving && step == 3
+              ? 'verifying'
+              : saving
+              ? 'sending'
+              : 'reading',
+        };
+      }
+      _emit();
+    });
+  }
+
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    _passportTimer?.cancel();
     unawaited(_events.close());
   }
 }

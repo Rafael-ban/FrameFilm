@@ -71,7 +71,7 @@ void main() {
           .text,
       'Amiya',
     );
-    expect(find.textContaining('关闭应用后不保留'), findsOneWidget);
+    expect(find.textContaining('草稿自动保存在本机'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 

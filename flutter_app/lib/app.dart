@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'device_gateway.dart';
 import 'preview_device_gateway.dart';
 import 'github_release_service.dart';
+import 'passport_editor.dart';
 
 enum FilmTheme { automatic, forFilm, arknights }
 
@@ -51,9 +52,8 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   bool loading = false;
   bool wasConnected = false;
   Timer? loadingTimer;
-  final operatorName = TextEditingController();
-  final operatorId = TextEditingController();
-  final operatorRole = TextEditingController();
+  final passportEditor = PassportEditorController();
+
   final deviceSuffix = TextEditingController();
   final wakeInterval = TextEditingController();
   bool? autoSleepDraft, timedWakeDraft;
@@ -127,9 +127,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     if (device.gateway case final PreviewDeviceGateway preview) {
       preview.dispose();
     }
-    operatorName.dispose();
-    operatorId.dispose();
-    operatorRole.dispose();
+
     deviceSuffix.dispose();
     wakeInterval.dispose();
     super.dispose();
@@ -572,6 +570,8 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
         supported &&
         !device.busy &&
         !snapshot.importing &&
+        !snapshot.settingsBusy &&
+        !snapshot.passportBusy &&
         !transfer.active &&
         !transfer.canConfirm;
     final editable =
@@ -685,6 +685,8 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
         supported &&
         !device.busy &&
         !snapshot.importing &&
+        !snapshot.settingsBusy &&
+        !snapshot.passportBusy &&
         !globalTransfer.active &&
         !globalTransfer.canConfirm;
     final phase = switch (transfer.phase) {
@@ -792,6 +794,8 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
         supported &&
         !device.busy &&
         !snapshot.importing &&
+        !snapshot.settingsBusy &&
+        !snapshot.passportBusy &&
         !transfer.active &&
         !transfer.canConfirm &&
         !(transfer.canRetry && !transfer.cleanupCompleted);
@@ -982,100 +986,91 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   ];
 
   List<Widget> passportPage(BuildContext context) => [
+    if (device.gateway is PreviewDeviceGateway)
+      const Text('模拟设备：发送仅保存到演示内存，重置演示会清除；本地草稿单独保留。'),
+    if (device.errorMessage != null)
+      Text(
+        device.errorMessage!,
+        style: TextStyle(color: Theme.of(context).colorScheme.error),
+      ),
     panel(
+      context,
+      child: PassportEditor(
+        controller: passportEditor,
+        canOperate: device.canEditSettings,
+        busy: device.snapshot.passportBusy || device.busy,
+        operation: device.snapshot.passport,
+        onRead: () => device.command('readPassport'),
+        onSave: (json, bin) =>
+            device.command('savePassport', {'json': json, 'bin': bin}),
+        onCancel: () => device.command('cancelPassport'),
+        onOpen: () => device.command('openDevicePage', {'appId': 6}),
+      ),
+    ),
+  ];
+
+  Widget remotePanel(BuildContext context) {
+    Widget key(String label, int value, IconData icon) => OutlinedButton.icon(
+      key: Key('remote-key-$value'),
+      onPressed: device.canEditSettings
+          ? () => device.command('remoteKey', {'key': value})
+          : null,
+      icon: Icon(icon),
+      label: Text(label),
+    );
+    return panel(
       context,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('本地表单预览 · 未保存到设备；关闭应用后不保留。'),
-          const SizedBox(height: 20),
-          TextField(
-            key: const Key('operator-name'),
-            controller: operatorName,
-            decoration: const InputDecoration(
-              labelText: '代号',
-              hintText: '输入干员代号',
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: operatorId,
-            decoration: const InputDecoration(
-              labelText: '编号',
-              hintText: '输入通行证编号',
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: operatorRole,
-            decoration: const InputDecoration(
-              labelText: '职能',
-              hintText: '输入所属职能',
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-        ],
-      ),
-    ),
-    const SizedBox(height: 24),
-    Container(
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        color: const Color(0xff222629),
-        border: Border.all(color: const Color(0xff83afc1)),
-        borderRadius: BorderRadius.zero,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'RHODES ISLAND',
-            style: TextStyle(
-              color: Color(0xfff0f1f2),
-              letterSpacing: 4,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'OPERATOR PASS',
-            style: TextStyle(color: Color(0xff83afc1), letterSpacing: 2),
-          ),
-          const SizedBox(height: 32),
-          Text(
-            operatorName.text.isEmpty ? '待填写代号' : operatorName.text,
-            style: const TextStyle(
-              color: Color(0xfff0f1f2),
-              fontSize: 32,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'ID  /  ${operatorId.text.isEmpty ? '—' : operatorId.text}',
-            style: const TextStyle(color: Color(0xfff0f1f2)),
-          ),
+          Text('设备遥控', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
-          Text(
-            'CLASS  /  ${operatorRole.text.isEmpty ? '—' : operatorRole.text}',
-            style: const TextStyle(color: Color(0xfff0f1f2)),
+          const Text('回包表示按键已收到，电子纸刷新仍需等待。休眠后需按实体确认键唤醒。'),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              // Match the existing ForFilm panel and Ark physical key direction.
+              key('上', 3, Icons.arrow_upward),
+              key('确认', 0, Icons.check),
+              key('下', 2, Icons.arrow_downward),
+              key('返回主菜单', 4, Icons.keyboard_return),
+              key('休眠', 1, Icons.bedtime_outlined),
+            ],
           ),
-          const SizedBox(height: 28),
-          const Divider(color: Color(0xff41484d)),
-          const Text(
-            'LOCAL PREVIEW · NOT SYNCED',
-            style: TextStyle(
-              color: Color(0xff83afc1),
-              fontSize: 11,
-              letterSpacing: 2,
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final entry in const [
+                (5, '主菜单'),
+                (6, '通行证'),
+                (0, '图片'),
+                (4, '系统设置'),
+              ])
+                TextButton(
+                  onPressed: device.canEditSettings
+                      ? () => device.command('openDevicePage', {
+                          'appId': entry.$1,
+                        })
+                      : null,
+                  child: Text('打开${entry.$2}'),
+                ),
+            ],
+          ),
+          if (device.snapshot.settingsMessage != null)
+            Text(device.snapshot.settingsMessage!),
+          if (device.errorMessage != null)
+            Text(
+              device.errorMessage!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
-          ),
         ],
       ),
-    ),
-  ];
+    );
+  }
 
   Widget deviceSettingsPanel(BuildContext context) {
     final snapshot = device.snapshot;
@@ -1229,6 +1224,8 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     const SizedBox(height: 20),
     deviceSettingsPanel(context),
     const SizedBox(height: 20),
+    remotePanel(context),
+    const SizedBox(height: 20),
     firmwarePanel(context),
     const SizedBox(height: 20),
     transferStatus(context, kind: 'firmware'),
@@ -1253,7 +1250,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
           const Divider(height: 32),
           const Text(
-            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息与休眠设置、改名和时间同步、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、通行证内存表单预览。\n\n后续阶段\n图片与动画编辑、film 转换及通行证同步。',
+            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息与休眠设置、改名和时间同步、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、设备遥控、通行证读取/发送与本地草稿。\n\n后续阶段\n图片与动画编辑、film 转换及统一 UI。',
           ),
         ],
       ),
