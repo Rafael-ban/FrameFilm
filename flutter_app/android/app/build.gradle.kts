@@ -44,7 +44,7 @@ android {
 kotlin {
     sourceSets.getByName("main").kotlin.apply {
         srcDir(rootProject.file("../../android/app/src/main/java"))
-        exclude("org/framefilm/ark/MainActivity.kt", "org/framefilm/ark/ArkUi.kt", "org/framefilm/ark/ArkCameraProvider.kt")
+        exclude("org/framefilm/ark/MainActivity.kt", "org/framefilm/ark/ArkUi.kt")
     }
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17

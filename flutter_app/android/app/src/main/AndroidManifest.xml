@@ -15,6 +15,11 @@
         android:label="FrameFilm Ark Flutter"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <provider
+            android:name="org.framefilm.ark.ArkCameraProvider"
+            android:authorities="${applicationId}.camera"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

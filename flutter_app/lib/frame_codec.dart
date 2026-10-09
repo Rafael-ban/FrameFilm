@@ -3,6 +3,10 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'frame_algorithms.dart';
+import 'frame_lut.dart';
+export 'frame_algorithms.dart' show FrameAlgorithm;
+
 enum FrameFormat { sixColor, monoFast }
 
 enum FrameFit { cover, contain }
@@ -19,12 +23,16 @@ class FrameOptions {
     this.contrast = 1,
     this.saturation = 1,
     this.dither = false,
+    this.algorithm = FrameAlgorithm.atkinsonEnhanced,
+    this.ditherStrength = 1,
   });
   final FrameFormat format;
   final FrameFit fit;
   final int quarterTurns;
   final double zoom, panX, panY, brightness, contrast, saturation;
   final bool dither;
+  final FrameAlgorithm algorithm;
+  final double ditherStrength;
 }
 
 class FrameResult {
@@ -46,17 +54,61 @@ class FrameCancelledException implements Exception {
   String toString() => '转换已取消';
 }
 
-const _palette = <List<int>>[
-  [0, 0, 0],
-  [255, 255, 255],
-  [255, 255, 0],
-  [255, 0, 0],
-  [0, 0, 255],
-  [41, 204, 20],
-];
-
 void _check(bool Function()? cancelled) {
   if (cancelled?.call() ?? false) throw const FrameCancelledException();
+}
+
+Future<Uint8List> _quantizeMono(
+  Uint8List rgba,
+  bool dither,
+  bool Function()? isCancelled,
+  void Function(double)? onProgress,
+) async {
+  final indices = Uint8List(480 * 720);
+  var current = Float64List(482 * 3);
+  var next = Float64List(482 * 3);
+  for (var y = 0; y < 720; y++) {
+    for (var x = 0; x < 480; x++) {
+      final pixel = y * 480 + x, offset = (x + 1) * 3;
+      final channels = <double>[
+        for (var c = 0; c < 3; c++)
+          (rgba[pixel * 4 + c] + current[offset + c]).clamp(0, 255),
+      ];
+      final black =
+          channels[0] * channels[0] +
+          channels[1] * channels[1] +
+          channels[2] * channels[2];
+      final white =
+          (channels[0] - 255) * (channels[0] - 255) +
+          (channels[1] - 255) * (channels[1] - 255) +
+          (channels[2] - 255) * (channels[2] - 255);
+      final color = black < white ? 0 : 255;
+      indices[pixel] = color == 0 ? 0 : 1;
+      for (var c = 0; c < 3; c++) {
+        rgba[pixel * 4 + c] = color;
+        if (dither) {
+          final error = channels[c] - color;
+          current[offset + 3 + c] += error * 7 / 16;
+          next[offset - 3 + c] += error * 3 / 16;
+          next[offset + c] += error * 5 / 16;
+          next[offset + 3 + c] += error / 16;
+        }
+      }
+      rgba[pixel * 4 + 3] = 255;
+    }
+    final old = current;
+    current = next;
+    next = old;
+    next.fillRange(0, next.length, 0);
+    _check(isCancelled);
+    onProgress?.call(.05 + .85 * (y + 1) / 720);
+    _check(isCancelled);
+    if ((y + 1) % 8 == 0 || y == 719) {
+      await Future<void>.delayed(Duration.zero);
+      _check(isCancelled);
+    }
+  }
+  return indices;
 }
 
 /// Portrait logical coordinates map to physical (height - 1 - y, x).
@@ -116,6 +168,7 @@ Future<ui.Image> _render(
     options.brightness,
     options.contrast,
     options.saturation,
+    options.ditherStrength,
   ];
   if (values.any((v) => !v.isFinite) || options.zoom <= 0) {
     throw ArgumentError('无效图片调整参数');
@@ -169,6 +222,40 @@ Future<Uint8List> _png(ui.Image image) async =>
     (await image.toByteData(format: ui.ImageByteFormat.png))!.buffer
         .asUint8List();
 
+void _adjustRgba(Uint8List rgba, FrameOptions options) {
+  if (options.brightness != 0) {
+    for (var i = 0; i < rgba.length; i += 4) {
+      for (var c = 0; c < 3; c++) {
+        rgba[i + c] = (rgba[i + c] + options.brightness * 255)
+            .clamp(0, 255)
+            .round();
+      }
+    }
+  }
+  adjustFrameColors(
+    rgba,
+    contrast: options.contrast,
+    saturation: options.saturation,
+  );
+}
+
+Future<Uint8List> _encodeRgba(Uint8List rgba) async {
+  final completer = Completer<ui.Image>();
+  ui.decodeImageFromPixels(
+    rgba,
+    480,
+    720,
+    ui.PixelFormat.rgba8888,
+    completer.complete,
+  );
+  final preview = await completer.future;
+  try {
+    return await _png(preview);
+  } finally {
+    preview.dispose();
+  }
+}
+
 Future<Uint8List> prepareFrame(
   Uint8List source,
   FrameOptions options, {
@@ -177,7 +264,11 @@ Future<Uint8List> prepareFrame(
 }) async {
   final image = await _render(source, options, isCancelled);
   try {
-    final result = await _png(image);
+    final rgba = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!
+        .buffer
+        .asUint8List();
+    _adjustRgba(rgba, options);
+    final result = await _encodeRgba(rgba);
     _check(isCancelled);
     onProgress?.call(1);
     return result;
@@ -200,83 +291,37 @@ Future<FrameResult> convertFrame(
   } finally {
     image.dispose();
   }
-  final indices = Uint8List(480 * 720);
-  var current = Float64List(482 * 3);
-  var next = Float64List(482 * 3);
-  final channels = Float64List(3);
-  for (var y = 0; y < 720; y++) {
-    _check(isCancelled);
-    for (var x = 0; x < 480; x++) {
-      final pixel = y * 480 + x;
-      final offset = (x + 1) * 3;
-      final lum =
-          .2126 * rgba[pixel * 4] +
-          .7152 * rgba[pixel * 4 + 1] +
-          .0722 * rgba[pixel * 4 + 2];
-      for (var c = 0; c < 3; c++) {
-        final saturated =
-            lum + (rgba[pixel * 4 + c] - lum) * options.saturation;
-        channels[c] =
-            ((saturated - 128) * options.contrast +
-                    128 +
-                    options.brightness * 255 +
-                    current[offset + c])
-                .clamp(0, 255);
-      }
-      var nearest = 0;
-      var distance = double.infinity;
-      for (
-        var p = 0;
-        p < (options.format == FrameFormat.monoFast ? 2 : 6);
-        p++
-      ) {
-        var d = 0.0;
-        for (var c = 0; c < 3; c++) {
-          d += math.pow(channels[c] - _palette[p][c], 2);
-        }
-        if (d < distance) {
-          distance = d;
-          nearest = p;
-        }
-      }
-      indices[pixel] = nearest;
-      for (var c = 0; c < 3; c++) {
-        rgba[pixel * 4 + c] = _palette[nearest][c];
-        if (options.dither) {
-          final error = channels[c] - _palette[nearest][c];
-          current[offset + 3 + c] += error * 7 / 16;
-          next[offset - 3 + c] += error * 3 / 16;
-          next[offset + c] += error * 5 / 16;
-          next[offset + 3 + c] += error / 16;
-        }
-      }
-      rgba[pixel * 4 + 3] = 255;
-    }
-    final old = current;
-    current = next;
-    next = old;
-    next.fillRange(0, next.length, 0);
-    if (y % 8 == 0) {
-      onProgress?.call(.05 + .85 * y / 720);
-      await Future<void>.delayed(Duration.zero);
-    }
-  }
+  _adjustRgba(rgba, options);
   _check(isCancelled);
-  final completer = Completer<ui.Image>();
-  ui.decodeImageFromPixels(
-    rgba,
-    480,
-    720,
-    ui.PixelFormat.rgba8888,
-    completer.complete,
-  );
-  final preview = await completer.future;
-  late Uint8List png;
-  try {
-    png = await _png(preview);
-  } finally {
-    preview.dispose();
+  Uint8List indices;
+  if (options.format == FrameFormat.monoFast) {
+    // MonoFast is a Flutter extension; retain its existing luminance/FS path.
+    indices = await _quantizeMono(
+      rgba,
+      options.dither,
+      isCancelled,
+      onProgress,
+    );
+  } else {
+    final usesAe =
+        options.dither && options.algorithm == FrameAlgorithm.atkinsonEnhanced;
+    _check(isCancelled);
+    indices = await quantizeFramePixels(
+      rgba,
+      480,
+      720,
+      algorithm: options.algorithm,
+      strength: options.ditherStrength,
+      dither: options.dither,
+      correctionLut: usesAe ? forFilmCorrectionLut : null,
+      selectionLut: usesAe ? forFilmSelectionLut : null,
+      checkCancelled: () => _check(isCancelled),
+      onProgress: onProgress,
+    );
   }
+  onProgress?.call(.9);
+  _check(isCancelled);
+  final png = await _encodeRgba(rgba);
   _check(isCancelled);
   final film = packFramePixels(indices, format: options.format);
   onProgress?.call(1);

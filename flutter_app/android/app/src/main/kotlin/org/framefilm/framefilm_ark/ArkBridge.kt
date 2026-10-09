@@ -2,9 +2,13 @@ package org.framefilm.framefilm_ark
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
 import android.content.Intent
+import android.net.Uri
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import java.io.File
+import java.io.InputStream
 import java.util.concurrent.Executors
 import org.framefilm.ark.FilmConverter
 import org.framefilm.ark.FirmwareDownloader
@@ -92,6 +96,9 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private var passportTotal = 0
     private var passportMessage = ""
     private var avatarResult: MethodChannel.Result? = null
+    private var frameResult: MethodChannel.Result? = null
+    private var frameCameraUri: Uri? = null
+    private val frameCameraFile = File(activity.cacheDir, "ark-camera/photo.jpg")
     private val drafts get() = activity.getSharedPreferences("ark-passport", Activity.MODE_PRIVATE)
     private fun passportState(): Map<String, Any?> = mapOf(
         "phase" to passportPhase, "completed" to passportCompleted, "total" to passportTotal,
@@ -191,13 +198,43 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                     result.success(null)
                 }
                 "pickPassportAvatar" -> {
-                    checkReplace(); check(avatarResult == null) { "正在选择头像" }
+                    checkReplace(); check(avatarResult == null && frameResult == null) { "正在选择图片" }
                     avatarResult = result
                     try {
                         activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE); type = "image/*"
                         }, PICK_AVATAR)
                     } catch (error: Exception) { avatarResult = null; throw error }
+                }
+                "pickFramePhotos" -> {
+                    checkReplace(); check(avatarResult == null && frameResult == null) { "正在选择图片" }
+                    frameResult = result
+                    try {
+                        activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "image/*"
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, call.argument<Boolean>("multiple") == true)
+                        }, PICK_FRAME_PHOTOS)
+                    } catch (error: Exception) { frameResult = null; throw error }
+                }
+                "captureFramePhoto" -> {
+                    checkReplace(); check(avatarResult == null && frameResult == null) { "正在选择图片" }
+                    frameResult = result
+                    try {
+                        frameCameraFile.parentFile?.mkdirs()
+                        frameCameraFile.delete()
+                        val uri = Uri.parse("content://${activity.packageName}.camera/photo.jpg")
+                        frameCameraUri = uri
+                        activity.startActivityForResult(Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                            putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                            clipData = ClipData.newRawUri("photo", uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                        }, CAPTURE_FRAME_PHOTO)
+                    } catch (error: Exception) {
+                        frameResult = null
+                        cleanupFrameCamera()
+                        throw error
+                    }
                 }
                 "readPassport" -> beginPassport(result)
                 "savePassport" -> savePassport(call, result)
@@ -745,7 +782,7 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         ((data[offset].toInt() and 255) shl 8) or (data[offset + 1].toInt() and 255)
 
     private fun checkReplace() {
-        check(!importing && !refreshing && !session.transferActive && !transferPermission &&
+        check(!importing && !refreshing && frameResult == null && !session.transferActive && !transferPermission &&
             transfer.cleanupCompleted && !transfer.canConfirm) { "请等待导入或直传清理结束" }
     }
 
@@ -923,7 +960,110 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         }
     }
 
+    private fun readFramePhoto(input: InputStream, limit: Int): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            require(output.size() + count <= limit) { "图片超过大小限制" }
+            output.write(buffer, 0, count)
+        }
+        require(output.size() > 0) { "图片为空" }
+        return output.toByteArray()
+    }
+
+    private fun cleanupFrameCamera() {
+        frameCameraUri?.let {
+            activity.revokeUriPermission(it,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }
+        frameCameraUri = null
+        frameCameraFile.delete()
+    }
+
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == PICK_FRAME_PHOTOS) {
+            val result = frameResult ?: return true
+            if (resultCode != Activity.RESULT_OK) {
+                frameResult = null
+                result.success(emptyList<Map<String, Any>>())
+                return true
+            }
+            val uris = data?.clipData?.let { clip ->
+                (0 until clip.itemCount).map { clip.getItemAt(it).uri }
+            } ?: listOfNotNull(data?.data)
+            if (uris.isEmpty()) {
+                frameResult = null
+                result.success(emptyList<Map<String, Any>>())
+                return true
+            }
+            worker.execute {
+                val photos = ArrayList<Map<String, Any>>(uris.size)
+                try {
+                    require(uris.size <= MAX_FRAME_PHOTOS) { "最多选择 20 张图片" }
+                    var total = 0
+                    for ((index, uri) in uris.withIndex()) {
+                        val displayName = activity.contentResolver.query(uri,
+                            arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                            if (it.moveToFirst()) it.getString(0) else null
+                        }?.takeIf { it.isNotBlank() } ?: "photo_${index + 1}.jpg"
+                        val bytes = checkNotNull(activity.contentResolver.openInputStream(uri)).use {
+                            readFramePhoto(it, minOf(MAX_FRAME_PHOTO_BYTES, MAX_FRAME_TOTAL_BYTES - total))
+                        }
+                        total += bytes.size
+                        photos.add(mapOf("name" to displayName, "bytes" to bytes))
+                    }
+                    main.post {
+                        if (!closed && frameResult === result) {
+                            frameResult = null
+                            result.success(photos)
+                        }
+                    }
+                } catch (error: Exception) {
+                    photos.clear()
+                    main.post {
+                        if (!closed && frameResult === result) {
+                            frameResult = null
+                            result.error("frame_pick_failed", error.message ?: "读取图片失败", null)
+                        }
+                    }
+                }
+            }
+            return true
+        }
+        if (requestCode == CAPTURE_FRAME_PHOTO) {
+            val result = frameResult ?: run { cleanupFrameCamera(); return true }
+            if (resultCode != Activity.RESULT_OK) {
+                frameResult = null
+                cleanupFrameCamera()
+                result.success(null)
+                return true
+            }
+            worker.execute {
+                try {
+                    val bytes = frameCameraFile.inputStream().use {
+                        readFramePhoto(it, MAX_FRAME_PHOTO_BYTES)
+                    }
+                    main.post {
+                        cleanupFrameCamera()
+                        if (!closed && frameResult === result) {
+                            frameResult = null
+                            result.success(mapOf("name" to "camera.jpg", "bytes" to bytes))
+                        }
+                    }
+                } catch (error: Exception) {
+                    main.post {
+                        cleanupFrameCamera()
+                        if (!closed && frameResult === result) {
+                            frameResult = null
+                            result.error("frame_capture_failed", error.message ?: "读取照片失败", null)
+                        }
+                    }
+                }
+            }
+            return true
+        }
         if (requestCode == PICK_AVATAR) {
             val result = avatarResult ?: return true
             avatarResult = null
@@ -1031,6 +1171,8 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         }
         download = null
         avatarResult?.error("closed", "会话已关闭", null); avatarResult = null
+        frameResult?.error("closed", "会话已关闭", null); frameResult = null
+        cleanupFrameCamera()
         clearRead("closed", "蓝牙会话已关闭")
         permissionResult?.error("closed", "蓝牙会话已关闭", null)
         permissionResult = null
@@ -1046,5 +1188,15 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         if (!active) { deleteCurrent(); deleteFirmware() }
     }
 
-    private companion object { const val PERMISSION_REQUEST = 4207; const val PICK_FILM = 4208; const val PICK_AVATAR = 4209; var cacheInitialized = false }
+    private companion object {
+        const val PERMISSION_REQUEST = 4207
+        const val PICK_FILM = 4208
+        const val PICK_AVATAR = 4209
+        const val PICK_FRAME_PHOTOS = 4210
+        const val CAPTURE_FRAME_PHOTO = 4211
+        const val MAX_FRAME_PHOTOS = 20
+        const val MAX_FRAME_PHOTO_BYTES = 8 * 1024 * 1024
+        const val MAX_FRAME_TOTAL_BYTES = 64 * 1024 * 1024
+        var cacheInitialized = false
+    }
 }

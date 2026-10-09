@@ -41,6 +41,12 @@ void main() {
         await tester.scrollUntilVisible(
           find.byKey(const Key('transfer-phase')),
           300,
+          scrollable: find
+              .descendant(
+                of: find.byKey(const Key('workbench-content')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
         );
         expect(find.text('private-$kind-$phase'), findsNothing);
         expect(find.text('固件构建已确认'), findsNothing);
@@ -73,6 +79,12 @@ void main() {
         await tester.scrollUntilVisible(
           find.byKey(const Key('transfer-phase')),
           300,
+          scrollable: find
+              .descendant(
+                of: find.byKey(const Key('workbench-content')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
         );
         await tester.pump();
         expect(find.text('private-$kind-$phase'), findsOneWidget);
@@ -98,6 +110,16 @@ void main() {
       );
       await tester.pump();
       await openPage(tester, 'Film');
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('transfer-phase')),
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const Key('workbench-content')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       expect(find.text('等待文件'), findsOneWidget);
       expect(find.text('固件构建已确认'), findsNothing);
       await tester.pumpWidget(const SizedBox());

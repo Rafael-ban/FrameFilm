@@ -8,6 +8,8 @@ import 'preview_device_gateway.dart';
 import 'github_release_service.dart';
 import 'passport_editor.dart';
 import 'frame_editor.dart';
+import 'frame_quick_page.dart';
+import 'frame_media.dart' as frame_media;
 
 enum FilmTheme { automatic, forFilm, arknights }
 
@@ -55,6 +57,8 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   Timer? loadingTimer;
   final passportEditor = PassportEditorController();
   final frameEditor = FrameEditorController();
+  final frameQuick = FrameQuickController();
+  int frameSendEpoch = 0;
 
   final deviceSuffix = TextEditingController();
   final wakeInterval = TextEditingController();
@@ -77,8 +81,17 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   @override
   void initState() {
     super.initState();
+    frameQuick.addListener(onQuickChanged);
     device = DeviceController(widget.gateway ?? PlatformDeviceGateway());
     device.addListener(onDeviceChanged);
+  }
+
+  void onQuickChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void navigate(int value) {
+    if (!frameQuick.busy) setState(() => page = value);
   }
 
   void onDeviceChanged() {
@@ -130,6 +143,8 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
       preview.dispose();
     }
 
+    frameQuick.removeListener(onQuickChanged);
+    frameQuick.dispose();
     frameEditor.dispose();
     deviceSuffix.dispose();
     wakeInterval.dispose();
@@ -249,8 +264,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                           if (wide)
                             NavigationRail(
                               selectedIndex: page,
-                              onDestinationSelected: (value) =>
-                                  setState(() => page = value),
+                              onDestinationSelected: navigate,
                               labelType: NavigationRailLabelType.all,
                               destinations: destinations
                                   .map(
@@ -269,6 +283,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                                   maxWidth: 980,
                                 ),
                                 child: ListView(
+                                  key: const Key('workbench-content'),
                                   padding: EdgeInsets.all(wide ? 32 : 20),
                                   children: [
                                     Text(
@@ -309,8 +324,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                 ? null
                 : NavigationBar(
                     selectedIndex: page,
-                    onDestinationSelected: (value) =>
-                        setState(() => page = value),
+                    onDestinationSelected: navigate,
                     labelBehavior:
                         NavigationDestinationLabelBehavior.alwaysShow,
                     destinations: destinations
@@ -418,23 +432,64 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     if (!device.canImportFilm) throw StateError('请等待当前设备操作结束');
     await device.command('importGeneratedFilm', {'bytes': bytes, 'name': name});
     if (device.errorMessage != null) throw StateError(device.errorMessage!);
-    if (mounted) setState(() => page = 2);
+  }
+
+  Future<void> cancelFrameSend() async {
+    frameSendEpoch++;
+    await device.command('cancelTransfer');
+  }
+
+  Future<void> sendFrame(Uint8List bytes, String name) async {
+    if (!device.snapshot.connected) throw StateError('请先连接 Ark');
+    final epoch = ++frameSendEpoch;
+    await importFrame(bytes, name);
+    if (epoch != frameSendEpoch) throw StateError('发送已取消');
+    await device.command('startTransfer');
+    if (device.errorMessage != null) throw StateError(device.errorMessage!);
+    final completed = Completer<void>();
+    void changed() {
+      if (completed.isCompleted) return;
+      final t = device.snapshot.transfer;
+      if (t.kind != 'film' || t.active) return;
+      if (t.success && t.cleanupCompleted) {
+        completed.complete();
+      } else if (t.cleanupCompleted || !device.snapshot.connected) {
+        completed.completeError(StateError(t.message));
+      }
+    }
+
+    device.addListener(changed);
+    try {
+      changed();
+      await completed.future.timeout(const Duration(minutes: 4));
+    } on TimeoutException {
+      await cancelFrameSend();
+      rethrow;
+    } finally {
+      device.removeListener(changed);
+    }
   }
 
   List<Widget> framePage(BuildContext context) => [
     if (device.gateway is PreviewDeviceGateway)
       const Padding(
         padding: EdgeInsets.only(bottom: 12),
-        child: Text('图片转换和下载会生成真实文件；转入 Film 页后的设备发送为模拟操作。'),
+        child: Text('图片转换为真实文件；当前连接和发送为模拟操作。'),
       ),
-    panel(
-      context,
-      child: FrameEditor(
-        controller: frameEditor,
-        canImportFilm: device.canImportFilm,
-        onImportFilm: importFrame,
-      ),
+    FrameQuickPage(
+      controller: frameQuick,
+      pickImages: frame_media.pickFramePhotos,
+      captureImage: () => frame_media.captureFramePhoto(context),
+      sendFilm: sendFrame,
+      cancelSend: cancelFrameSend,
+      canSend: device.canImportFilm && device.snapshot.connected,
+      battery: device.snapshot.battery,
     ),
+    if (device.snapshot.transfer.kind == 'film' &&
+        device.snapshot.transfer.phase != 'idle') ...[
+      const SizedBox(height: 12),
+      transferStatus(context, kind: 'film'),
+    ],
   ];
   List<Widget> connectionPage(BuildContext context) {
     final snapshot = device.snapshot;
@@ -596,6 +651,19 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     final editable =
         available && !(transfer.canRetry && !transfer.cleanupCompleted);
     return [
+      FrameEditor(
+        controller: frameEditor,
+        canImportFilm: device.canImportFilm,
+        canSend: device.canImportFilm && device.snapshot.connected,
+        onImportFilm: importFrame,
+        onSendFilm: sendFrame,
+        onCancelSend: cancelFrameSend,
+        pickPhoto: () async {
+          final photos = await frame_media.pickFramePhotos(multiple: false);
+          return photos.isEmpty ? null : photos.first;
+        },
+      ),
+      const SizedBox(height: 24),
       panel(
         context,
         child: Column(
@@ -1269,7 +1337,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
           const Divider(height: 32),
           const Text(
-            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息与休眠设置、改名和时间同步、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、设备遥控、通行证读取/发送与本地草稿、图片裁剪与 film 转换。\n\n后续阶段\n动画编辑、高级图片算法及统一 UI。',
+            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息与休眠设置、改名和时间同步、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、设备遥控、通行证读取/发送与本地草稿、Frame 拾光/定影/一言/批量入口与 Film 图片处理。\n\n后续阶段\n按原网页继续迁移高级算法、动画工坊、设备文件管理及统一 UI。',
           ),
         ],
       ),

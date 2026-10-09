@@ -28,18 +28,21 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.text('上传图像'));
     await tester.pumpAndSettle();
     expect(c.hasCurrentResult, isTrue);
     expect(find.textContaining('加载失败'), findsOneWidget);
+    await tester.ensureVisible(find.text('扩展选项'));
+    await tester.tap(find.text('扩展选项'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('黑白 MonoFast'));
     await tester.tap(find.text('黑白 MonoFast'));
     await tester.pumpAndSettle();
     expect(c.hasCurrentResult, isFalse);
-    await tester.ensureVisible(find.text('转入 Film 页面'));
+    await tester.ensureVisible(find.text('导入直传区'));
     final button = tester.widget<OutlinedButton>(
       find.ancestor(
-        of: find.text('转入 Film 页面'),
+        of: find.text('导入直传区'),
         matching: find.byType(OutlinedButton),
       ),
     );
@@ -70,7 +73,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('选择照片'));
+    await tester.tap(find.text('上传图像'));
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     await tester.pump(const Duration(seconds: 2));
     expect(c.source, isNull);
