@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 jobs:
   android:
-    name: Flutter Android debug APK
+    name: Flutter Android release APK (temporary debug signing)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -51,22 +51,22 @@ jobs:
           mkdir -p ../ci-logs
           flutter --version 2>&1 | tee ../ci-logs/flutter-version.log
           flutter pub get 2>&1 | tee ../ci-logs/flutter-pub.log
-          flutter build apk --debug 2>&1 | tee ../ci-logs/flutter-build.log
-      - name: Check Flutter debug runtime assets
+          flutter build apk --release 2>&1 | tee ../ci-logs/flutter-build.log
+      - name: Check Flutter release runtime assets
         shell: python
         run: |
           import zipfile
-          with zipfile.ZipFile('flutter_app/build/app/outputs/flutter-apk/app-debug.apk') as archive:
-              for name in ('kernel_blob.bin', 'isolate_snapshot_data', 'vm_snapshot_data'):
-                  info = archive.getinfo('assets/flutter_assets/' + name)
-                  if name != 'vm_snapshot_data' and info.file_size == 0:
-                      raise RuntimeError(f'Empty Flutter runtime asset: {name}')
-                  print(f'{name}: {info.file_size} bytes')
+          with zipfile.ZipFile('flutter_app/build/app/outputs/flutter-apk/app-release.apk') as archive:
+              names = archive.namelist()
+              assert any(name.endswith('/libapp.so') for name in names), 'Missing AOT application'
+              assert any(name.endswith('/libflutter.so') for name in names), 'Missing Flutter engine'
+              assert 'assets/flutter_assets/kernel_blob.bin' not in names, 'Unexpected debug Dart kernel'
+              print('Release AOT application and Flutter engine are present.')
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ark-flutter-debug-apk
-          path: flutter_app/build/app/outputs/flutter-apk/app-debug.apk
+          name: ark-flutter-release-apk
+          path: flutter_app/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
       - name: Upload Android build logs
         if: always()

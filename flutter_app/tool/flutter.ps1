@@ -4,6 +4,12 @@ param(
     [string[]]$FlutterArguments
 )
 $ErrorActionPreference = 'Stop'
+# Web is the development preview; APKs default to Release even while temporarily debug-signed.
+if ($FlutterArguments.Count -ge 2 -and $FlutterArguments[0] -eq 'build' -and
+    !(@('--debug', '--profile', '--release') | Where-Object { $FlutterArguments -contains $_ })) {
+    if ($FlutterArguments[1] -eq 'web') { $FlutterArguments += '--debug' }
+    if ($FlutterArguments[1] -eq 'apk') { $FlutterArguments += '--release' }
+}
 $storage = if ($env:FRAMEFILM_DEV_ROOT) { $env:FRAMEFILM_DEV_ROOT } else { 'D:\dev-tool' }
 $app = Split-Path $PSScriptRoot -Parent
 $flutter = Join-Path $storage 'FrameFilm-toolchains\flutter'
@@ -67,6 +73,22 @@ try {
                 }
             }
             Write-Output 'Verified debug APK: Dart kernel and runtime snapshots are present.'
+        } finally { $apk.Dispose() }
+    }
+    if ($result -eq 0 -and $FlutterArguments.Count -ge 2 -and
+        $FlutterArguments[0] -eq 'build' -and $FlutterArguments[1] -eq 'apk' -and
+        $FlutterArguments -contains '--release' -and
+        $FlutterArguments -notcontains '--split-per-abi' -and
+        $FlutterArguments -notcontains '--flavor') {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $apk = [IO.Compression.ZipFile]::OpenRead((Join-Path $output 'app\outputs\flutter-apk\app-release.apk'))
+        try {
+            $names = @($apk.Entries | ForEach-Object { $_.FullName })
+            if (!($names -like 'lib/*/libapp.so') -or !($names -like 'lib/*/libflutter.so') -or
+                $names -contains 'assets/flutter_assets/kernel_blob.bin') {
+                throw 'APK is missing its Release AOT runtime or contains a debug Dart kernel.'
+            }
+            Write-Output 'Verified Release APK: AOT application and Flutter engine are present.'
         } finally { $apk.Dispose() }
     }
 } finally {

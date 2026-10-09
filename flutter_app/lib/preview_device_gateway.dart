@@ -19,6 +19,11 @@ class PreviewDeviceGateway implements DeviceGateway {
   FilmTransfer _transfer = const FilmTransfer();
   FirmwareDownload _download = const FirmwareDownload();
   bool _downloadFailed = false;
+  bool _autoSleep = true, _timedWake = false;
+  int _wakeMinutes = 60;
+  String _name = 'FRAMEFILMARK-DEMO';
+  int? _syncedAt;
+  String? _settingsMessage;
   PreviewScenario scenario = PreviewScenario.normal;
   static const warning = '模拟设备 / 演示数据，不会连接或修改真实设备';
   static const _build = 'demo-build-20261008';
@@ -38,7 +43,12 @@ class PreviewDeviceGateway implements DeviceGateway {
                 DeviceInfo(address: 'DEMO-ARK', name: 'FRAMEFILMARK / 模拟设备'),
               ]
             : const [],
-        name: _connected ? 'FRAMEFILMARK / 模拟设备' : null,
+        name: _connected ? _name : null,
+        autoSleep: _connected ? _autoSleep : null,
+        timedWake: _connected ? _timedWake : null,
+        wakeMinutes: _connected ? _wakeMinutes : null,
+        syncedAt: _connected ? _syncedAt : null,
+        settingsMessage: _connected ? _settingsMessage : null,
         battery: _connected ? 86 : null,
         width: _connected ? 720 : null,
         height: _connected ? 480 : null,
@@ -67,13 +77,49 @@ class PreviewDeviceGateway implements DeviceGateway {
     _transfer = const FilmTransfer();
     _download = const FirmwareDownload();
     _downloadFailed = false;
+    _autoSleep = true;
+    _timedWake = false;
+    _wakeMinutes = 60;
+    _name = 'FRAMEFILMARK-DEMO';
+    _syncedAt = null;
+    _settingsMessage = null;
     _emit();
   }
 
   @override
   Future<void> invoke(String method, [Map<String, Object?>? arguments]) async {
     if (_disposed) return;
+    if (deviceSettingsMethods.contains(method) &&
+        (!_connected ||
+            _transfer.active ||
+            _transfer.canConfirm ||
+            _download.canCancel ||
+            (_transfer.canRetry && !_transfer.cleanupCompleted))) {
+      throw StateError('请先连接模拟设备并等待当前操作完成');
+    }
     switch (method) {
+      case 'setAutoSleep':
+        _autoSleep = arguments!['enabled'] as bool;
+        _settingsMessage = '模拟保存并回读确认';
+      case 'setTimedWake':
+        _timedWake = arguments!['enabled'] as bool;
+        _settingsMessage = '模拟保存并回读确认';
+      case 'setWakeMinutes':
+        final minutes = arguments!['minutes'] as int;
+        if (minutes < 10 || minutes > 2880) {
+          throw ArgumentError('唤醒间隔必须为 10–2880 分钟');
+        }
+        _wakeMinutes = minutes;
+        _settingsMessage = '模拟保存并回读确认';
+      case 'renameDevice':
+        final suffix = arguments!['suffix'] as String;
+        final error = validateDeviceSuffix(suffix);
+        if (error != null) throw ArgumentError(error);
+        _name = 'FRAMEFILMARK-$suffix';
+        _settingsMessage = '模拟已保存，真实设备需重启后广播名生效';
+      case 'syncTime':
+        _syncedAt = DateTime.now().millisecondsSinceEpoch;
+        _settingsMessage = '模拟时间同步完成';
       case 'downloadFirmware':
         _startDownload();
       case 'cancelFirmwareDownload':
@@ -88,6 +134,8 @@ class PreviewDeviceGateway implements DeviceGateway {
         _connected = true;
       case 'disconnect':
         _connected = false;
+        _syncedAt = null;
+        _settingsMessage = null;
       case 'pickFilm':
         _film = const ImportedFilm(
           name: '演示画面.film',

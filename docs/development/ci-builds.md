@@ -14,7 +14,7 @@
 
 仓库忽略 Gradle wrapper 脚本和 jar。CI 使用同版本 Flutter 在临时目录生成 Android 项目，仅复制 wrapper 脚本/jar，不覆盖仓库中的 Gradle 配置和业务代码。
 
-产物 `ark-flutter-debug-apk` 包含可安装的 `app-debug.apk`，使用临时 debug 签名，仅供开发构建；签名可能与本地或其他 CI 运行不同，不保证覆盖安装兼容，正式可更新包需使用稳定签名。上传前检查 APK 中 `kernel_blob.bin`、`isolate_snapshot_data` 存在且非空，`vm_snapshot_data` 必须存在但允许为零字节。日志位于 `ark-flutter-build-logs`。
+产物 `ark-flutter-release-apk` 包含 `app-release.apk`，使用 Release/AOT 编译并暂时沿用 debug 签名。签名可能与本地或其他 CI 运行不同，正式可更新包后续再配置稳定发行签名。上传前检查 `libapp.so` 与 `libflutter.so` 存在且没有 debug 的 `kernel_blob.bin`。日志位于 `ark-flutter-build-logs`。
 
 ## Ark 固件
 
@@ -48,3 +48,5 @@
 本次仅本地修改并检查 YAML 与发布开关，未推送、未触发远端 CI、未发布 Release。2026-10-08 公开 API 实测 HTTP 200，列表为空，因此目前线上暂无可下载固件；发布能力不能当作已远端验证。
 
 参考：[GitHub Releases API](https://docs.github.com/en/rest/releases/releases)、[gh release create](https://cli.github.com/manual/gh_release_create)。
+
+2026-10-09：本机 arm64 Release 构建与 AOT 资源检查通过；CI 的 Release 模式修改仅保存在本地，尚未推送或运行远端验证。

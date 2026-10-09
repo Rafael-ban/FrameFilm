@@ -1,7 +1,30 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+
+String? validateDeviceSuffix(String suffix) {
+  final bytes = utf8.encode(suffix);
+  if (bytes.isEmpty || bytes.length > 16) {
+    return '后缀需为 1–16 UTF-8 字节（中文通常每字 3 字节）';
+  }
+  if (suffix.runes.any(
+    (c) => c < 0x20 || (c >= 0x7f && c <= 0x9f) || (c >= 0xd800 && c <= 0xdfff),
+  )) {
+    return '后缀不能包含控制字符';
+  }
+  return null;
+}
+
+const deviceSettingsMethods = {
+  'refresh',
+  'setAutoSleep',
+  'setTimedWake',
+  'setWakeMinutes',
+  'renameDevice',
+  'syncTime',
+};
 
 class DeviceInfo {
   const DeviceInfo({required this.address, required this.name});
@@ -136,12 +159,20 @@ class FirmwareDownload {
 class DeviceSnapshot {
   const DeviceSnapshot({
     this.connected = false,
+    this.hasConnectionState = true,
     this.message = '尚未连接设备',
     this.devices = const [],
     this.name,
     this.battery,
     this.width,
     this.height,
+    this.autoSleep,
+    this.timedWake,
+    this.wakeMinutes,
+    this.syncedAt,
+    this.settingsMessage,
+    this.settingsBusy = false,
+    this.presentKeys = const {},
     this.importedFile,
     this.importedFirmware,
     this.importing = false,
@@ -157,6 +188,7 @@ class DeviceSnapshot {
   factory DeviceSnapshot.fromMap(Map<Object?, Object?> data) {
     return DeviceSnapshot(
       connected: data['connected'] == true,
+      hasConnectionState: data.containsKey('connected'),
       message: data['message'] as String? ?? '尚未连接设备',
       devices: (data['devices'] as List? ?? const []).map((value) {
         final item = value as Map;
@@ -169,6 +201,13 @@ class DeviceSnapshot {
       battery: (data['battery'] as num?)?.toInt(),
       width: (data['width'] as num?)?.toInt(),
       height: (data['height'] as num?)?.toInt(),
+      autoSleep: data['autoSleep'] as bool?,
+      timedWake: data['timedWake'] as bool?,
+      wakeMinutes: (data['wakeMinutes'] as num?)?.toInt(),
+      syncedAt: (data['syncedAt'] as num?)?.toInt(),
+      settingsMessage: data['settingsMessage'] as String?,
+      settingsBusy: data['settingsBusy'] == true,
+      presentKeys: data.keys.toSet(),
       importedFile: data['importedFile'] is Map
           ? ImportedFilm.fromMap(data['importedFile'] as Map)
           : null,
@@ -191,12 +230,20 @@ class DeviceSnapshot {
   }
 
   final bool connected;
+  final bool hasConnectionState;
   final String message;
   final List<DeviceInfo> devices;
   final String? name;
   final int? battery;
   final int? width;
   final int? height;
+  final bool? autoSleep;
+  final bool? timedWake;
+  final int? wakeMinutes;
+  final int? syncedAt;
+  final String? settingsMessage;
+  final bool settingsBusy;
+  final Set<Object?> presentKeys;
   final ImportedFilm? importedFile;
   final ImportedFirmware? importedFirmware;
   final bool importing;
@@ -208,28 +255,79 @@ class DeviceSnapshot {
   final bool hasImportingState;
   final bool hasTransferState;
 
-  DeviceSnapshot retainingTransfer(DeviceSnapshot previous) => DeviceSnapshot(
-    firmwareDownload: hasDownloadState || firmwareDownload.phase != 'idle'
-        ? firmwareDownload
-        : previous.firmwareDownload,
-    connected: connected,
-    message: message,
-    devices: devices,
-    name: name,
-    battery: battery,
-    width: width,
-    height: height,
-    importedFile: hasFilmState || importedFile != null
-        ? importedFile
-        : previous.importedFile,
-    importing: hasImportingState || importing ? importing : previous.importing,
-    importedFirmware: hasFirmwareState || importedFirmware != null
-        ? importedFirmware
-        : previous.importedFirmware,
-    transfer: hasTransferState || transfer.phase != 'idle'
-        ? transfer
-        : previous.transfer,
-  );
+  DeviceSnapshot retainingTransfer(DeviceSnapshot previous) {
+    final keepConnected = hasConnectionState ? connected : previous.connected;
+    return DeviceSnapshot(
+      firmwareDownload: hasDownloadState || firmwareDownload.phase != 'idle'
+          ? firmwareDownload
+          : previous.firmwareDownload,
+      connected: keepConnected,
+      message: message,
+      devices: devices,
+      name: !keepConnected
+          ? null
+          : presentKeys.contains('name')
+          ? name
+          : name ?? previous.name,
+      battery: !keepConnected
+          ? null
+          : presentKeys.contains('battery')
+          ? battery
+          : battery ?? previous.battery,
+      width: !keepConnected
+          ? null
+          : presentKeys.contains('width')
+          ? width
+          : width ?? previous.width,
+      height: !keepConnected
+          ? null
+          : presentKeys.contains('height')
+          ? height
+          : height ?? previous.height,
+      settingsBusy:
+          keepConnected &&
+          (presentKeys.contains('settingsBusy')
+              ? settingsBusy
+              : settingsBusy || previous.settingsBusy),
+      autoSleep: !keepConnected
+          ? null
+          : presentKeys.contains('autoSleep')
+          ? autoSleep
+          : autoSleep ?? previous.autoSleep,
+      timedWake: !keepConnected
+          ? null
+          : presentKeys.contains('timedWake')
+          ? timedWake
+          : timedWake ?? previous.timedWake,
+      wakeMinutes: !keepConnected
+          ? null
+          : presentKeys.contains('wakeMinutes')
+          ? wakeMinutes
+          : wakeMinutes ?? previous.wakeMinutes,
+      syncedAt: !keepConnected
+          ? null
+          : presentKeys.contains('syncedAt')
+          ? syncedAt
+          : syncedAt ?? previous.syncedAt,
+      settingsMessage: !keepConnected
+          ? null
+          : presentKeys.contains('settingsMessage')
+          ? settingsMessage
+          : settingsMessage ?? previous.settingsMessage,
+      importedFile: hasFilmState || importedFile != null
+          ? importedFile
+          : previous.importedFile,
+      importing: hasImportingState || importing
+          ? importing
+          : previous.importing,
+      importedFirmware: hasFirmwareState || importedFirmware != null
+          ? importedFirmware
+          : previous.importedFirmware,
+      transfer: hasTransferState || transfer.phase != 'idle'
+          ? transfer
+          : previous.transfer,
+    );
+  }
 }
 
 abstract class DeviceGateway {
@@ -283,7 +381,19 @@ class DeviceController extends ChangeNotifier {
   bool _disposed = false;
   StreamSubscription<DeviceSnapshot>? _subscription;
 
+  bool get canEditSettings =>
+      gateway.supported &&
+      snapshot.connected &&
+      !busy &&
+      !snapshot.settingsBusy &&
+      !snapshot.importing &&
+      !snapshot.firmwareDownload.canCancel &&
+      !snapshot.transfer.active &&
+      !snapshot.transfer.canConfirm &&
+      (!snapshot.transfer.canRetry || snapshot.transfer.cleanupCompleted);
+
   Future<void> command(String method, [Map<String, Object?>? arguments]) async {
+    if (deviceSettingsMethods.contains(method) && !canEditSettings) return;
     final cancellingDownload = method == 'cancelFirmwareDownload';
     final cancelling = method == 'cancelTransfer' || cancellingDownload;
     if (!gateway.supported || (busy && !cancelling)) return;

@@ -9,6 +9,7 @@ Flutter 共用界面、Android BLE 桥接与 film / 固件 Wi-Fi Direct 传输�
 - 默认自动模式：离线显示 ForFilm，Ark GATT 就绪后切主题并播放一次过场。名称后续回包不会重播；断连立即取消。明确选择 ForFilm 时保持该外观。
 - 设置可离线预览明日方舟；主题偏好目前只在当前应用会话内保留。
 - Android bridge 接入扫描、权限、连接、断开、0x42 屏参、0x23 电量与 0x54 名字读取。命令同时等待写入完成和同通道回包；超时断开以丢弃旧连接的迟到回包。
+- 设置支持读取/保存自动休眠、定时唤醒与 10–2880 分钟间隔、修改设备名称后缀及同步手机时间/时区；保存后核对设备回读，广播名在重启后生效。传输、下载及清理期间禁用设置。
 - 通行证提供代号、编号、职能的内存表单预览；不是最终设备档案布局，也不写 SD，退出应用后不保留。
 - Film 页支持系统文件选择器导入已有 `.film`、格式与 720×480 尺寸校验、Wi-Fi Direct 直传、设备实际字节进度、取消、清理状态与重试。单文件上限 32 MiB；非法文件或取消选择保留上次导入。合法 ASCII 文件名最长 50 字符（包含 `.film`），其他名称映射为本次导入的稳定短名，以预留固件保存后缀。
 - 传输通过 BLE 协商手机创建的临时 2.4GHz 直连组，不需要路由器或用户手动开热点。重试从头传输，不是断点续传；只有设备确认保存且连接清理完成才显示成功。
@@ -34,7 +35,7 @@ Flutter 共用界面、Android BLE 桥接与 film / 固件 Wi-Fi Direct 传输�
 
 ## 工具链与命令
 
-本轮使用 Flutter stable 3.47.6 / Dart 3.13.5。Android compile/target SDK 35、minSDK 28（Android 9）、JVM 17；调试包名 `org.framefilm.ark.flutter.dev`，与现有客户端共存。当前签名仅用于开发。
+本轮使用 Flutter stable 3.47.6 / Dart 3.13.5。Android compile/target SDK 35、minSDK 28（Android 9）、JVM 17；Release 包名 `org.framefilm.ark.flutter`；显式 debug 构建包名 `org.framefilm.ark.flutter.dev`。APK 使用 Release/AOT 编译，暂时仍用 debug 签名，不生成发行密钥。
 
 本机大型依赖与构建目录已经迁到 D 盘，原 C 盘入口保留 Windows 目录联接（junction）。没有更改系统 PATH，也没有迁移整个 `.codex/worktrees`：其他工作树仍有正在运行的程序和未提交内容。
 
@@ -55,8 +56,8 @@ $env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电
 ./flutter_app/tool/flutter.ps1 pub get
 ./flutter_app/tool/flutter.ps1 analyze --no-pub
 ./flutter_app/tool/flutter.ps1 test --no-pub test/widget_test.dart
-./flutter_app/tool/flutter.ps1 build web --no-pub
-./flutter_app/tool/flutter.ps1 build apk --debug --target-platform android-arm64 --no-pub
+./flutter_app/tool/flutter.ps1 build web --debug --no-pub
+./flutter_app/tool/flutter.ps1 build apk --release --target-platform android-arm64 --no-pub
 ```
 
 这组 D 盘路径是当前电脑的开发配置，不是项目运行依赖。其他电脑可以按标准 Flutter 命令构建；也可以用 `FRAMEFILM_DEV_ROOT` 指定同结构存储目录。不同 checkout 应使用独立存储根目录，避免共享构建输出。已有非联接的 build 目录需要先迁移，脚本不会自动删除。Ark 的 build 联接如被 `fullclean` 删除，也需要重新创建或用 `idf.py -B <D盘目录>` 指定输出位置。
@@ -64,7 +65,7 @@ $env:JAVA_HOME = 'C:/Program Files/Java/jdk-25' # 本机安装路径；其他电
 浏览器预览从 `build/web` 启动静态服务，本机地址 `http://127.0.0.1:8770/`。默认仅查看界面；点击“进入模拟设备演示”，或直接打开 `http://127.0.0.1:8770/?preview=1`，可使用同一份页面操作内存模拟设备。Android 默认不会进入模拟模式。
 
 ```powershell
-./flutter_app/tool/flutter.ps1 build web --no-pub
+./flutter_app/tool/flutter.ps1 build web --debug --no-pub
 python -m http.server 8770 --bind 127.0.0.1 --directory D:/dev-tool/FrameFilm-build/flutter/web
 ```
 
@@ -168,3 +169,13 @@ Web真实查询可用，普通Web不提供原生下载与刷机。模拟设备�
 - 本次公开GitHub API返回HTTP200/空列表。可选Release发布工作流已准备，默认关闭，尚未推送/发布/运行远端验证。详见[构建与发布说明](../docs/development/ci-builds.md)。
 
 - Web 构建通过，Edge 已实际查询 GitHub（HTTP200/空列表）并完成模拟下载取消、重新下载及导入；未自动执行 OTA。
+
+## 设备设置与页面状态隔离（2026-10-09）
+
+- 新增设备设置的 Flutter 表单、Android BLE 桥接及 Web 模拟操作。未读到实际值时禁止保存；断连清空设备值；普通状态更新保留编辑草稿。休眠开关和间隔 SET 没有 ACK，因此发送成功后 GET 回读核对；改名与时间同步核对对应回包。
+- Film 和固件升级各自显示对应类型的进度、取消和重试，共享传输互斥保留。另一类传输活动时只显示去对应页面处理的提示，不把 OTA 面板塞进 Film 的等待文件区域。
+- 本机入口默认 Web debug / APK Release，CI 同步改为 `ark-flutter-release-apk`。暂用 debug 签名；Release 包不含 `.dev` 后缀，因此与原 debug 包是两个安装实例。
+- 验证：设备设置 5 项、页面隔离 9 项定向测试通过，受影响文件 analyze 无问题；Web debug 与 Android arm64 Release 构建通过。首次 Release 依赖下载出现 TLS 握手失败，Flutter 自动重试后成功，未关闭 Lint。
+- Edge 模拟操作已检查间隔、中文改名、时间同步，以及升级期间 Film 页面隔离。输入探针需等待 Flutter 焦点/事件处理，修正探针后通过。
+- APK：`D:/dev-tool/FrameFilm-build/flutter/app/outputs/flutter-apk/app-release.apk`，17,967,222 字节，已检查 AOT 应用和 Flutter 引擎存在。尚未安装手机；BLE 保存、断连重连和重启广播名仍需真机验收。没有修改固件或设备数据，未推送远端。
+- 下一步仍以功能为先：设备遥控、通行证实际读写与草稿、Frame 图片转换和动画编辑，再统一 UI。

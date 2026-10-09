@@ -34,8 +34,8 @@ android {
             versionNameSuffix = "-dev"
         }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Temporary debug signing is intentional; this is still a Release/AOT build.
+            // Switch to the stable distribution key when release signing is introduced.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

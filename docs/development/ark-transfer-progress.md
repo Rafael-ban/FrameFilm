@@ -69,3 +69,13 @@
 - 验证：Flutter定向7项测试/analyze、Android下载helper host probe、APK与Web构建通过；发布job YAML和bash语法通过。Edge浏览器真实API HTTP200空列表，模拟下载取消后重新下载完成，状态仍为导入待升级。
 - 本轮APK为 D:/dev-tool/FrameFilm-build/flutter/app/outputs/flutter-apk/app-debug.apk（97,311,403字节），没有安装手机。原固件和设备数据未更改。
 - 待实测：正式Release附件下载/网络重定向、Android取消/生命周期及下载后实机OTA。当前公开Releases为空，无线上新固件可验收；保持不推送、不发布。
+
+### 阶段 C3：设备设置、状态隔离和 Release 构建（2026-10-09）
+
+- 自动休眠、定时唤醒、唤醒间隔、名称后缀、时间/时区已接入 Flutter/Android，并提供同接口 Web 模拟操作。SET 无 ACK 的字段保存后 GET 回读；现有协议不变，固件未改。
+- 修复 Film 页面串入固件升级状态。按传输 kind 投影各页面，保留设备共享互斥、取消与重试约束。
+- 用户最终决定：Web 为 debug 预览，APK 为 Release 编译，暂用 debug 签名，后续再配置发行密钥。没有生成密钥。默认构建模式和 CI 产物名已同步。
+- 设备设置 5 项和页面隔离 9 项测试通过，定向 analyze 通过；Edge 模拟保存间隔/中文名称/时间、OTA 期间 Film 显示通过。
+- Web debug 与 Android arm64 Release 构建通过；APK 17,967,222 字节，AOT/引擎检查通过。第一次 Maven TLS 下载失败，Flutter 自带重试恢复，未禁用检查。
+- 预览服务 8770；未安装手机、未修改真实设备，不把模拟验证算作 BLE 持久化或重启广播验收。继续本地提交/合入 main，不推送。
+- 后续缺项：设备遥控、通行证实际读写与草稿、Frame 图片转换、动画编辑；功能补齐后统一 UI。

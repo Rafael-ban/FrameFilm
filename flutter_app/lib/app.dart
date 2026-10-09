@@ -54,6 +54,10 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   final operatorName = TextEditingController();
   final operatorId = TextEditingController();
   final operatorRole = TextEditingController();
+  final deviceSuffix = TextEditingController();
+  final wakeInterval = TextEditingController();
+  bool? autoSleepDraft, timedWakeDraft;
+  DeviceSnapshot settingsSnapshot = const DeviceSnapshot();
 
   static const destinations = [
     ('连接', Icons.bluetooth_rounded),
@@ -76,7 +80,30 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
   }
 
   void onDeviceChanged() {
-    final connected = device.snapshot.connected;
+    final snapshot = device.snapshot;
+    final connected = snapshot.connected;
+    if (!connected) {
+      deviceSuffix.clear();
+      wakeInterval.clear();
+      autoSleepDraft = null;
+      timedWakeDraft = null;
+    } else {
+      if (snapshot.name != settingsSnapshot.name && snapshot.name != null) {
+        deviceSuffix.text = snapshot.name!.startsWith('FRAMEFILMARK-')
+            ? snapshot.name!.substring('FRAMEFILMARK-'.length)
+            : '';
+      }
+      if (snapshot.autoSleep != settingsSnapshot.autoSleep) {
+        autoSleepDraft = snapshot.autoSleep;
+      }
+      if (snapshot.timedWake != settingsSnapshot.timedWake) {
+        timedWakeDraft = snapshot.timedWake;
+      }
+      if (snapshot.wakeMinutes != settingsSnapshot.wakeMinutes) {
+        wakeInterval.text = snapshot.wakeMinutes?.toString() ?? '';
+      }
+    }
+    settingsSnapshot = snapshot;
     if (connected && !wasConnected && ark) {
       loading = true;
       loadingTimer?.cancel();
@@ -103,6 +130,8 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     operatorName.dispose();
     operatorId.dispose();
     operatorRole.dispose();
+    deviceSuffix.dispose();
+    wakeInterval.dispose();
     super.dispose();
   }
 
@@ -599,7 +628,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                       editable &&
                           file != null &&
                           snapshot.connected &&
-                          !transfer.canRetry
+                          !(transfer.kind == 'film' && transfer.canRetry)
                       ? () => device.command('startTransfer')
                       : null,
                   icon: const Icon(Icons.wifi),
@@ -631,17 +660,23 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
         ),
       ),
       const SizedBox(height: 20),
-      transferStatus(context),
+      transferStatus(context, kind: 'film'),
     ];
   }
 
   String shortBuild(String value) =>
       value.length > 16 ? value.substring(0, 16) : value;
 
-  Widget transferStatus(BuildContext context) {
+  Widget transferStatus(BuildContext context, {required String kind}) {
     final snapshot = device.snapshot;
-    final transfer = snapshot.transfer;
-    final firmware = transfer.kind == 'firmware';
+    final globalTransfer = snapshot.transfer;
+    final firmware = kind == 'firmware';
+    final transfer = globalTransfer.kind == kind
+        ? globalTransfer
+        : FilmTransfer(
+            kind: kind,
+            message: firmware ? '选择固件后检查并升级' : '选择 film 文件后开始直传',
+          );
     final hasFile = firmware
         ? snapshot.importedFirmware != null
         : snapshot.importedFile != null;
@@ -650,10 +685,10 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
         supported &&
         !device.busy &&
         !snapshot.importing &&
-        !transfer.active &&
-        !transfer.canConfirm;
+        !globalTransfer.active &&
+        !globalTransfer.canConfirm;
     final phase = switch (transfer.phase) {
-      'idle' => '等待文件',
+      'idle' => hasFile ? '文件已就绪' : '等待文件',
       'preparing' => '准备直传',
       'connecting' => '建立 Wi-Fi 连接',
       'downloading' => '设备接收中',
@@ -686,6 +721,9 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
           const SizedBox(height: 12),
           Text(transfer.message),
+          if (globalTransfer.kind != kind &&
+              (globalTransfer.active || globalTransfer.canConfirm))
+            Text(firmware ? '设备正在传输 film，请等待传输结束。' : '设备正在升级固件，请在设置页处理。'),
           if (firmware && transfer.targetBuild != null)
             Text('目标构建：${shortBuild(transfer.targetBuild!)}'),
           if (transfer.active || transfer.total > 0) ...[
@@ -860,7 +898,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
                     editable &&
                         file != null &&
                         snapshot.connected &&
-                        !transfer.canRetry
+                        !(transfer.kind == 'firmware' && transfer.canRetry)
                     ? () => device.command('startFirmwareTransfer')
                     : null,
                 icon: const Icon(Icons.system_update_alt),
@@ -1039,6 +1077,132 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
     ),
   ];
 
+  Widget deviceSettingsPanel(BuildContext context) {
+    final snapshot = device.snapshot;
+    final enabled = device.canEditSettings;
+    final suffixError = validateDeviceSuffix(deviceSuffix.text);
+    final minutes = int.tryParse(wakeInterval.text);
+    final validMinutes = minutes != null && minutes >= 10 && minutes <= 2880;
+    Widget settingSwitch(
+      String label,
+      bool? draft,
+      bool? actual,
+      String method,
+      ValueChanged<bool> change,
+    ) => Row(
+      children: [
+        Expanded(child: Text(actual == null ? '$label（等待读取）' : label)),
+        Switch(
+          value: draft ?? false,
+          onChanged: enabled && actual != null ? change : null,
+        ),
+        TextButton(
+          onPressed: enabled && actual != null && draft != null
+              ? () => device.command(method, {'enabled': draft})
+              : null,
+          child: const Text('保存'),
+        ),
+      ],
+    );
+    return panel(
+      context,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('设备设置', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          if (device.gateway is PreviewDeviceGateway)
+            const Text('模拟设备设置，不会修改真实设备。'),
+          if (!snapshot.connected) const Text('连接 Ark 后读取并修改设备设置。'),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              key: const Key('refresh-device-settings'),
+              onPressed: enabled ? () => device.command('refresh') : null,
+              icon: const Icon(Icons.refresh),
+              label: const Text('刷新设备设置'),
+            ),
+          ),
+          settingSwitch(
+            '自动休眠',
+            autoSleepDraft,
+            snapshot.autoSleep,
+            'setAutoSleep',
+            (value) => setState(() => autoSleepDraft = value),
+          ),
+          const Text('开启后按固件规则自动休眠；蓝牙连接期间不会自动计时。'),
+          settingSwitch(
+            '定时唤醒',
+            timedWakeDraft,
+            snapshot.timedWake,
+            'setTimedWake',
+            (value) => setState(() => timedWakeDraft = value),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: wakeInterval,
+            key: const Key('wake-minutes'),
+            enabled: enabled && snapshot.wakeMinutes != null,
+            keyboardType: TextInputType.number,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: '唤醒间隔（分钟）',
+              helperText: snapshot.wakeMinutes == null
+                  ? '等待读取设备值'
+                  : '10–2880 分钟',
+              errorText: wakeInterval.text.isNotEmpty && !validMinutes
+                  ? '请输入 10–2880 的整数'
+                  : null,
+            ),
+          ),
+          TextButton(
+            onPressed: enabled && snapshot.wakeMinutes != null && validMinutes
+                ? () => device.command('setWakeMinutes', {'minutes': minutes})
+                : null,
+            child: const Text('保存唤醒间隔'),
+          ),
+          const Divider(height: 28),
+          TextField(
+            controller: deviceSuffix,
+            key: const Key('device-name-suffix'),
+            enabled: enabled && snapshot.name != null,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: '设备名称后缀',
+              prefixText: 'FRAMEFILMARK-',
+              helperText: '1–16 UTF-8 字节；保存后重启设备使广播名生效',
+              errorText: deviceSuffix.text.isNotEmpty ? suffixError : null,
+            ),
+          ),
+          TextButton(
+            key: const Key('save-device-name'),
+            onPressed: enabled && snapshot.name != null && suffixError == null
+                ? () => device.command('renameDevice', {
+                    'suffix': deviceSuffix.text,
+                  })
+                : null,
+            child: const Text('保存设备名称'),
+          ),
+          const Divider(height: 28),
+          OutlinedButton.icon(
+            key: const Key('sync-device-time'),
+            onPressed: enabled ? () => device.command('syncTime') : null,
+            icon: const Icon(Icons.schedule),
+            label: const Text('同步手机时间与时区'),
+          ),
+          if (snapshot.syncedAt != null)
+            Text(
+              '最近同步完成：${DateTime.fromMillisecondsSinceEpoch(snapshot.syncedAt!).toLocal()}',
+            ),
+          if (snapshot.settingsMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(snapshot.settingsMessage!),
+          ],
+        ],
+      ),
+    );
+  }
+
   List<Widget> settingsPage(BuildContext context) => [
     panel(
       context,
@@ -1063,12 +1227,12 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
       ),
     ),
     const SizedBox(height: 20),
+    deviceSettingsPanel(context),
+    const SizedBox(height: 20),
     firmwarePanel(context),
     const SizedBox(height: 20),
-    if (device.snapshot.transfer.kind == 'firmware') ...[
-      transferStatus(context),
-      const SizedBox(height: 20),
-    ],
+    transferStatus(context, kind: 'firmware'),
+    const SizedBox(height: 20),
     panel(
       context,
       child: Column(
@@ -1089,7 +1253,7 @@ class _FrameFilmAppState extends State<FrameFilmApp> {
           ),
           const Divider(height: 32),
           const Text(
-            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息读取、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、通行证内存表单预览。\n\n后续阶段\n图片与动画编辑、film 转换、设备参数及通行证同步。',
+            '当前阶段\n原生六页导航、双主题、Android 蓝牙连接、设备基础信息与休眠设置、改名和时间同步、film 导入与 Wi-Fi 直传、固件升级（进度、取消、重试与构建确认）、通行证内存表单预览。\n\n后续阶段\n图片与动画编辑、film 转换及通行证同步。',
           ),
         ],
       ),

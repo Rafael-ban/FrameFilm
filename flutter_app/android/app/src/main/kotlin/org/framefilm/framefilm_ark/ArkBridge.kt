@@ -60,13 +60,18 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private var battery: Int? = null
     private var width: Int? = null
     private var height: Int? = null
+    private var autoSleep: Boolean? = null
+    private var timedWake: Boolean? = null
+    private var wakeMinutes: Int? = null
+    private var syncedAt: Long? = null
+    private var settingsMessage: String? = null
     private var permissionAction: (() -> Unit)? = null
     private var permissionResult: MethodChannel.Result? = null
     private var refreshResult: MethodChannel.Result? = null
     private var refreshing = false
     private var readIndex = 0
-    private val channels = intArrayOf(0x42, 0x23, 0x54)
-    private class Read(val channel: Int) {
+    private val channels = intArrayOf(0x42, 0x23, 0x54, 0x26, 0x28, 0x2A)
+    private class Read(val channel: Int, val done: ((ByteArray) -> Unit)? = null) {
         var writeDone = false
         var response: ByteArray? = null
         var timeout: Runnable? = null
@@ -119,6 +124,8 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private fun snapshot(): Map<String, Any?> = mapOf(
         "connected" to connected, "message" to message, "devices" to devices,
         "name" to name, "battery" to battery, "width" to width, "height" to height,
+        "autoSleep" to autoSleep, "timedWake" to timedWake, "wakeMinutes" to wakeMinutes,
+        "syncedAt" to syncedAt, "settingsMessage" to settingsMessage, "settingsBusy" to refreshing,
         "importing" to importing,
         "firmwareDownload" to firmwareDownload,
         "hasFirmwareState" to true,
@@ -150,7 +157,12 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
                 result.error("busy", "直传期间请等待传输结束", null)
                 return
             }
+            if (refreshing && call.method !in setOf("snapshot", "refresh", "disconnect", "cancelTransfer", "cancelFirmwareDownload")) {
+                result.error("busy", "设备读写正在进行，请稍后重试", null)
+                return
+            }
             when (call.method) {
+                "setAutoSleep", "setTimedWake", "setWakeMinutes", "renameDevice", "syncTime" -> settingsCommand(call, result)
                 "downloadFirmware" -> downloadFirmware(call, result)
                 "cancelFirmwareDownload" -> {
                     cancelFirmwareDownload()
@@ -291,8 +303,8 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     }
 
     private fun beginRefresh(result: MethodChannel.Result?) {
-        if (session.transferActive) {
-            result?.error("busy", "直传期间不能读取设备信息", null)
+        if (session.transferActive || importing || transfer.canConfirm || (transfer.canRetry && !transfer.cleanupCompleted)) {
+            result?.error("busy", "请等待导入、传输和清理完成后读取设备信息", null)
             return
         }
         if (!connected || !session.isReady) {
@@ -321,14 +333,18 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
             result?.success(snapshot())
             return
         }
-        val read = Read(channels[readIndex])
+        request(channels[readIndex])
+    }
+
+    private fun request(channel: Int, payload: ByteArray = byteArrayOf(), done: ((ByteArray) -> Unit)? = null) {
+        val read = Read(channel, done)
         pending = read
         message = "正在读取设备信息"
         emit()
         read.timeout = Runnable {
             if (pending === read) failRead("timeout", "设备响应超时，请重新连接 Ark")
         }.also { main.postDelayed(it, 7_000) }
-        val bytes = byteArrayOf(0x55, read.channel.toByte(), 0)
+        val bytes = byteArrayOf(0x55, read.channel.toByte(), payload.size.toByte()) + payload
         session.writePacket(bytes + byteArrayOf((bytes.sumOf { it.toInt() and 255 } and 255).toByte())) { outcome ->
             if (closed || pending !== read) return@writePacket
             outcome.fold(onSuccess = {
@@ -341,10 +357,19 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
     private fun completeRead(read: Read) {
         if (pending !== read || !read.writeDone) return
         val data = read.response ?: return
+        if (read.done != null) {
+            read.timeout?.let(main::removeCallbacks)
+            pending = null
+            try { read.done.invoke(data) }
+            catch (error: Exception) { failRead("invalid_response", error.message ?: "设备返回格式无效") }
+            return
+        }
         val valid = when (read.channel) {
             0x42 -> data.size == 5 && u16(data, 1) > 0 && u16(data, 3) > 0
             0x23 -> data.size == 1 && (data[0].toInt() and 255) in 0..100
             0x54 -> data.size in 3..31 && data[0] == 0.toByte() && data.last() == 0.toByte()
+            0x26, 0x28 -> data.size == 1 && data[0].toInt() in 0..1
+            0x2A -> data.size == 2 && u16(data, 0) in 10..2880
             else -> false
         }
         if (!valid) { failRead("invalid_response", "设备返回的信息格式无效"); return }
@@ -352,6 +377,9 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
             0x42 -> { width = u16(data, 1); height = u16(data, 3) }
             0x23 -> battery = data[0].toInt() and 255
             0x54 -> name = data.copyOfRange(1, data.lastIndex).toString(Charsets.UTF_8)
+            0x26 -> autoSleep = data[0].toInt() == 1
+            0x28 -> timedWake = data[0].toInt() == 1
+            0x2A -> wakeMinutes = u16(data, 0)
         }
         read.timeout?.let(main::removeCallbacks)
         pending = null
@@ -379,12 +407,116 @@ class ArkBridge(private val activity: Activity, messenger: BinaryMessenger) :
         result?.error(code, detail, null)
     }
 
-    private fun clearDetails() { name = null; battery = null; width = null; height = null }
+    private fun clearDetails() {
+        name = null; battery = null; width = null; height = null
+        autoSleep = null; timedWake = null; wakeMinutes = null; syncedAt = null; settingsMessage = null
+    }
+
+    private fun finishSettings(detail: String, failure: Boolean = false) {
+        refreshing = false
+        settingsMessage = detail
+        val result = refreshResult
+        refreshResult = null
+        emit()
+        if (failure) result?.error("settings_failed", detail, null) else result?.success(snapshot())
+    }
+
+    private fun settingsCommand(call: MethodCall, result: MethodChannel.Result) {
+        check(connected && session.isReady) { "请先连接 Ark" }
+        check(!refreshing && !importing && !session.transferActive && !transferPermission &&
+            !transfer.canConfirm && (!transfer.canRetry || transfer.cleanupCompleted)) { "请等待当前操作或清理完成" }
+        val channel: Int
+        val payload: ByteArray
+        var getChannel: Int? = null
+        when (call.method) {
+            "setAutoSleep", "setTimedWake" -> {
+                check(if (call.method == "setAutoSleep") autoSleep != null else timedWake != null) { "请先读取设备设置" }
+                val enabled = requireNotNull(call.argument<Boolean>("enabled")) { "缺少开关值" }
+                channel = if (call.method == "setAutoSleep") 0x25 else 0x27
+                getChannel = channel + 1
+                payload = byteArrayOf(if (enabled) 1 else 0)
+            }
+            "setWakeMinutes" -> {
+                check(wakeMinutes != null) { "请先读取设备设置" }
+                val value = requireNotNull(call.argument<Number>("minutes")).toInt()
+                require(value in 10..2880) { "唤醒间隔必须为 10–2880 分钟" }
+                channel = 0x29; getChannel = 0x2A
+                payload = byteArrayOf((value shr 8).toByte(), value.toByte())
+            }
+            "renameDevice" -> {
+                check(name != null) { "请先读取设备名称" }
+                val suffix = requireNotNull(call.argument<String>("suffix"))
+                val bytes = suffix.toByteArray(Charsets.UTF_8)
+                require(bytes.size in 1..16 && suffix.codePoints().allMatch {
+                    it >= 0x20 && it !in 0x7F..0x9F && it !in 0xD800..0xDFFF
+                }) { "名称后缀需为 1–16 UTF-8 字节，且不能包含控制字符" }
+                channel = 0x55; payload = bytes + byteArrayOf(0)
+            }
+            else -> {
+                val now = System.currentTimeMillis()
+                val seconds = now / 1000
+                val offset = java.util.TimeZone.getDefault().getOffset(now) / 60000
+                require(seconds in 1577836800L..4102444800L && offset in -840..840) { "手机时间或时区超出设备范围" }
+                channel = 0x4D
+                payload = byteArrayOf((seconds shr 24).toByte(), (seconds shr 16).toByte(),
+                    (seconds shr 8).toByte(), seconds.toByte(), (offset shr 8).toByte(), offset.toByte())
+            }
+        }
+        refreshing = true
+        refreshResult = result
+        settingsMessage = "正在保存设备设置"
+        if (getChannel != null) {
+            val readChannel = getChannel
+            // SET has no protocol ACK. Keep the same operation lock through GET verification.
+            val marker = Read(channel)
+            pending = marker
+            marker.timeout = Runnable { if (pending === marker) failRead("timeout", "设备写入超时") }
+                .also { main.postDelayed(it, 7_000) }
+            val bytes = byteArrayOf(0x55, channel.toByte(), payload.size.toByte()) + payload
+            session.writePacket(bytes + byteArrayOf((bytes.sumOf { it.toInt() and 255 } and 255).toByte())) { outcome ->
+                if (closed || pending !== marker) return@writePacket
+                marker.timeout?.let(main::removeCallbacks)
+                pending = null
+                outcome.fold(onSuccess = {
+                    request(readChannel) { data ->
+                        require(if (readChannel == 0x2A) data.size == 2 && u16(data, 0) in 10..2880
+                            else data.size == 1 && data[0].toInt() in 0..1) { "设备返回设置格式无效" }
+                        when (readChannel) {
+                            0x26 -> autoSleep = data[0].toInt() == 1
+                            0x28 -> timedWake = data[0].toInt() == 1
+                            0x2A -> wakeMinutes = u16(data, 0)
+                        }
+                        val matches = data.contentEquals(payload)
+                        finishSettings(if (matches) "已保存并回读确认" else "保存后回读与请求不一致，请刷新后重试", !matches)
+                    }
+                }, onFailure = { failRead("write_failed", it.message ?: "蓝牙写入失败") })
+            }
+        } else {
+            request(channel, payload) { data ->
+                if (channel == 0x55) {
+                    if (data.size == 1 && data[0].toInt() in 1..2) {
+                        finishSettings(if (data[0].toInt() == 1) "设备拒绝名称参数" else "设备名称存储失败", true)
+                    } else {
+                        require(data.size in 3..31 && data[0] == 0.toByte() && data.last() == 0.toByte()) { "名称回包无效" }
+                        name = data.copyOfRange(1, data.lastIndex).toString(Charsets.UTF_8)
+                        val expected = "FRAMEFILMARK-" + payload.copyOfRange(0, payload.lastIndex).toString(Charsets.UTF_8)
+                        val matches = name == expected
+                        finishSettings(if (matches) "已保存，设备重启后广播名生效" else "设备返回的名称与请求不一致", !matches)
+                    }
+                } else {
+                    val matches = data.contentEquals(payload)
+                    if (matches) syncedAt = System.currentTimeMillis()
+                    finishSettings(if (matches) "时间同步完成" else "时间同步回显与请求不一致", !matches)
+                }
+            }
+        }
+        emit()
+    }
     private fun u16(data: ByteArray, offset: Int) =
         ((data[offset].toInt() and 255) shl 8) or (data[offset + 1].toInt() and 255)
 
     private fun checkReplace() {
-        check(!importing && !session.transferActive && !transferPermission &&
+        check(!importing && !refreshing && !session.transferActive && !transferPermission &&
             transfer.cleanupCompleted && !transfer.canConfirm) { "请等待导入或直传清理结束" }
     }
 
